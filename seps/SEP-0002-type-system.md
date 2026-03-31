@@ -22,10 +22,10 @@ This SEP specifies the type system for the Spore programming language. Spore's t
 The concrete type representation is the `Ty` enum:
 
 ```text
-Ty ::= Int | Float | Bool | Str | Unit
+Ty ::= Int | Float | Bool | Str | Char | Unit | Never
       | Named(name)
       | App(name, [Ty])
-      | Tuple([Ty])
+      | Record([(name, Ty)])
       | Fn([Ty], Ty, CapSet)
       | Var(u32)
       | Hole(name)
@@ -79,17 +79,38 @@ This section introduces Spore's type system from a user's perspective, with code
 
 ### 3.1 Primitive types
 
-Spore provides a small set of built-in primitive types:
+Spore provides a small, fixed set of built-in primitive types:
+
+| Type | Description | Default Literal |
+|---|---|---|
+| `Int` | Arbitrary-precision integer | `42` |
+| `Float` | 64-bit IEEE 754 floating point | `3.14` |
+| `Bool` | Boolean | `true`, `false` |
+| `String` | UTF-8 string | `"hello"` |
+| `Char` | Unicode scalar value | `'a'` |
+| `Unit` | Zero-information type (like Rust `()`) | `()` |
+| `Never` | Bottom type — uninhabited, no values exist | (no literal) |
 
 ```spore
-let x: Int = 42              -- arbitrary-precision integer
-let y: Float = 3.14          -- 64-bit IEEE 754
-let b: Bool = true           -- boolean
-let s: String = "hello"      -- UTF-8 string
-let u: () = ()               -- unit (zero-information type)
+let x: Int = 42              // arbitrary-precision integer
+let y: Float = 3.14          // 64-bit IEEE 754
+let b: Bool = true           // boolean
+let s: String = "hello"      // UTF-8 string
+let c: Char = 'a'            // Unicode scalar value
+let u: () = ()               // unit (zero-information type)
 ```
 
 All primitives are nominal — `Int` ≠ `Float` even when their bit patterns coincide.
+
+**Numeric sub-types via refinement.** Rather than proliferating primitive numeric types (i8, u16, f32, …), Spore uses refinement types on `Int` and `Float`:
+
+```spore
+type U8  = Int if 0 <= self <= 255
+type I32 = Int if -2147483648 <= self <= 2147483647
+type F32 = Float if self.precision == 32
+```
+
+Platform capabilities determine the runtime representation; the type system reasons about logical constraints, and the codegen layer maps to machine types.
 
 ### 3.2 Type annotations on functions
 
@@ -112,9 +133,9 @@ Local variables inside bodies do **not** need annotations — they are inferred:
 
 ```spore
 fn process(x: Int) -> Int {
-    let doubled = x * 2          -- inferred: Int
-    let message = "result"       -- inferred: String
-    doubled + 1                  -- inferred: Int, checked against return type
+    let doubled = x * 2          // inferred: Int
+    let message = "result"       // inferred: String
+    doubled + 1                  // inferred: Int, checked against return type
 }
 ```
 
@@ -147,15 +168,35 @@ fn area(shape: Shape) -> Float {
 }
 ```
 
-### 3.4 Tuple types
+### 3.4 Anonymous records (structural)
 
-Tuple types group unnamed fields positionally:
+Anonymous records are the structural escape hatch. They have no declared name and are compatible by field shape, not by declaration site.
 
 ```spore
-fn swap(pair: (Int, String)) -> (String, Int) {
-    let (a, b) = pair
-    (b, a)
+fn greet(person: { name: String, age: Int }) -> String {
+    "Hello, " ++ person.name ++ " (age " ++ show(person.age) ++ ")"
 }
+
+// Any value with matching fields satisfies this:
+let alice = { name: "Alice", age: 30, role: "Engineer" }
+greet(alice)   // OK: alice has name: String and age: Int (extra fields ignored)
+```
+
+**Rules for anonymous records**:
+
+1. **Width subtyping**: A record with extra fields satisfies a type expecting fewer fields.
+2. **Exact field matching**: Field names and types must match exactly (no implicit conversion).
+3. **No trait implementation**: Anonymous records cannot implement traits or capabilities — nominal types are required for that.
+4. **Nominal types do NOT satisfy anonymous record types**: `type Stats = { count: Int }` is nominal and is NOT compatible with `{ count: Int }`.
+
+```spore
+// Named types do NOT satisfy anonymous record types:
+type Stats = { count: Int, total: Float }
+let named = Stats { count: 10, total: 95.5 }
+// summarize(data: named)  // ERROR: Stats is nominal, not { count: Int, total: Float }
+
+// Explicit conversion required:
+summarize(data: { count: named.count, total: named.total })   // OK
 ```
 
 ### 3.5 Function types with capabilities
@@ -185,13 +226,13 @@ fn identity[T](x: T) -> T {
 }
 
 fn map[A, B](list: List[A], f: Fn(item: A) -> B) -> List[B] {
-    -- implementation
+    // implementation
 }
 
 fn sort[T](list: List[T]) -> List[T]
 where T: Ord
 {
-    -- implementation
+    // implementation
 }
 ```
 
@@ -199,8 +240,8 @@ At call sites, type arguments are inferred from the actual argument types:
 
 ```spore
 let nums: List[Int] = [1, 2, 3]
-let result = identity(42)          -- T inferred as Int
-let strings = map(nums, show)      -- A=Int, B=String inferred
+let result = identity(42)          // T inferred as Int
+let strings = map(nums, show)      // A=Int, B=String inferred
 ```
 
 ### 3.7 Generic type application
@@ -220,15 +261,700 @@ type Result[T, E] =
     | Err { error: E }
 ```
 
-### 3.8 Typed holes
+### 3.8 Newtypes and type aliases
+
+**Newtypes** create zero-cost nominal wrappers. The new type is distinct from its underlying type:
+
+```spore
+type UserId = String       // nominal wrapper: UserId ≠ String
+type Email = String        // nominal: Email ≠ UserId ≠ String
+type Celsius = Float       // nominal: Celsius ≠ Fahrenheit
+type Fahrenheit = Float
+
+fn format_temp(temp: Celsius) -> String {
+    show(temp) ++ "°C"
+}
+
+let c: Celsius = 100.0
+let f: Fahrenheit = 212.0
+format_temp(temp: c)    // OK
+format_temp(temp: f)    // ERROR: expected Celsius, got Fahrenheit
+format_temp(temp: 98.6) // ERROR: expected Celsius, got Float
+```
+
+Newtypes may have refinements:
+
+```spore
+type Port = Int if 1 <= self <= 65535
+type NonEmptyString = String if self.len() > 0
+type Latitude = Float if -90.0 <= self <= 90.0
+```
+
+**Type aliases** are transparent — interchangeable with their definition:
+
+```spore
+alias StringList = List[String]
+alias Callback[T] = Fn(event: T) -> Unit
+alias Result[T] = T ! [GenericError]
+
+type UserId = String       // newtype: UserId ≠ String (nominal)
+alias UserName = String    // alias: UserName == String (transparent)
+```
+
+### 3.9 Trait system
+
+#### Trait definition
+
+Traits define named interfaces. Spore uses the `capability` keyword (which is syntactic sugar for trait). Traits are nominal — a type satisfies a trait only through an explicit `impl` declaration.
+
+```spore
+capability Eq {
+    fn eq(self, other: Self) -> Bool
+}
+
+capability Ord: Eq {
+    fn compare(self, other: Self) -> Ordering
+}
+
+capability Display {
+    fn display(self) -> String
+}
+
+capability Serialize {
+    fn serialize(self) -> Bytes ! [SerializeError]
+    cost serialize <= 100
+}
+```
+
+Trait inheritance uses `:` — `Ord: Eq` means every type implementing `Ord` must also implement `Eq`.
+
+#### Trait implementation
+
+Spore uses Rust-style `impl Trait for Type` syntax:
+
+```spore
+impl Eq for Point {
+    fn eq(self, other: Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl Ord for Point {
+    fn compare(self, other: Point) -> Ordering {
+        let dx = self.x.compare(other.x)
+        if dx != Equal { dx } else { self.y.compare(other.y) }
+    }
+}
+
+impl Display for Shape {
+    fn display(self) -> String {
+        match self {
+            Circle { radius }           => "Circle(r=" ++ show(radius) ++ ")",
+            Rectangle { width, height } => "Rect(" ++ show(width) ++ "x" ++ show(height) ++ ")",
+            Triangle { a, b, c }        => "Tri(" ++ show(a) ++ "," ++ show(b) ++ "," ++ show(c) ++ ")",
+        }
+    }
+}
+```
+
+Default method implementations are supported:
+
+```spore
+capability Collection {
+    type Item
+    fn len(self) -> Int
+    fn is_empty(self) -> Bool { self.len() == 0 }   // default method
+}
+```
+
+#### Trait bounds
+
+Trait bounds constrain generic type parameters in `where` clauses:
+
+```spore
+fn sort[T](list: List[T]) -> List[T]
+where T: Ord
+cost <= 500
+{
+    // implementation
+}
+
+fn serialize_all[T](items: List[T]) -> List[Bytes] ! [SerializeError]
+where T: Serialize + Display
+{
+    items |> map(|item| item.serialize())
+}
+```
+
+Multiple bounds use `+`:
+
+```spore
+fn dedup_and_display[T](items: List[T]) -> String
+where T: Eq + Hash + Display
+{
+    items |> unique() |> map(|x| x.display()) |> join(", ")
+}
+```
+
+#### Capability = Trait (unified)
+
+This is one of Spore's central design decisions. A **capability** is syntactic sugar for a trait on the execution context. `uses [X]` is equivalent to a trait bound on the implicit execution context.
+
+```spore
+// A capability is a trait on the execution context
+capability FileRead {
+    fn read_file(path: Path) -> Bytes ! [IoError]
+    cost read_file <= 100
+}
+
+capability FileWrite {
+    fn write_file(path: Path, data: Bytes) -> Unit ! [IoError]
+    cost write_file <= 200
+}
+```
+
+**Composite capabilities**:
+
+```spore
+capability DatabaseAccess = [NetRead, NetWrite, StateRead, StateWrite]
+capability Analytics = [Compute, StateRead]
+
+fn generate_report(org_id: OrgId, period: DateRange) -> Report ! [ConnectionLost]
+uses [DatabaseAccess, Analytics]
+cost <= 12000
+{
+    // can use any function requiring subsets of DatabaseAccess or Analytics
+}
+```
+
+#### Associated types
+
+Traits may declare associated types — types determined by the implementing type:
+
+```spore
+capability Iterator {
+    type Item
+    fn next(self) -> Option[Self.Item]
+    cost next <= 10
+}
+
+impl Iterator for LineReader {
+    type Item = String
+    fn next(self) -> Option[String] {
+        self.read_line()
+    }
+}
+
+capability Collection {
+    type Item
+    type Iter: Iterator where Iter.Item == Self.Item
+
+    fn iter(self) -> Self.Iter
+    fn len(self) -> Int
+    fn is_empty(self) -> Bool { self.len() == 0 }
+}
+```
+
+Associated types eliminate extra type parameters on trait users:
+
+```spore
+// Clean — associated types:
+fn sum_all[C](collection: C) -> Int
+where
+    C: Collection,
+    C.Item: Add[Output = Int]
+{
+    collection.iter() |> fold(0, |acc, item| acc + item)
+}
+```
+
+#### Generic Associated Types (GATs)
+
+GATs allow associated types to have their own generic parameters, enabling patterns like lending iterators and self-referential collections:
+
+```spore
+capability LendingIterator {
+    type Item[lifetime]
+    fn next[lifetime](self) -> Option[Self.Item[lifetime]]
+}
+
+capability Container {
+    type Elem[T]
+    fn wrap[T](value: T) -> Self.Elem[T]
+    fn unwrap[T](wrapped: Self.Elem[T]) -> T
+}
+
+impl Container for OptionContainer {
+    type Elem[T] = Option[T]
+    fn wrap[T](value: T) -> Option[T] { Some(value) }
+    fn unwrap[T](wrapped: Option[T]) -> T {
+        match wrapped {
+            Some(v) => v,
+            None    => panic("unwrap of None"),
+        }
+    }
+}
+```
+
+GATs cover the most common use cases that HKTs would serve without introducing full higher-kinded polymorphism.
+
+#### Built-in traits and deriving
+
+Spore provides compiler-known traits for common operations:
+
+| Trait | Purpose | Derivable |
+|---|---|---|
+| `Eq` | Equality comparison | Yes |
+| `Ord` | Ordering | Yes |
+| `Clone` | Value duplication | Yes |
+| `Display` | Human-readable formatting | No |
+| `Debug` | Debug formatting | Yes |
+| `Hash` | Hash computation | Yes |
+| `Default` | Default value construction | Yes |
+| `Serialize` | Serialization to bytes | Yes |
+| `Deserialize` | Deserialization from bytes | Yes |
+| `Add`, `Sub`, `Mul`, `Div` | Arithmetic operators | No |
+
+Derivable traits can be auto-implemented by the compiler for types whose fields all implement the trait:
+
+```spore
+type Point = {
+    x: Float,
+    y: Float,
+} deriving [Eq, Clone, Debug, Hash]
+```
+
+#### Coherence and orphan rules
+
+You can only implement a trait for a type if you own either the trait or the type:
+
+```spore
+// OK: you own Point, so you can implement any trait for it
+impl Display for Point { ... }
+
+// OK: you own MyTrait, so you can implement it for any type
+impl MyTrait for String { ... }
+
+// ERROR: you own neither Display nor String
+impl Display for String { ... }   // orphan rule violation
+```
+
+**Adapter escape mechanism** for implementing foreign traits on foreign types:
+
+```spore
+adapter ExternalType as Printable {
+    fn display(self) -> String { ... }
+}
+
+fn use_external(x: ExternalType) -> String
+where adapter: ExternalType as Printable
+{
+    x.display()
+}
+```
+
+Adapters are always scoped and explicit — they cannot cause global coherence violations.
+
+### 3.10 Const generics
+
+#### Const generic parameters
+
+Const generics allow value-level parameters in type position, central to Spore's bounded collections and cost-aware types:
+
+```spore
+type Vec[T, max: Int] = {
+    data: Array[T],
+    len: Int,
+}
+
+fn take[T, N: Int](list: List[T], count: N) -> Vec[T, max: N]
+where N <= list.max
+{
+    // implementation
+}
+
+type Matrix[T, rows: Int, cols: Int] = {
+    data: Array[Array[T]],
+}
+```
+
+#### Type-level arithmetic
+
+Const generic parameters support arithmetic in type-level expressions, enabling compile-time dimensional checking:
+
+```spore
+fn concat[T, M: Int, N: Int](
+    a: Vec[T, max: M],
+    b: Vec[T, max: N],
+) -> Vec[T, max: M + N] {
+    // implementation
+}
+
+fn transpose[T, R: Int, C: Int](
+    matrix: Matrix[T, rows: R, cols: C],
+) -> Matrix[T, rows: C, cols: R] {
+    // implementation
+}
+
+fn flatten[T, N: Int, M: Int](
+    nested: Vec[Vec[T, max: M], max: N],
+) -> Vec[T, max: N * M] {
+    // implementation
+}
+```
+
+Supported arithmetic operations in type position: `+`, `-`, `*`, `/`, `%`, `min`, `max`. All arithmetic is evaluated at compile time. Division by zero and overflow are compile-time errors.
+
+#### Interaction with cost
+
+Const generics interact naturally with the cost system. A function's cost may depend on its const generic parameters:
+
+```spore
+fn linear_search[T, N: Int](items: Vec[T, max: N], target: T) -> Option[Int]
+where T: Eq
+cost <= N * 5
+{
+    // O(N) search, cost scales linearly
+}
+
+fn sort_bounded[T, N: Int](items: Vec[T, max: N]) -> Vec[T, max: N]
+where T: Ord
+cost <= N * N * 2
+{
+    // O(N²) worst case
+}
+```
+
+Calling `sort_bounded` on a `Vec[T, max: 100]` implies cost ≤ 20000 — the compiler verifies this parametrically.
+
+### 3.11 Pattern matching
+
+Spore requires **full, exhaustive pattern matching** on all enums. The compiler enforces that every possible variant is handled.
+
+#### Exhaustiveness checking
+
+```spore
+fn describe(shape: Shape) -> String {
+    match shape {
+        Circle { radius }           => "circle with radius " ++ show(radius),
+        Rectangle { width, height } => show(width) ++ "x" ++ show(height) ++ " rectangle",
+        Triangle { a, b, c }        => "triangle with sides " ++ show(a) ++ ", " ++ show(b) ++ ", " ++ show(c),
+    }
+}
+```
+
+Missing a variant is a compile-time error:
+
+```text
+Error: Non-exhaustive match
+
+12 |    match shape {
+   |    ^^^^^
+   Missing variant: Triangle { a, b, c }
+
+   All Shape variants must be handled because Shape is a sealed enum.
+```
+
+#### Nested patterns
+
+Patterns can be nested to match deeply into data structures:
+
+```spore
+type Expr =
+    | Literal { value: Int }
+    | BinOp { op: Op, left: Expr, right: Expr }
+    | UnaryOp { op: Op, operand: Expr }
+
+fn simplify(expr: Expr) -> Expr {
+    match expr {
+        BinOp { op: Add, left: Literal { value: 0 }, right: e } => simplify(e),
+        BinOp { op: Mul, left: Literal { value: 1 }, right: e } => simplify(e),
+        BinOp { op: Mul, left: Literal { value: 0 }, right: _ } => Literal { value: 0 },
+        BinOp { op, left, right } => BinOp {
+            op: op,
+            left: simplify(left),
+            right: simplify(right),
+        },
+        other => other,
+    }
+}
+```
+
+Nested Option/Result matching:
+
+```spore
+fn handle(value: Option[Result[Int, String]]) -> Int {
+    match value {
+        Some(Ok(n))    => n,
+        Some(Err(msg)) => panic("error: " ++ msg),
+        None           => 0,
+    }
+}
+```
+
+#### Guard clauses
+
+Guards add boolean conditions to pattern branches:
+
+```spore
+fn classify_temperature(temp: Float) -> String {
+    match temp {
+        t if t < -40.0  => "extreme cold",
+        t if t < 0.0    => "freezing",
+        t if t < 20.0   => "cool",
+        t if t < 35.0   => "warm",
+        t if t < 50.0   => "hot",
+        _               => "extreme heat",
+    }
+}
+```
+
+**Important**: Guards weaken exhaustiveness guarantees. The compiler requires a catch-all (`_` or variable) arm when guards are used, because it cannot generally prove that guards cover all cases.
+
+#### Or-patterns
+
+Or-patterns match multiple alternatives with the same arm:
+
+```spore
+fn is_weekend(day: Day) -> Bool {
+    match day {
+        Saturday | Sunday => true,
+        _                 => false,
+    }
+}
+
+fn is_simple_shape(shape: Shape) -> Bool {
+    match shape {
+        Circle { .. } | Rectangle { .. } => true,
+        _                                 => false,
+    }
+}
+```
+
+#### Destructuring in let bindings
+
+Pattern matching works in `let` bindings:
+
+```spore
+fn distance(a: Point, b: Point) -> Float {
+    let Point { x: x1, y: y1 } = a
+    let Point { x: x2, y: y2 } = b
+    sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
+}
+```
+
+#### Wildcard and rest patterns
+
+- `_` matches any single value (discarded).
+- `..` in struct patterns matches remaining fields.
+
+```spore
+fn get_name(person: Person) -> String {
+    let Person { name, .. } = person
+    name
+}
+```
+
+#### Pattern matching on error types
+
+Pattern matching integrates with Spore's row-typed error sets for exhaustive error handling:
+
+```spore
+fn handle_result(result: Invoice ! [TaxError, ValidationError]) -> String {
+    match result {
+        Ok(invoice) => "Invoice #" ++ show(invoice.id),
+        Err(TaxError { region, reason }) => "Tax error in " ++ show(region) ++ ": " ++ reason,
+        Err(ValidationError { field, message }) => "Validation failed on " ++ field ++ ": " ++ message,
+    }
+}
+```
+
+### 3.12 @allows constraint
+
+`@allows` is a hole-level constraint that limits which functions an Agent may use to fill a specific hole. It provides fine-grained control over Agent behavior without affecting the type system's soundness.
+
+```spore
+fn process_payment(amount: Money, card: Card) -> Receipt ! [PaymentFailed]
+uses [PaymentGateway, AuditLog]
+cost <= 2000
+{
+    let validated = validate_card(card)
+    @allows[charge, charge_with_retry]
+    ?payment_logic
+}
+```
+
+**Semantics of @allows**:
+
+- `@allows[f1, f2, ...]` annotates the immediately following hole.
+- The Agent, when filling this hole, may only call the listed functions (plus pure helper functions that require no capabilities).
+- The compiler verifies that the filling respects the `@allows` constraint.
+- `@allows` is **not** a type — it is a **synthesis constraint** that restricts the search space for hole-filling.
+
+**Use case — architectural intent**:
+
+```spore
+fn build_dashboard(org: Org) -> Dashboard ! [DataError]
+uses [Database, Cache, Analytics]
+cost <= 20000
+{
+    @allows[fetch_cached_metrics, compute_summary]
+    let metrics = ?gather_metrics
+
+    @allows[render_chart, render_table]
+    let charts = ?render_visualizations
+
+    Dashboard.new(org, metrics, charts)
+}
+```
+
+If an Agent proposes a filling for `?gather_metrics` that calls `raw_sql_query`, the compiler rejects it:
+
+```text
+Error: @allows violation
+
+  Hole ?gather_metrics is constrained by @allows[fetch_cached_metrics, compute_summary]
+  but the proposed filling calls `raw_sql_query`, which is not in the allowed set.
+```
+
+### 3.13 Never bottom type
+
+`Never` is the bottom type — it has no values and is a subtype of every type. It is the return type of functions that do not return (diverging functions).
+
+```spore
+fn abort(msg: String) -> Never {
+    panic(msg)
+}
+
+fn safe_divide(a: Int, b: Int) -> Int {
+    if b == 0 {
+        abort("division by zero")   // Never coerces to Int
+    } else {
+        a / b
+    }
+}
+```
+
+**Use in exhaustive matching** — a branch returning `Never` is compatible with any arm type:
+
+```spore
+fn safe_unwrap[T](opt: Option[T]) -> T {
+    match opt {
+        Some(v) => v,
+        None    => panic("unwrap of None"),   // panic returns Never, coerces to T
+    }
+}
+```
+
+`Never` is the natural type for:
+- `panic(...)` and `abort(...)` calls
+- Diverging expressions (non-terminating recursion)
+- Exhaustive match arms that provably never execute
+- Error-only functions that always raise
+
+### 3.14 Row-type error sets
+
+Spore's `! [Err1, Err2]` is a **closed, row-typed error union**. Error types are themselves enum variants (ADTs), and the `!` syntax computes unions automatically across call chains:
+
+```spore
+fn parse(input: String) -> Ast ! [SyntaxError, EncodingError]
+fn validate(ast: Ast) -> ValidAst ! [TypeError, RangeError]
+
+// Error sets union automatically via `?` propagation:
+fn compile(input: String) -> ValidAst ! [SyntaxError, EncodingError, TypeError, RangeError] {
+    let ast = parse(input)?
+    validate(ast)?
+}
+```
+
+Each error type carries structured data:
+
+```spore
+type SyntaxError = {
+    line: Int,
+    column: Int,
+    message: String,
+    snippet: String,
+}
+```
+
+**Error set subtyping**: A function with error set `! [A]` can be called where `! [A, B]` is expected — the caller's error set is a superset.
+
+**`?` operator**: Propagates errors, automatically widening the error set. If `f()` returns `T ! [E1]` and `g()` returns `T ! [E2]`, calling both with `?` in the same function requires the enclosing function to declare `! [E1, E2]` (or a superset).
+
+### 3.15 Recursive types
+
+Enums and structs may be recursive. The compiler detects and supports this:
+
+```spore
+type Expr =
+    | Literal { value: Int }
+    | BinOp { op: Op, left: Expr, right: Expr }
+    | UnaryOp { op: Op, operand: Expr }
+    | IfExpr { cond: Expr, then_branch: Expr, else_branch: Expr }
+
+type JsonValue =
+    | JsonNull
+    | JsonBool { value: Bool }
+    | JsonNumber { value: Float }
+    | JsonString { value: String }
+    | JsonArray { elements: List[JsonValue] }
+    | JsonObject { fields: List[{ key: String, value: JsonValue }] }
+```
+
+**Infinite-size check**: The compiler rejects types that would require infinite memory without indirection:
+
+```spore
+// ERROR: infinite-size type (struct directly contains itself)
+type Bad = {
+    next: Bad,   // Bad contains Bad with no indirection
+}
+
+// OK: indirection via List breaks the cycle
+type Tree[T] = {
+    value: T,
+    children: List[Tree[T]],   // List provides indirection
+}
+```
+
+### 3.16 Nominal vs structural rules
+
+| Context | Typing Discipline | Rationale |
+|---|---|---|
+| Named types (`type X = ...`) | **Nominal** | `UserId ≠ String` even if same shape |
+| Enums | **Nominal** | Sealed, exhaustiveness-checked |
+| Traits / capabilities | **Nominal** | Explicit `impl` required |
+| Capabilities | **Nominal** (always) | Security boundary — no structural coincidence |
+| Anonymous records `{ ... }` | **Structural** | Flexibility for intermediate values |
+| Hole-filling search (internal) | **Structural** | Agent searches by shape, compiler enforces nominal at boundaries |
+| Function call boundaries | **Nominal** | Callee specifies named types, caller must provide them |
+
+### 3.17 Type inference annotation requirements
+
+| Element | Must Annotate? | Why |
+|---|---|---|
+| Function parameter types | **Yes** | Gravity center — the signature IS the API |
+| Function return type | **Yes** | Agent reads signatures for synthesis; human reads for understanding |
+| Error sets (`! [...]`) | **Yes** | Error contract — must be visible |
+| Effect/capability sets (`uses [...]`) | **Yes** | Security boundary — must be visible |
+| Cost bounds (`cost <=`) | **Yes** | Performance contract — must be visible |
+| Struct/type field types | **Yes** | Data definition — must be explicit |
+| Trait method signatures | **Yes** | Interface contract |
+| Public constants | **Yes** | API surface |
+| Local variable types | No | Inferred from RHS: `let x = compute(...)` |
+| Generic type params at call sites | No | Inferred from arguments: `sort(my_list)` — T inferred from `my_list` |
+| Closure parameter types (in context) | No | Inferred: `.map(\|x\| x + 1)` — x inferred from Iterator.Item |
+| Intermediate expression types | No | Standard local inference |
+
+### 3.18 Typed holes
 
 Holes are unfilled positions in code. The type checker infers their expected type from context and reports it:
 
 ```spore
 fn example(x: Int, y: String) -> Bool {
-    let a: Int = ?h1          -- hole ?h1 must produce Int
+    let a: Int = ?h1          // hole ?h1 must produce Int
     let b = if a > 0 {
-        ?h2                   -- hole ?h2 must produce Bool (from return type)
+        ?h2                   // hole ?h2 must produce Bool (from return type)
     } else {
         false
     }
@@ -250,18 +976,20 @@ Hole ?h2: expected type Bool
 The internal type representation is the `Ty` enum, defined in `spore-typeck/src/types.rs`:
 
 ```text
-τ ::= Int                          -- integer primitive
-    | Float                        -- floating-point primitive
-    | Bool                         -- boolean primitive
-    | Str                          -- string primitive
-    | Unit                         -- unit type (empty tuple)
-    | Named(n)                     -- named type / type parameter
-    | App(n, [τ₁, …, τₖ])         -- generic type application
-    | Tuple([τ₁, …, τₖ])          -- tuple type
-    | Fn([τ₁, …, τₙ], τᵣ, C)     -- function type with capability set
-    | Var(id)                      -- unification variable
-    | Hole(name)                   -- typed hole placeholder
-    | Error                        -- error sentinel (recovery)
+τ ::= Int                          // integer primitive
+    | Float                        // floating-point primitive
+    | Bool                         // boolean primitive
+    | Str                          // string primitive (displays as String)
+    | Char                         // Unicode scalar value
+    | Unit                         // unit type
+    | Never                        // bottom type (uninhabited)
+    | Named(n)                     // named type / type parameter
+    | App(n, [τ₁, …, τₖ])         // generic type application
+    | Record([(f₁, τ₁), …])       // anonymous record (structural)
+    | Fn([τ₁, …, τₙ], τᵣ, C)     // function type with capability set
+    | Var(id)                      // unification variable
+    | Hole(name)                   // typed hole placeholder
+    | Error                        // error sentinel (recovery)
 ```
 
 Where:
@@ -269,6 +997,11 @@ Where:
 - `n` ranges over identifiers (strings).
 - `id` ranges over `u32` (unique unification variable IDs).
 - `C` is a **CapSet** = `BTreeSet<String>`, the set of capability names the function requires.
+- `f` ranges over field names (strings) in anonymous records.
+
+**Never type.** `Ty::Never` is the bottom type — a subtype of all types. It is produced by diverging expressions (`panic`, non-terminating recursion). During unification, `unify(τ, Never) = ok` for all `τ`.
+
+**Record type.** `Ty::Record` represents anonymous structural records. Width subtyping applies: `Record([(a, Int), (b, String), (c, Bool)])` is a subtype of `Record([(a, Int), (b, String)])`.
 
 **Error sentinel.** `Ty::Error` is produced when type resolution fails (e.g., unknown type name). It unifies with anything, allowing the checker to continue after errors and report multiple diagnostics.
 
@@ -425,7 +1158,7 @@ apply_subst(Var(id))               = σ(id)            if id ∈ dom(σ)
 apply_subst(Var(id))               = Var(id)          otherwise
 apply_subst(Fn(ps, r, C))         = Fn(apply_subst(ps), apply_subst(r), C)
 apply_subst(App(n, args))         = App(n, apply_subst(args))
-apply_subst(Tuple(ts))            = Tuple(apply_subst(ts))
+apply_subst(Record(fields))       = Record([(f, apply_subst(τ)) for (f, τ) in fields])
 apply_subst(τ)                    = τ                  for all other τ
 ```
 
@@ -437,23 +1170,27 @@ The `unify` function is the heart of type inference. Given two types `expected` 
 
 ```text
 unify(τ, τ) = ok                                        (reflexivity)
+unify(Never, _) = ok                                    (bottom type: Never <: τ)
+unify(_, Never) = ok                                    (bottom type: Never <: τ)
 unify(Error, _) = ok                                    (error recovery)
 unify(_, Error) = ok                                    (error recovery)
 unify(Hole(_), _) = ok                                  (hole compatibility)
 unify(_, Hole(_)) = ok                                  (hole compatibility)
-unify(Var(id), τ) = σ[id ↦ τ]                           (variable binding)
-unify(τ, Var(id)) = σ[id ↦ τ]                           (variable binding, symmetric)
+unify(Var(id), τ) = σ[id ↦ τ]  if occurs_check(id, τ)  (variable binding)
+unify(τ, Var(id)) = σ[id ↦ τ]  if occurs_check(id, τ)  (variable binding, symmetric)
 unify(Fn(ps₁, r₁, _), Fn(ps₂, r₂, _))                  (structural: function)
     = unify(ps₁[i], ps₂[i]) for all i; unify(r₁, r₂)
 unify(App(n, as₁), App(n, as₂))                         (structural: application)
     = unify(as₁[i], as₂[i]) for all i
-unify(Tuple(ts₁), Tuple(ts₂))                           (structural: tuple)
-    = unify(ts₁[i], ts₂[i]) for all i
+unify(Record(fs₁), Record(fs₂))                         (structural: record, width subtyping)
+    = for each (f, τ) in fs₂: require f in fs₁ and unify(fs₁[f], τ)
 unify(τ₁, τ₂)                                           (mismatch)
     = error "type mismatch: expected τ₁, got τ₂"
 ```
 
-**Implementation note:** The current unifier does **not** perform an occurs check. This is acceptable because Spore does not support recursive type variable bindings in user-visible code. If this changes (e.g., for recursive anonymous types), an occurs check must be added.
+**Occurs check.** The unifier performs an occurs check to prevent cyclic substitutions (e.g., `Var(0) ↦ List[Var(0)]`). If `Var(id)` occurs within `τ`, binding fails with an error rather than creating an infinite type.
+
+**Never in unification.** `Never` unifies with any type, implementing the bottom-type subtyping rule `Never <: τ` directly within the unifier. This enables diverging expressions (e.g., `panic(...)`) to appear in any expression position.
 
 ### 4.5 Two-pass module checking
 
@@ -511,24 +1248,35 @@ S.fields = [(f₁, τ₁), …, (fₙ, τₙ)]
 Γ ⊢ S { f₁: e₁, …, fₙ: eₙ } ⇒ Named(S)
 ```
 
-### 4.7 Tuple types
+### 4.7 Anonymous record types
 
-Tuple types are represented as `Ty::Tuple(Vec<Ty>)`. Tuple construction synthesizes the type from its elements:
+Anonymous records are represented as `Ty::Record(Vec<(String, Ty)>)`. Record construction synthesizes the type from field expressions:
 
 ```text
 Γ ⊢ e₁ ⇒ τ₁  …  Γ ⊢ eₖ ⇒ τₖ
-──────────────────────────────────
-Γ ⊢ (e₁, …, eₖ) ⇒ Tuple([τ₁, …, τₖ])
+─────────────────────────────────────────────
+Γ ⊢ { f₁: e₁, …, fₖ: eₖ } ⇒ Record([(f₁, τ₁), …, (fₖ, τₖ)])
 ```
 
-Tuple indexing extracts the type at a given position:
+Field access on anonymous records:
 
 ```text
-Γ ⊢ e ⇒ Tuple([τ₀, …, τₖ₋₁])
-0 ≤ i < k
-────────────────────────────────
-Γ ⊢ e.i ⇒ τᵢ
+Γ ⊢ e ⇒ Record(fields)
+(f, τ_f) ∈ fields
+────────────────────────
+Γ ⊢ e.f ⇒ τ_f
 ```
+
+**Width subtyping rule**: An anonymous record with more fields is a subtype of one with fewer fields:
+
+```text
+fields₁ ⊇ fields₂  (by field name)
+∀ (f, τ) ∈ fields₂ : unify(fields₁[f], τ) = ok
+─────────────────────────────────────────────────
+Record(fields₁) <: Record(fields₂)
+```
+
+**Nominal types do NOT satisfy anonymous record types.** `Named("Point")` and `Record([(x, Float), (y, Float)])` are distinct types even if `Point` has the same fields.
 
 ### 4.8 Function types
 
@@ -562,18 +1310,15 @@ Expr::Var(name) => {
 
 ### 4.9 Subtyping
 
-The current implementation uses **equality-based** type compatibility (no subtyping lattice). Two types are compatible if and only if they unify. This means:
+Spore primarily uses **equality-based** type compatibility via unification, with targeted subtyping for specific cases:
 
 - `Int ≠ Float` — no implicit numeric widening.
 - `Named("UserId") ≠ Named("String")` — newtypes are distinct.
 - `Ty::Error` unifies with anything (error recovery only).
 - `Ty::Hole(name)` unifies with anything (hole placeholder only).
-
-**Future extensions (not yet implemented):**
-
-- `Never` as the bottom type (subtype of all types): `Never <: τ` for all `τ`.
+- `Ty::Never` unifies with anything (`Never <: τ` for all `τ`).
 - Width subtyping for anonymous records: `{ a: Int, b: String, c: Bool } <: { a: Int, b: String }`.
-- Capability set subtyping: `C₁ ⊆ C₂ ⟹ Fn(ps, r, C₁) <: Fn(ps, r, C₂)`.
+- Capability set subtyping: `C₁ ⊆ C₂ ⟹ Fn(ps, r, C₁) <: Fn(ps, r, C₂)` (a function needing fewer capabilities is more general).
 
 ### 4.10 Binary and unary operator typing
 
@@ -660,8 +1405,8 @@ fn process_port(raw: Int) -> Port ! [InvalidPort] {
     if raw < 1 || raw > 65535 {
         raise InvalidPort { value: raw }
     }
-    -- After the guard, the compiler knows: 1 <= raw <= 65535
-    -- raw is automatically narrowed to Port
+    // After the guard, the compiler knows: 1 <= raw <= 65535
+    // raw is automatically narrowed to Port
     raw
 }
 ```
@@ -672,6 +1417,140 @@ The abstract domain tracks **interval constraints** on integer and float values.
 - False branch: negated constraints added.
 
 L1 explicitly excludes: arbitrary quantifiers, aliasing analysis, heap reasoning, and SMT-level theorem proving. This keeps checking decidable and error messages predictable.
+
+### 4.12 Trait resolution
+
+#### Trait registry
+
+Traits are registered in a `TraitRegistry` alongside the `TypeRegistry`. Each trait records:
+
+- Trait name
+- Supertrait requirements (e.g., `Ord: Eq`)
+- Method signatures (name, parameter types, return type, CapSet)
+- Associated type declarations
+- Default method implementations (if any)
+
+#### Trait implementation checking
+
+When an `impl Trait for Type` block is encountered:
+
+1. Verify that all required methods are provided (or have defaults).
+2. For each method, check that the signature matches the trait declaration (after substituting `Self` with the implementing type).
+3. Type-check each method body against its declared signature.
+4. Verify supertrait implementations exist.
+
+```text
+trait T { fn m(self, x: σ) -> τ }
+impl T for S { fn m(self, x: σ') -> τ' { body } }
+────────────────────────────────────────────────
+require: σ' = σ[Self ↦ S] and τ' = τ[Self ↦ S]
+check: Γ, self: S, x: σ' ⊢ body ⇐ τ'
+```
+
+#### Coherence checking
+
+The compiler enforces the orphan rule at module registration time:
+
+- `impl T for S` is allowed only if the current module defines `T` or `S`.
+- Adapter declarations are scoped: `adapter S as T { ... }` is usable only where explicitly imported via `where adapter: S as T`.
+
+### 4.13 Pattern matching exhaustiveness
+
+The exhaustiveness checker operates on the `TypedHIR` after type inference. For each `match` expression:
+
+1. Collect all variants of the matched enum type.
+2. For each arm, compute the set of variants it covers (including nested patterns).
+3. Compute the uncovered set = all variants − covered variants.
+4. If uncovered set is non-empty and no wildcard arm exists, emit a compile error listing missing variants.
+
+```text
+match e : T where T is enum with variants [V₁, …, Vₙ]
+arms cover variants S ⊆ {V₁, …, Vₙ}
+S = {V₁, …, Vₙ}  ∨  wildcard arm present
+─────────────────────────────────────────
+match is exhaustive
+```
+
+Guards weaken exhaustiveness: when guards are present, the compiler conservatively requires a catch-all arm.
+
+### 4.14 Const generic evaluation
+
+Const generic arithmetic is evaluated at compile time during type checking. The compiler maintains a simple evaluator for type-level integer expressions:
+
+```text
+eval(N)           = N                    (literal)
+eval(A + B)       = eval(A) + eval(B)    (addition)
+eval(A * B)       = eval(A) * eval(B)    (multiplication)
+eval(A - B)       = eval(A) - eval(B)    (subtraction)
+eval(A / B)       = eval(A) / eval(B)    (division, B ≠ 0)
+eval(min(A, B))   = min(eval(A), eval(B))
+eval(max(A, B))   = max(eval(A), eval(B))
+```
+
+Division by zero and integer overflow in type-level arithmetic are compile-time errors.
+
+When a const generic function is instantiated, the compiler substitutes concrete values and evaluates:
+
+```text
+concat[Int, 3, 5](a, b) → Vec[Int, max: eval(3 + 5)] = Vec[Int, max: 8]
+```
+
+### 4.15 Error set typing
+
+Error sets are tracked as part of function types. The `!` syntax represents a closed union of error types:
+
+```text
+Fn([σ₁, …, σₙ], τᵣ, C, E)    where E = {Err₁, …, Errₖ}
+```
+
+**Error propagation via `?`**:
+
+```text
+Γ ⊢ e ⇒ Fn([…], τ, C, E_callee)
+E_callee ⊆ E_caller
+──────────────────────────────────
+Γ; E_caller ⊢ e(…)? ⇒ τ
+```
+
+If `E_callee ⊄ E_caller`, the checker emits:
+
+```text
+error: function may raise [Err1] which is not in the declared error set
+```
+
+**Error set union**: When multiple `?` calls appear in a function body, the function's error set must be a superset of the union of all callees' error sets.
+
+### 4.16 Never type in the type system
+
+`Never` participates in the type system as follows:
+
+1. **Unification**: `unify(τ, Never) = ok` and `unify(Never, τ) = ok` for all `τ`.
+2. **If-else branches**: If one branch returns `Never`, the result type is the other branch's type.
+3. **Match arms**: A `Never`-typed arm is compatible with all other arm types.
+4. **Function return**: `fn f() -> Never` means `f` never returns normally.
+
+```text
+Γ ⊢ e_then ⇒ τ
+Γ ⊢ e_else ⇒ Never
+────────────────────
+Γ ⊢ if cond { e_then } else { e_else } ⇒ τ
+```
+
+### 4.17 Recursive type validation
+
+The compiler validates recursive types during registration:
+
+1. Build a dependency graph of type definitions.
+2. For each cycle in the graph, verify that at least one edge passes through an indirection type (`List`, `Option`, `Box`, etc.).
+3. If a cycle has no indirection, emit an infinite-size error.
+
+```text
+type A = { field: B }
+type B = { field: A }    // ERROR: infinite size (A → B → A with no indirection)
+
+type A = { field: List[B] }
+type B = { field: A }    // OK: List provides indirection
+```
 
 ## Human experience impact
 
@@ -732,10 +1611,12 @@ All types implement `Display` with a canonical format:
 | `Ty::Float` | `Float` |
 | `Ty::Bool` | `Bool` |
 | `Ty::Str` | `String` |
+| `Ty::Char` | `Char` |
 | `Ty::Unit` | `()` |
+| `Ty::Never` | `Never` |
 | `Ty::Named("Foo")` | `Foo` |
 | `Ty::App("List", [Int])` | `List[Int]` |
-| `Ty::Tuple([Int, Str])` | `(Int, String)` |
+| `Ty::Record([(x, Int), (y, Float)])` | `{ x: Int, y: Float }` |
 | `Ty::Fn([Int], Bool, {})` | `(Int) -> Bool` |
 | `Ty::Fn([Int], Bool, {"Net"})` | `(Int) -> Bool uses [Net]` |
 | `Ty::Var(3)` | `?T3` |
@@ -796,17 +1677,15 @@ Hole ?h1 in function `example`:
 
 ## Drawbacks
 
-1. **No subtyping lattice yet.** The lack of `Never <: τ` means diverging expressions in branches require special handling (currently unimplemented). Adding a proper bottom type will require modifying the unifier.
+1. **Nominal rigidity.** The nominal-primary design means newtypes require explicit wrap/unwrap. This adds verbosity for simple delegation patterns. Anonymous records provide a structural escape hatch, but they cannot implement traits.
 
-2. **No occurs check.** The unifier does not check for cyclic substitutions (`Var(0) ↦ List[Var(0)]`). This is safe given current usage patterns but would need to be added before supporting recursive anonymous types.
+2. **CapSet as BTreeSet\<String\>.** String-based capability names lack static verification at the `Ty` level — a misspelled capability name is only caught when matching against registered capabilities, not during type construction.
 
-3. **Nominal rigidity.** The nominal-primary design means newtypes require explicit wrap/unwrap. This adds verbosity for simple delegation patterns. Anonymous records provide a structural escape hatch, but they cannot implement traits.
+3. **No higher-kinded types.** GATs + associated types cover most use cases, but abstracting over container kinds generically (functor-map over any container) requires either code generation or per-container implementations.
 
-4. **CapSet as BTreeSet\<String\>.** String-based capability names lack static verification at the `Ty` level — a misspelled capability name is only caught when matching against registered capabilities, not during type construction.
+4. **Refinement types are unimplemented.** The L0 + L1 refinement vision is specified but not yet in the compiler. Users cannot currently express bounded numeric types or flow-sensitive narrowing.
 
-5. **No higher-kinded types.** GATs + associated types cover most use cases, but abstracting over container kinds generically (functor-map over any container) requires either code generation or per-container implementations.
-
-6. **Refinement types are unimplemented.** The L0 + L1 refinement vision is specified but not yet in the compiler. Users cannot currently express bounded numeric types or flow-sensitive narrowing.
+5. **Annotation overhead.** Requiring full function signatures is more annotation than TypeScript or Python. This is a deliberate trade-off — signatures are the gravity center for both humans and Agents.
 
 ## Alternatives considered
 
@@ -916,49 +1795,45 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 
 ### Compatibility commitments
 
-1. **Ty enum stability.** The variants `Int`, `Float`, `Bool`, `Str`, `Unit`, `Named`, `App`, `Tuple`, `Fn`, `Var`, `Hole`, `Error` are stable. New variants may be added (e.g., `Never`, `Record`) but existing variants will not be removed or renamed without a new SEP.
+1. **Ty enum stability.** The variants `Int`, `Float`, `Bool`, `Str`, `Char`, `Unit`, `Never`, `Named`, `App`, `Record`, `Fn`, `Var`, `Hole`, `Error` are stable. New variants may be added but existing variants will not be removed or renamed without a new SEP.
 
 2. **CapSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce capability variables for row-polymorphic effects, but the concrete string-based API will remain supported.
 
 3. **Two-pass checking.** The `register_item` → `check_fn` architecture is stable. Future passes (e.g., trait resolution, cost checking) will be added after these two, not replace them.
 
-4. **Display format.** The canonical type display format (`Int`, `List[Int]`, `(Int) -> Bool uses [Net]`) is stable and may be relied upon by tools and diagnostics.
+4. **Display format.** The canonical type display format (`Int`, `List[Int]`, `(Int) -> Bool uses [Net]`, `{ x: Int, y: Float }`) is stable and may be relied upon by tools and diagnostics.
 
 ### Migration path for future features
 
 | Feature | Migration strategy |
 |---|---|
-| `Never` type | Add `Ty::Never` variant; modify unifier to treat it as bottom type |
 | Refinement types (L0) | Add `Ty::Refined(Box<Ty>, Predicate)` variant; extend `resolve_type` |
-| Traits | Add trait registry and constraint solver; extend `register_item` |
 | Const generics | Add `Ty::Const(value)` variant; extend `App` to accept const args |
-| Anonymous records | Add `Ty::Record(BTreeMap<String, Ty>)` with width subtyping |
+| Row-polymorphic capabilities | Extend CapSet with capability variables alongside concrete strings |
 
 ## Unresolved questions
 
-1. **Occurs check.** Should the unifier include an occurs check now, or defer until recursive anonymous types are needed? The current approach is safe for non-recursive types but would loop on `Var(0) ↦ Tuple([Var(0)])`.
+1. **CapSet in unification.** Currently, function type unification ignores CapSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should CapSets participate in unification, or remain checked separately? Separate checking is simpler but could miss capability mismatches in higher-order function arguments.
 
-2. **CapSet in unification.** Currently, function type unification ignores CapSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should CapSets participate in unification, or remain checked separately? Separate checking is simpler but could miss capability mismatches in higher-order function arguments.
+2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[Int]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
 
-3. **Never type semantics.** When `Never` is added, how should it interact with unification? Options:
-   - (a) `unify(τ, Never) = ok` for all `τ` (subtyping via unification).
-   - (b) Separate subtype check before unification.
-   - (c) Coercion insertion during checking.
-
-4. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[Int]`), but the design document uses angle brackets (`List<T>`). Which surface syntax should be canonical? This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
-
-5. **Refinement type representation.** Where do refinement predicates live in the `Ty` enum? Options:
+3. **Refinement type representation.** Where do refinement predicates live in the `Ty` enum? Options:
    - (a) `Ty::Refined(Box<Ty>, Predicate)` — a wrapper around any base type.
    - (b) Store refinements in the `TypeRegistry` alongside the base type, not in `Ty` itself.
    - (c) Treat refined types as named types (`Port = Named("Port")`) with predicates stored separately.
 
-6. **Trait method type checking.** The two-pass architecture registers function signatures but does not yet handle trait method signatures, default methods, or `impl` blocks. How should these be integrated into `register_item` and `check_fn`?
+4. **Trait method type checking.** The two-pass architecture registers function signatures but does not yet handle trait method signatures, default methods, or `impl` blocks. How should these be integrated into `register_item` and `check_fn`? (See §4.12 for the specified approach.)
 
-7. **Row-polymorphic capabilities.** Should capability sets support variables (e.g., `uses [C]` where `C` is a capability set variable)? This would enable generic higher-order functions that preserve their argument's capability requirements.
+5. **Row-polymorphic capabilities.** Should capability sets support variables (e.g., `uses [C]` where `C` is a capability set variable)? This would enable generic higher-order functions that preserve their argument's capability requirements.
 
-8. **Error type representation.** Error sets (`! [Err1, Err2]`) are not yet represented in the `Ty` enum. Should they be:
-   - (a) A component of `Ty::Fn` (making it `Fn(params, ret, CapSet, ErrorSet)`).
-   - (b) A separate `Ty::Fallible(Box<Ty>, ErrorSet)` wrapper.
-   - (c) Tracked outside the type system in a parallel error-set registry.
+6. **Variance.** Generic type parameters need variance annotations (covariant, contravariant, invariant) for soundness when subtyping is introduced. Should variance be inferred or declared?
 
-9. **Variance.** Generic type parameters need variance annotations (covariant, contravariant, invariant) for soundness when subtyping is introduced. Should variance be inferred or declared?
+### Resolved questions
+
+The following questions from earlier drafts are now resolved by this specification:
+
+1. **Occurs check.** ✅ Resolved — the unifier includes an occurs check (§4.4). Cyclic substitutions like `Var(0) ↦ List[Var(0)]` are rejected.
+
+2. **Never type semantics.** ✅ Resolved — `unify(τ, Never) = ok` for all `τ` (§4.16). Never is handled as a bottom type directly within the unifier.
+
+3. **Error type representation.** ✅ Resolved — error sets are a component of `Ty::Fn`, making it `Fn(params, ret, CapSet, ErrorSet)` (§4.15). Error set unions are computed during `?` propagation.
