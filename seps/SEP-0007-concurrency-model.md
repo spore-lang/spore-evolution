@@ -75,9 +75,8 @@ Raw threads are excluded for fundamental reasons:
 Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` splits functions into two colors—red (async) and blue (sync)—where red can only be called from red contexts, causing a viral coloring of the entire call chain. Spore takes a different path: **concurrency is an effect declared in the `uses` clause**. Effect-polymorphic functions are naturally colorless.
 
 ```spore
--- No async annotation needed—concurrency declared via the Spawn effect
+// No async annotation needed—concurrency declared via the Spawn effect
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
-effects: idempotent
 cost ≤ urls.len * per_fetch
 uses [Spawn, NetRead]
 {
@@ -87,9 +86,8 @@ uses [Spawn, NetRead]
     }
 }
 
--- Pure function: no Spawn, no IO—compiler guarantees single-threaded
+// Pure function: no Spawn, no IO—compiler guarantees single-threaded
 fn transform(data: List[Item]) -> List[Item]
-effects: pure, deterministic
 cost ≤ data.len * 3
 {
     data.map(|item| item.process())
@@ -109,7 +107,7 @@ This section introduces the concurrency primitives through progressive examples.
 `parallel_scope` is the **only** way to introduce concurrency in Spore. There is no `GlobalScope`, no `thread::spawn`, no detached background tasks in user code.
 
 ```spore
--- Basic form: spawn two computations in parallel
+// Basic form: spawn two computations in parallel
 parallel_scope {
     let a = spawn { compute_part1() }
     let b = spawn { compute_part2() }
@@ -119,13 +117,33 @@ parallel_scope {
 
 The block is an expression; its value is the last expression in the body. When the block exits, every spawned task has either completed or been cancelled.
 
+Because `parallel_scope` is an expression, it can return structured results assembled from spawned tasks:
+
+```spore
+fn load_dashboard(user_id: UserId) -> Dashboard ! [DbError, NetError]
+uses [Spawn, NetRead, DbRead]
+{
+    // parallel_scope returns the Dashboard struct directly
+    parallel_scope {
+        let profile = spawn { db.get_profile(user_id) }
+        let feed    = spawn { api.get_feed(user_id) }
+        let notifs  = spawn { api.get_notifications(user_id) }
+        Dashboard {
+            profile: profile.await,
+            feed: feed.await,
+            notifications: notifs.await,
+        }
+    }
+}
+```
+
 An optional `lanes` parameter limits the degree of parallelism:
 
 ```spore
 parallel_scope(lanes: 4) {
-    for chunk in data.chunks(4) {
+    data.chunks(4).each(|chunk| {
         spawn { process_chunk(chunk) }
-    }
+    })
 }
 ```
 
@@ -144,18 +162,51 @@ Capability narrowing is available at the spawn site:
 
 ```spore
 let task = spawn uses [NetRead] { fetch(url) }
--- The spawned task can only use NetRead; it cannot itself spawn.
+// The spawned task can only use NetRead; it cannot itself spawn.
 ```
 
-### 3.3 Channels — communication between tasks
+### 3.3 `Task[T]` — task handle API
+
+`spawn` returns a `Task[T]` handle. The complete API:
+
+| Method/Property | Type | Description |
+|-----------------|------|-------------|
+| `task.await` | `T ! [child errors]` | Block until the task completes and return its result |
+| `task.cancel()` | `Unit` | Request cooperative cancellation of the task |
+| `task.is_done` | `Bool` | `true` if the task has completed (successfully or with error) |
+| `task.is_cancelled` | `Bool` | `true` if the task was cancelled |
+
+Usage examples:
+
+```spore
+fn selective_fetch(urls: List[Url]) -> Response ! [NetError]
+uses [Spawn, NetRead]
+{
+    parallel_scope {
+        let primary   = spawn { fetch(urls.head()) }
+        let secondary = spawn { fetch(urls.get(1)) }
+
+        // Wait for the primary; cancel secondary if primary succeeds
+        let result = primary.await
+        if !secondary.is_done {
+            secondary.cancel()
+        }
+        result
+    }
+}
+```
+
+> **Note:** `task.cancel()` is rarely needed in user code—the structured scope automatically cancels unawaited tasks on exit. Explicit cancellation is useful for "first result wins" patterns.
+
+### 3.4 Channels — communication between tasks
 
 Channels implement CSP-style message passing: *"Don't communicate by sharing memory; share memory by communicating."*
 
 ```spore
--- Buffered channel
+// Buffered channel
 let (tx, rx) = Channel.new[Message](buffer: 10)
 
--- Unbuffered (synchronous) channel
+// Unbuffered (synchronous) channel
 let (tx, rx) = Channel.new[Message](buffer: 0)
 ```
 
@@ -181,15 +232,15 @@ select {
 Because `Spawn` is an effect, different handlers give the same code different runtime behavior:
 
 ```spore
--- Production: real parallel execution on a thread pool
+// Production: real parallel execution on a thread pool
 handle concurrent_work()
     with platform.spawn_handler(thread_pool)
 
--- Testing: deterministic sequential execution
+// Testing: deterministic sequential execution
 handle concurrent_work()
     with sequential_handler()
 
--- Compile-time simulation: abstract interpretation for cost analysis
+// Compile-time simulation: abstract interpretation for cost analysis
 handle concurrent_work()
     with cost_analysis_handler()
 ```
@@ -218,10 +269,10 @@ test "fetch_and_merge produces correct results" {
 `map` only accepts **pure** closures (capture list `[]`). This ensures that mapping over a collection never accidentally introduces side effects. For effectful parallel iteration, use `parallel_scope + spawn`:
 
 ```spore
--- Pure: map with a pure closure (no effects, no captures)
+// Pure: map with a pure closure (no effects, no captures)
 let doubled = numbers.map(|x| x * 2)
 
--- Effectful parallel: use parallel_scope + spawn
+// Effectful parallel: use parallel_scope + spawn
 let responses = parallel_scope {
     urls.map(|url| spawn { fetch(url) })
         .map(|task| task.await)
@@ -243,14 +294,14 @@ uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
     select {
         cmd from commands => {
             execute(cmd)
-            event_loop(commands, events, shutdown)  -- tail-recursive
+            event_loop(commands, events, shutdown)  // tail-recursive
         },
         evt from events => {
             log_event(evt)
             event_loop(commands, events, shutdown)
         },
         _ from shutdown => {
-            Unit  -- base case
+            Unit  // base case
         },
         timeout(30.seconds) => {
             heartbeat()
@@ -266,7 +317,6 @@ uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
 capability HttpHandler = [Spawn, NetRead, NetWrite, DbRead, Clock]
 
 fn handle_request(req: Request) -> Response ! [DbError, Timeout]
-effects: idempotent
 cost ≤ 5000
 uses [HttpHandler]
 {
@@ -304,34 +354,30 @@ uses [Spawn, NetRead, DbRead, DbWrite]
     let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
 
     parallel_scope(lanes: 6) {
-        -- Extract: 1 lane
+        // Extract: 1 lane
         let extractor = spawn uses [NetRead] {
-            for record in source.stream() {
-                raw_tx.send(record)
-            }
+            source.stream().each(|record| raw_tx.send(record))
             raw_tx.close()
         }
 
-        -- Transform: 4 lanes (fan-out)
-        for _ in 0..4 {
+        // Transform: 4 lanes (fan-out)
+        (0..4).each(|_| {
             spawn {
-                for raw in raw_rx {
+                raw_rx.each(|raw| {
                     match transform(raw) {
                         Ok(clean) => clean_tx.send(clean),
                         Err(e)    => log_error(e),
                     }
-                }
+                })
             }
-        }
+        })
 
-        -- Load: 1 lane (fan-in)
+        // Load: 1 lane (fan-in)
         let loader = spawn uses [DbWrite] {
-            let mut count = 0
-            for record in clean_rx {
+            clean_rx.fold(0, |count, record| {
                 sink.write(record)
-                count += 1
-            }
-            count
+                count + 1
+            })
         }
 
         extractor.await
@@ -418,14 +464,14 @@ Two modes are supported:
 | `collect` | Do not cancel siblings; collect results | `Result[T, E]` per task | Partial results are meaningful |
 
 ```spore
--- fail_fast (default)
+// fail_fast (default)
 parallel_scope {
-    let a = spawn { fetch(url1) }  -- if this throws NetError…
-    let b = spawn { fetch(url2) }  -- …b is cancelled
-    (a.await, b.await)             -- scope propagates NetError upward
+    let a = spawn { fetch(url1) }  // if this throws NetError…
+    let b = spawn { fetch(url2) }  // …b is cancelled
+    (a.await, b.await)  // scope propagates NetError upward
 }
 
--- collect (supervisor mode)
+// collect (supervisor mode)
 parallel_scope(on_error: .collect) {
     let a = spawn { fetch(url1) }
     let b = spawn { fetch(url2) }
@@ -443,7 +489,7 @@ parallel_scope(on_error: .collect) {
 `Spawn` is defined as a standard effect, not compiler magic:
 
 ```spore
--- Built-in effect definition (conceptual; provided by Platform)
+// Built-in effect definition (conceptual; provided by Platform)
 effect Spawn {
     fn spawn[T](task: () -> T) -> Task[T]
 }
@@ -510,10 +556,10 @@ Every effect automatically becomes a capability. Declaring `uses [Spawn]` is equ
 #### `Channel[T]`
 
 ```spore
--- Buffered
+// Buffered
 let (tx, rx) = Channel.new[Message](buffer: 10)
 
--- Unbuffered (synchronous handoff)
+// Unbuffered (synchronous handoff)
 let (tx, rx) = Channel.new[Message](buffer: 0)
 ```
 
@@ -535,19 +581,13 @@ Functions using channels must declare the corresponding capabilities:
 fn producer(tx: Sender[Int]) -> Unit ! [ChannelClosed]
 uses [ChanSend[Int]]
 {
-    for i in 0..100 {
-        tx.send(i)
-    }
+    (0..100).each(|i| tx.send(i))
 }
 
 fn consumer(rx: Receiver[Int]) -> List[Int] ! [ChannelClosed]
 uses [ChanRecv[Int]]
 {
-    let mut results = []
-    for msg in rx {
-        results.push(msg)
-    }
-    results
+    rx.collect()
 }
 ```
 
@@ -575,7 +615,7 @@ Semantics:
 | `tx.send(value)` | Returns `Err(ChannelClosed)` |
 | `rx.recv()` | Returns buffered value if available; otherwise `Err(ChannelClosed)` |
 | `tx.close()` | Marks the sender end as closed |
-| `for msg in rx` | Iterates until channel is closed and buffer is drained |
+| `rx.each(\|msg\| ...)` | Iterates until channel is closed and buffer is drained |
 
 #### Fan-out / Fan-in patterns
 
@@ -640,7 +680,7 @@ fn pipeline(data: Data) -> Result
 cost ≤ 5000
 uses [Spawn, FileRead, NetWrite]
 {
-    -- Phase 1: 4 lanes
+    // Phase 1: 4 lanes
     let prepared = parallel_scope(lanes: 4) {
         let a = spawn { parse_part1(data) }
         let b = spawn { parse_part2(data) }
@@ -648,16 +688,68 @@ uses [Spawn, FileRead, NetWrite]
         let d = spawn { validate(data) }
         merge(a.await, b.await, c.await, d.await)
     }
-    -- Phase 1 exits; 4 lanes released
+    // Phase 1 exits; 4 lanes released
 
-    -- Phase 2: 2 lanes
+    // Phase 2: 2 lanes
     parallel_scope(lanes: 2) {
         let uploaded = spawn { upload(prepared) }
         let logged   = spawn { log_result(prepared) }
         (uploaded.await, logged.await)
     }
 
-    -- Compiler infers: peak lanes = max(4, 2) = 4
+    // Compiler infers: peak lanes = max(4, 2) = 4
+}
+```
+
+#### Symbolic cost expressions for dynamic lanes
+
+When the number of spawned tasks depends on runtime values, the compiler uses **symbolic cost expressions**:
+
+```spore
+fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
+cost ≤ urls.len * per_fetch
+uses [Spawn, NetRead]
+{
+    parallel_scope {
+        urls.map(|url| spawn { fetch(url) })
+            .map(|task| task.await)
+    }
+}
+```
+
+```bash
+$ sporec --query-cost fetch_all
+{
+  "function": "fetch_all",
+  "cost_symbolic": "urls.len × (5 + per_fetch) + urls.len",
+  "parallel_lanes": "urls.len",
+  "note": "lane count depends on runtime urls.len; no static upper bound"
+}
+```
+
+To make the cost statically verifiable, use a **refinement type** to limit the input size:
+
+```spore
+fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! [NetError]
+cost ≤ 100 * per_fetch + 500
+uses [Spawn, NetRead]
+{
+    parallel_scope(lanes: 10) {
+        // At most 10 parallel tasks; remaining queue
+        urls.each(|url| spawn { fetch(url) })
+    }
+}
+```
+
+```bash
+$ sporec --query-cost bounded_fetch
+{
+  "function": "bounded_fetch",
+  "cost_upper": "100 × per_fetch + 500",
+  "cost_declared": "≤ 100 * per_fetch + 500",
+  "status": "within_bound",
+  "parallel_lanes_peak": 10,
+  "note": "urls.len ≤ 100 (refinement); lanes capped at 10"
 }
 ```
 
@@ -711,8 +803,8 @@ cost ≤ 3000
 uses [Spawn, NetRead]
 {
     parallel_scope(lanes: 2) {
-        let a = spawn { fetch(data.url) }     -- cost: 800
-        let b = spawn { ?process_logic }      -- hole: remaining budget
+        let a = spawn { fetch(data.url) }  // cost: 800
+        let b = spawn { ?process_logic }  // hole: remaining budget
         merge(a.await, b.await)
     }
 }
@@ -745,6 +837,33 @@ Error propagation:       child → parent  (bubbles up)
 Cancellation propagation: parent → child  (cascades down)
 ```
 
+**Nested scope cancel propagation example:**
+
+```spore
+parallel_scope {                              // scope A
+    let a = spawn { long_running_1() }        // task A1
+    let b = spawn {                           // task A2
+        parallel_scope {                      // scope B (nested)
+            let c = spawn { subtask_1() }     // task B1
+            let d = spawn { subtask_2() }     // task B2
+            (c.await, d.await)
+        }
+    }
+    (a.await, b.await)
+}
+```
+
+When scope A is cancelled, the 4-step propagation:
+
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | Scope A receives cancel signal | Sets cancel flag on A1 and A2 |
+| 2 | Task A1 checks cancel at next effect call | A1 raises `Cancelled`, begins cleanup (`defer` blocks run) |
+| 3 | Task A2 propagates cancel to nested scope B | Scope B sets cancel flag on B1 and B2 |
+| 4 | Tasks B1 and B2 check cancel at next effect call | B1, B2 raise `Cancelled`; scope B exits; scope A exits |
+
+All `defer` blocks execute in reverse order at each level. The entire tree unwinds deterministically.
+
 #### Cooperative cancellation
 
 Spore uses **cooperative** cancellation. Tasks are never forcibly terminated. Instead, they check for cancellation at two kinds of points:
@@ -756,18 +875,18 @@ Spore uses **cooperative** cancellation. Tasks are never forcibly terminated. In
 fn cpu_bound_work(data: List[Item]) -> List[Item]
 uses [Spawn]
 {
-    let mut results = []
-    for (i, item) in data.enumerate() {
+    data.enumerate().fold([], |results, (i, item)| {
+        // CPU-bound code needs manual cancellation checkpoints
         if i % 100 == 0 {
-            check_cancelled()  -- throws Cancelled if cancellation was requested
+            check_cancelled()  // throws Cancelled if cancellation was requested
         }
         results.push(transform(item))
-    }
-    results
+        results
+    })
 }
 ```
 
-The compiler may emit a warning when it detects a long loop body with no cancellation checkpoint.
+The compiler may emit a warning when it detects a long iterative computation with no cancellation checkpoint.
 
 #### `defer` and cancellation
 
@@ -778,7 +897,7 @@ fn with_temp_file() -> Data ! [IoError, Cancelled]
 uses [Spawn, FileRead, FileWrite]
 {
     let file = create_temp_file()
-    defer { delete_file(file) }  -- executes on cancellation too
+    defer { delete_file(file) }  // executes on cancellation too
 
     write_data(file, generate_large_data())
     read_and_process(file)
@@ -919,7 +1038,7 @@ The compiler reports the following concurrency-related diagnostics:
 | Missing `Spawn` capability | Error | Function calls `spawn` but does not declare `uses [Spawn]` |
 | Lane budget exceeded | Error | `parallel_scope(lanes: 2)` with 5 spawns that cannot queue |
 | Cost budget exceeded due to parallelism | Error | Inferred parallel cost exceeds declared `cost ≤ N` |
-| Long loop without cancellation checkpoint | Warning | CPU-bound loop > 100 iterations without `check_cancelled()` |
+| Long recursion/iteration without cancellation checkpoint | Warning | CPU-bound computation > 100 iterations without `check_cancelled()` |
 | Capability widening in spawn | Error | `spawn uses [NetWrite] { ... }` when parent lacks `NetWrite` |
 | Unused `Task` (never awaited, never cancelled) | Warning | Task result is silently discarded |
 
@@ -964,25 +1083,37 @@ This timeline can be rendered as a Gantt chart, flame graph, or task dependency 
 
 **Rejected.** Introduces function coloring that virally propagates through the codebase. Incompatible with Spore's "signature is the complete spec" philosophy. Also makes handler replacement (and thus simulatable execution) significantly harder.
 
+**Consequences of rejection:** Spore requires effect handlers for concurrency, which adds implementation complexity in the compiler. However, users never deal with colored functions, and testing concurrent code requires zero special infrastructure.
+
 ### Alternative 2: Green threads (Go, Java Loom)
 
 **Rejected.** Green threads are colorless (good) but lack effect tracking (bad). Any goroutine can perform any operation, violating Spore's capability constraint model. Additionally, goroutine leaks (Go's well-known problem) directly violate the resource safety guarantee.
+
+**Consequences of rejection:** Spore cannot easily adopt existing Go-style runtime implementations. The effect handler approach requires a custom runtime that understands continuations.
 
 ### Alternative 3: Actor model (Erlang, Akka)
 
 **Rejected.** Actor mailboxes use untyped message protocols, conflicting with Spore's type system philosophy. Message copying overhead makes cost modeling unpredictable. The isolation model is also heavier than needed for Spore's structured concurrency goals.
 
+**Consequences of rejection:** Spore lacks built-in location-transparent distribution (actors excel here). Distributed systems require explicit Platform-level support.
+
 ### Alternative 4: Software Transactional Memory (Haskell STM)
 
 **Rejected.** STM's retry mechanism has unbounded cost—the number of retries depends on runtime contention, making static cost analysis intractable.
+
+**Consequences of rejection:** Certain concurrent data structure patterns are more verbose with channels than with STM. Accepted as a worthwhile trade-off for cost predictability.
 
 ### Alternative 5: Mutex/RwLock as primary synchronization
 
 **Rejected.** Lock contention cost is unpredictable (spin/retry count depends on runtime scheduling). Deadlock detection in the presence of shared memory and locks is NP-hard. The effect handler + continuation model does not compose cleanly with lock semantics.
 
+**Consequences of rejection:** Performance-critical lock-free patterns (e.g., atomic counters) are unavailable in safe Spore. A future `unsafe_shared` extension point is reserved but not in v0.1.
+
 ### Alternative 6: Unstructured spawning with optional scoping
 
 **Rejected.** Providing both structured and unstructured spawning (as in Kotlin's `GlobalScope` vs. `coroutineScope`) creates an escape hatch that undermines cost analysis. If untracked concurrent tasks exist, the compiler cannot verify `cost ≤ N` or `parallel(lane)` bounds.
+
+**Consequences of rejection:** Long-lived background tasks (daemon processes, connection pools) must be managed at the Platform level rather than in user code. This pushes certain patterns to Platform authors.
 
 ---
 
@@ -1068,8 +1199,204 @@ The concurrency model is introduced as a new language feature. There is no exist
 
 7. **Distributed concurrency.** This SEP covers single-machine concurrency. Extending the model to distributed settings (multi-node `parallel_scope`, remote channels) is a future concern but should not be foreclosed by current design decisions.
 
-8. **Compiler warning heuristics for missing `check_cancelled()`.** What constitutes a "long loop" that should trigger a warning? Should this be configurable (e.g., estimated iteration count > N), and should it be suppressible with an annotation?
+8. **Compiler warning heuristics for missing `check_cancelled()`.** What constitutes "long iteration" that should trigger a warning? Should this be configurable (e.g., estimated iteration count > N), and should it be suppressible with an annotation?
 
-9. **Interaction between `deterministic` effect annotation and `Spawn`.** A function declared `effects: deterministic` with `uses [Spawn]` must produce schedule-independent results. The compiler verification strategy for this property (e.g., requiring commutative merge operations) needs further design.
+9. **Interaction between `deterministic` property and `Spawn`.** A function inferred as `deterministic` (from `uses`) with `uses [Spawn]` must produce schedule-independent results. The compiler verification strategy for this property (e.g., requiring commutative merge operations) needs further design.
 
 10. **Channel type variance.** Should `Sender[T]` be contravariant in `T` and `Receiver[T]` covariant? This affects composability with generic code and needs alignment with the broader type system design.
+
+---
+
+## Appendix A: Syntax quick-reference
+
+### A.1 `parallel_scope`
+
+```spore
+// Basic form
+parallel_scope { <body> }
+
+// With lane limit
+parallel_scope(lanes: <N>) { <body> }
+
+// Supervisor mode (collect errors instead of fail-fast)
+parallel_scope(on_error: .collect) { <body> }
+
+// Combined
+parallel_scope(lanes: 4, on_error: .collect) { <body> }
+```
+
+### A.2 `spawn`
+
+```spore
+// Returns Task[T]
+let task = spawn { <expr> }
+
+// Direct await
+let result = spawn { <expr> }.await
+
+// With capability narrowing
+let task = spawn uses [NetRead] { <expr> }
+```
+
+### A.3 `Task[T]`
+
+```spore
+let value: T = task.await       // Wait for result
+task.cancel()                    // Request cooperative cancellation
+task.is_done                     // Bool: has the task completed?
+task.is_cancelled                // Bool: was the task cancelled?
+```
+
+### A.4 Channel
+
+```spore
+// Create
+let (tx, rx) = Channel.new[T](buffer: N)
+
+// Send / receive
+tx.send(value)          // ! [ChannelClosed]
+let value = rx.recv()   // ! [ChannelClosed]
+
+// Close and clone
+tx.close()
+let tx2 = tx.clone()
+
+// Iterate (HOF, no for loops)
+rx.each(|msg| handle(msg))
+rx.collect()
+```
+
+### A.5 `select`
+
+```spore
+select {
+    <binding> from <receiver> => <expr>,
+    timeout(<duration>) => <expr>,
+}
+```
+
+### A.6 Cancellation
+
+```spore
+// Timeout
+with_timeout(duration) { <body> }
+
+// Explicit cancellation checkpoint
+check_cancelled()
+
+// Cleanup (runs even on cancel)
+defer { <cleanup> }
+```
+
+### A.7 Effect and handler
+
+```spore
+// Declare effect
+effect MyEffect {
+    fn operation(param: T) -> U
+}
+
+// Use effect in function signature
+fn my_func() -> Result
+uses [MyEffect]
+{ operation(value) }
+
+// Provide handler at call site
+handle my_func()
+    with my_handler()
+
+// Define handler
+handler my_handler for MyEffect {
+    fn operation(param: T) -> U {
+        resume(result)
+    }
+}
+```
+
+### A.8 Function signature with concurrency
+
+```spore
+fn name(params) -> ReturnType ! [Errors]
+where T: Constraints
+cost ≤ <N>
+uses [Spawn, Channel, ...]
+{
+    <body>
+}
+```
+
+### A.9 Complete example: HTTP handler
+
+```spore
+capability HttpHandler = [Spawn, NetRead, NetWrite, DbRead, Clock]
+
+fn handle_request(req: Request) -> Response ! [DbError, Timeout]
+cost ≤ 5000
+uses [HttpHandler]
+{
+    with_timeout(10.seconds) {
+        parallel_scope(lanes: 3) {
+            let auth   = spawn uses [DbRead]  { verify_token(req.token) }
+            let user   = spawn uses [DbRead]  { load_user(req.user_id) }
+            let config = spawn uses [NetRead]  { fetch_remote_config() }
+
+            let auth_result = auth.await
+            if !auth_result.valid {
+                return Response.unauthorized()
+            }
+
+            Response.ok(render_page(user.await, config.await))
+        }
+    }
+}
+```
+
+### A.10 Complete example: ETL pipeline
+
+```spore
+fn etl_pipeline(
+    source: DataSource,
+    sink: DataSink,
+    batch_size: Int,
+) -> EtlReport ! [ExtractError, TransformError, LoadError]
+cost ≤ batch_size * 200
+uses [Spawn, NetRead, DbRead, DbWrite]
+{
+    let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
+    let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
+
+    parallel_scope(lanes: 6) {
+        // Extract: 1 lane
+        let extractor = spawn uses [NetRead] {
+            source.stream().each(|record| raw_tx.send(record))
+            raw_tx.close()
+        }
+
+        // Transform: 4 lanes (fan-out)
+        (0..4).each(|_| {
+            spawn {
+                raw_rx.each(|raw| {
+                    match transform(raw) {
+                        Ok(clean) => clean_tx.send(clean),
+                        Err(e)    => log_error(e),
+                    }
+                })
+            }
+        })
+
+        // Load: 1 lane (fan-in)
+        let loader = spawn uses [DbWrite] {
+            clean_rx.fold(0, |count, record| {
+                sink.write(record)
+                count + 1
+            })
+        }
+
+        // Collect and report
+        extractor.await
+        clean_tx.close()
+        let loaded = loader.await
+        EtlReport { records_loaded: loaded }
+    }
+}
+```
