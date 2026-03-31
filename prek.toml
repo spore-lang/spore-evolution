@@ -1,0 +1,51 @@
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+hooks = [
+  { id = "check-added-large-files" },
+  { id = "check-case-conflict" },
+  { id = "check-executables-have-shebangs" },
+  { id = "check-yaml" },
+  { id = "check-json" },
+  { id = "check-merge-conflict" },
+  { id = "destroyed-symlinks" },
+  { id = "end-of-file-fixer" },
+  { id = "mixed-line-ending" },
+  { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "https://github.com/tombi-toml/tombi-pre-commit"
+rev = "v0.7.0"
+hooks = [
+  { id = "tombi-format" },
+  { id = "tombi-lint" },
+]
+
+[[repos]]
+repo = "https://github.com/rvben/rumdl-pre-commit"
+rev = "v0.1.63"
+hooks = [
+  { id = "rumdl" },
+]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.33.1"
+hooks = [
+  { id = "typos", args = ["--force-exclude"] },
+]
+
+[[repos]]
+repo = "https://github.com/zrr1999/zendev"
+rev = "v0.0.4"
+hooks = [
+  { id = "zendev-commit-msg" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "sep-index", name = "sep-index", entry = "uv run scripts/check_sep_index.py", language = "system", files = "^(drafts|seps)/.*\\.md$|^seps-index\\.json$", pass_filenames = false },
+  { id = "sep-documents", name = "sep-documents", entry = "uv run scripts/validate_sep_documents.py", language = "system", files = "^(drafts|seps)/.*\\.md$", pass_filenames = true },
+]
