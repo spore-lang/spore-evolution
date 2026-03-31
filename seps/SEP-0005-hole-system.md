@@ -171,7 +171,7 @@ with [pure, deterministic]
 
 **Step 2 — Agent queries holes:**
 
-```
+```text
 $ sporec --query-hole ?validate_items --json
 ```
 
@@ -185,7 +185,7 @@ validate_line_items(items)
 
 **Step 4 — Compiler verifies:**
 
-```
+```text
 $ sporec check src/billing/invoice.spore
 
 [partial] generate_invoice
@@ -196,7 +196,7 @@ $ sporec check src/billing/invoice.spore
 
 **Step 5 — Agent fills the next hole, compiler confirms completion:**
 
-```
+```text
 [ok] generate_invoice : (...) -> Invoice ! [TaxCalculationError, InvalidLineItem]
   cost: 520 (within budget of 5000)
   all holes filled ✓
@@ -208,7 +208,7 @@ $ sporec check src/billing/invoice.spore
 
 ### Hole Syntax (Formal)
 
-```
+```text
 hole       ::= '?' IDENT (':' type)?
 IDENT      ::= [a-z_][a-zA-Z0-9_]*
 ```
@@ -275,7 +275,7 @@ Replaces the coarse `match_quality: "exact" | "partial"` string with a four-dime
 
 **Type match formula:**
 
-```
+```text
 type_match(candidate, hole) =
     0.6 × type_similarity(candidate.return_type, hole.expected_type)
   + 0.4 × mean(param_scores)
@@ -285,7 +285,7 @@ Where `type_similarity(A, B)` returns: 1.0 (exact), 0.9 (subtype), 0.7 (known co
 
 **Cost fit formula:**
 
-```
+```text
 cost_fit(candidate, hole) =
     if estimated_cost ≤ budget_remaining:
         1.0 - (estimated_cost / budget_remaining) × 0.3
@@ -295,7 +295,7 @@ cost_fit(candidate, hole) =
 
 **Overall score:**
 
-```
+```text
 overall = 0.40 × type_match + 0.20 × cost_fit + 0.25 × capability_fit + 0.15 × error_coverage
 ```
 
@@ -408,7 +408,7 @@ function build_hole_graph(module: TypedAST) -> Graph:
 
 Circular hole dependencies are **compile errors**. Detection uses standard DFS coloring in O(|V| + |E|):
 
-```
+```text
 error[H0301]: circular hole dependency detected
   --> src/order.spore
   |
@@ -451,7 +451,7 @@ Independent holes within the same layer can be filled simultaneously by differen
 
 Scheduling protocol:
 
-```
+```text
 Round 0: ready_set = layers[0] = {h1, h2}
          Agent A1 ← h1, Agent A2 ← h2 (parallel)
 
@@ -478,7 +478,7 @@ When a hole is filled, the graph updates incrementally in O(|neighbors|):
 
 The Agent protocol defines a five-state machine with no explicit RETRY state:
 
-```
+```text
                 ┌────────────────────────────────────────────────┐
                 │                                                │
                 ▼                                                │
@@ -585,7 +585,7 @@ The Agent reads diagnostics, understands the failure, and autonomously decides t
 
 ### CLI interface
 
-```
+```text
 $ sporec --holes                         # list all holes
 $ sporec --holes --json                  # machine-readable
 $ sporec --query-hole ?name              # full HoleReport for one hole
@@ -601,7 +601,7 @@ $ spore fill --all                       # Agent fills all holes in order
 
 For partial functions, the compiler simulates all paths independently. A hole in one branch does not block simulation of other branches:
 
-```
+```text
 $ sporec --simulate route
 
 Path 1: request.method = GET  → completes normally (cost: 450)
@@ -636,7 +636,7 @@ This design eliminates the "context gathering" phase that plagues current AI cod
 
 The four-dimensional scoring vector (`type_match`, `cost_fit`, `capability_fit`, `error_coverage`) enables Agents to make decisions based on numeric comparison rather than string parsing. An Agent's selection logic becomes:
 
-```
+```text
 if confidence.candidate_ranking == "unique_best":
     select candidates[0]
 elif confidence.candidate_ranking == "ambiguous":
@@ -697,7 +697,7 @@ If an Agent fails repeatedly on a hole, it should:
 
 Agents consume the NDJSON event stream from `spore watch --json`:
 
-```
+```text
 {"type":"hole_graph_update","hole_graph":{...}}
 {"type":"hole_update","hole":"validate_input","report":{...}}
 {"type":"compile_result","status":"accepted","hole":"validate_input"}
@@ -725,7 +725,7 @@ while line = read_line(stdin):
 
 ### End-to-End Example: Multi-Agent Session
 
-```
+```text
 Timeline   Agent-1                     Agent-2                     Compiler
 ──────────────────────────────────────────────────────────────────────────────
 t0         DISCOVER                    DISCOVER                    hole_graph_update (5 holes)
@@ -857,7 +857,7 @@ The hole system integrates with Language Server Protocol:
 
 ### Cost diagnostics for partial functions
 
-```
+```text
 [partial] pipeline: (Vec<Int>) -> Vec<Int> ! []
   known cost: 200 (before hole) + ≤150 (after hole) = ≤350
   budget for ?middle_step: ≤650 (1000 - 350)

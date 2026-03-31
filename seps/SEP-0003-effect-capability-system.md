@@ -106,7 +106,7 @@ capability FullIO = [FileIO, NetRead, NetWrite]
 
 Aliases expand recursively and flatten:
 
-```
+```text
 FullIO → {FileIO, NetRead, NetWrite}
        → {FileRead, FileWrite, NetRead, NetWrite}
 ```
@@ -244,11 +244,12 @@ Expansion is **recursive**: if any $A_i$ is itself an alias, it is expanded unti
 
 #### 4.1 Complete function type
 
-```
+```text
 (T₁, T₂, …, Tₙ) -> R  uses S  ! [E₁, E₂, …]
 ```
 
 where:
+
 - `T₁ … Tₙ` — parameter types
 - `R` — return type
 - `S` — capability set (CapSet)
@@ -318,7 +319,7 @@ $$S_1 \subseteq S_2 \implies (\tau \to \rho \ \textbf{uses}\ S_1) <: (\tau \to \
 
 A function that requires *fewer* capabilities is more general and can be used wherever a more-capable function is expected.
 
-```
+```text
                     S₁ ⊆ S₂
 ─────────────────────────────────────────  [CAP-SUB]
 (T → R uses S₁) <: (T → R uses S₂)
@@ -326,7 +327,7 @@ A function that requires *fewer* capabilities is more general and can be used wh
 
 As a corollary, pure functions are subtypes of all function types:
 
-```
+```text
 ─────────────────────────────────────────  [CAP-PURE]
 (T → R uses {}) <: (T → R uses S)     ∀ S
 ```
@@ -349,7 +350,7 @@ Read: "Under type context Γ and capability set S, expression e has type T."
 
 #### Core rules
 
-```
+```text
 Γ; S ⊢ e₁ : T₁    Γ; S ⊢ e₂ : T₂
 ────────────────────────────────────────  [SEQ]
 Γ; S ⊢ (e₁; e₂) : T₂
@@ -379,7 +380,7 @@ When multiple expressions are combined the compiler computes the composite capab
 
 Formal rules for the two most important cases:
 
-```
+```text
 Γ; S ⊢ A : T₁    Γ; S ⊢ B : T₂
 ──────────────────────────────────  [SEQ-CAP]
 capabilities(A; B) = S_A ∪ S_B
@@ -591,6 +592,7 @@ All capability alias definitions are collected into a structured registry availa
 ### LSP extensions
 
 The language server protocol integration should expose:
+
 - Capability set in hover information for functions.
 - Inferred properties (`pure`, `deterministic`, `total`) in hover tooltips.
 - Quick-fix suggestions when a capability violation is detected (e.g., "Add `FileWrite` to the `uses` clause").
@@ -619,7 +621,7 @@ The language server protocol integration should expose:
 
 Example diagnostic:
 
-```
+```text
 error[cap-violation]: function body uses undeclared capability
   --> src/app.spore:12:5
    |
@@ -662,7 +664,7 @@ error[cap-violation]: function body uses undeclared capability
 
 Languages like Koka, Eff, and Frank support effect variables that allow abstracting over capability sets:
 
-```
+```text
 fn with_timeout[E](f: () -> T uses E) -> T uses [E, Clock]
 ```
 

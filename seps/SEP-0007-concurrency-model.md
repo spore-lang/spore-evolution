@@ -27,7 +27,7 @@ This proposal defines the concurrency model for the Spore programming language. 
 
 The core formula is:
 
-```
+```text
 Spore Concurrency = Koka Effects + Kotlin Structured Scoping
                   + Zig Explicit Resources + Spore Cost Budgets
 ```
@@ -353,7 +353,7 @@ uses [Spawn, NetRead, DbRead, DbWrite]
 
 Every `parallel_scope` creates a nursery node; every `spawn` attaches a leaf:
 
-```
+```text
 main()
  └─ parallel_scope            ← nursery A
      ├─ spawn { fetch(url1) }     ← task A1
@@ -373,7 +373,7 @@ The compiler builds this static task tree at compile time and uses it for:
 
 #### `parallel_scope` formal semantics
 
-```
+```text
 ⟦parallel_scope { e }⟧ =
     let nursery = Nursery.new()
     let result = ⟦e⟧ with nursery
@@ -395,7 +395,7 @@ Invariants:
 
 #### `spawn` formal semantics
 
-```
+```text
 ⟦spawn { e }⟧ =
     let task = nursery.register(thunk: λ(). ⟦e⟧)
     nursery.schedule(task)
@@ -600,14 +600,14 @@ The cost model (SEP-0004) defines four dimensions. This SEP defines the semantic
 
 **Sequential execution:**
 
-```
+```text
 cost(A ; B) = cost(A) + cost(B)         -- C, A, W dimensions: sum
 parallel(A ; B) = max(A.P, B.P)         -- P dimension: peak
 ```
 
 **Parallel execution (inside `parallel_scope`):**
 
-```
+```text
 cost(parallel { A, B }) = max(cost(A), cost(B))   -- C, A, W: max (wall-clock)
 parallel(parallel { A, B }) = A.P + B.P            -- P: sum (concurrent resources)
 ```
@@ -616,7 +616,7 @@ Intuition: wall-clock time of parallel tasks is determined by the slowest branch
 
 **Spawn overhead:**
 
-```
+```text
 cost(spawn { body }) = spawn_overhead + cost(body)
     where spawn_overhead = 5 op + 1 cell    -- constant, configurable in spore.toml
 ```
@@ -740,7 +740,7 @@ The compiler reports:
 
 Cancellation flows **top-down** through the task tree, complementing the **bottom-up** direction of error propagation:
 
-```
+```text
 Error propagation:       child → parent  (bubbles up)
 Cancellation propagation: parent → child  (cascades down)
 ```
@@ -998,7 +998,7 @@ Koka (Daan Leijen, Microsoft Research) pioneered the use of algebraic effect han
 
 Kotlin's `coroutineScope` + `launch`/`async` model demonstrated that structured concurrency is practical in a production language. Spore's `parallel_scope` + `spawn` is directly inspired by Kotlin's design, but replaces the coroutine machinery with effect handlers to eliminate function coloring.
 
-**Reference:** Kotlin Coroutines documentation. https://kotlinlang.org/docs/coroutines-basics.html
+**Reference:** Kotlin Coroutines documentation. <https://kotlinlang.org/docs/coroutines-basics.html>
 
 ### Python Trio — Nurseries
 
@@ -1014,13 +1014,13 @@ Swift 5.5 introduced `TaskGroup` as a structured concurrency primitive with canc
 
 OCaml 5 added native support for algebraic effect handlers, proving that the mechanism can be implemented efficiently in a compiled language. Spore's handler compilation strategy will draw from OCaml 5's implementation experience.
 
-**Reference:** OCaml 5 Effects. https://ocaml.org/manual/5.2/effects.html
+**Reference:** OCaml 5 Effects. <https://ocaml.org/manual/5.2/effects.html>
 
 ### Go — CSP channels
 
 Go's channel-based communication model (*"Don't communicate by sharing memory; share memory by communicating"*) directly inspires Spore's `Channel[T]`. Spore adds type safety (typed channels with effect declarations) and static cost analysis on top of Go's runtime model.
 
-**Reference:** Go Concurrency. https://go.dev/wiki/LearnConcurrency
+**Reference:** Go Concurrency. <https://go.dev/wiki/LearnConcurrency>
 
 ### Bob Nystrom — "What Color is Your Function?"
 

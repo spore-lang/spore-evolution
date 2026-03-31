@@ -57,7 +57,7 @@ Spore's language design creates a unique opportunity for compile-time cost analy
 
 ### The core equation
 
-```
+```text
 Compile-time cost analysis = Abstract Interpretation + Deterministic Cost Table
 ```
 
@@ -84,7 +84,7 @@ fn factorial(n: Int) -> Int {
 
 The compiler detects structural recursion on `n` (decreasing by 1 on each call) and infers:
 
-```
+```text
 ✓ structural recursion detected: n decreases by 1 on each call
   cost = n × 4 op  (1[*] + 3[call overhead])
   → O(n)
@@ -101,7 +101,7 @@ fn tree_sum(tree: Tree<Int>) -> Int {
 }
 ```
 
-```
+```text
 ✓ structural recursion detected: tree decreases to subtrees (binary)
   cost = nodes(tree) × 9 op
   → O(n)
@@ -177,7 +177,7 @@ $ sporec --query-cost merge_sort
 
 ### Summary of the three tiers
 
-```
+```text
           Coverage
   ┌────────────────────────────────────────────┐
   │  Tier 1: Structural recursion       ~70%   │  ← Fully automatic
@@ -207,7 +207,7 @@ The abstract machine maintains four independent cost dimensions:
 
 **Scalar reduction**: for signature-level `cost ≤ K`, dimensions are folded into a single scalar:
 
-```
+```text
 cost = C × 1 + A × α + W × β
 ```
 
@@ -313,7 +313,7 @@ CostExpr evaluates over **ℕ⁺ = {1, 2, 3, ...}** (positive natural numbers).
 
 Let σ: Var → ℕ⁺ be an assignment environment. The semantic function ⟦·⟧: CostExpr → (Var → ℕ⁺) → ℕ⁺ is defined as:
 
-```
+```text
 ⟦ c ⟧σ           = c                              (c ∈ ℕ⁺)
 ⟦ x ⟧σ           = σ(x)                           (x ∈ Var)
 ⟦ e₁ + e₂ ⟧σ    = ⟦e₁⟧σ + ⟦e₂⟧σ
@@ -338,7 +338,7 @@ Monotonicity guarantees: **if the inequality holds for "sufficiently large" inpu
 
 **Definition.** A function f(x₁, ..., xₙ) is *structurally recursive* if there exists i ∈ {1, ..., n} such that for every recursive call f(y₁, ..., yₙ):
 
-```
+```text
 yᵢ ≺ xᵢ   (where ≺ is a well-founded relation on type Tᵢ)
 ```
 
@@ -355,7 +355,7 @@ The compiler recognizes the following decreasing patterns:
 
 **Detection algorithm** (implemented in `spore-typeck/src/cost.rs`):
 
-```
+```text
 algorithm detect_structural_recursion(f):
     1. Extract all recursive call sites {call₁, call₂, ..., callₖ}
     2. For each callⱼ:
@@ -400,7 +400,7 @@ fn gcd(a: Int, b: Int) -> Int
 
 1. **Call-tree induction**: If `cost(recursive_call) < cost(current_call)` and the base case cost is bounded, the bound holds. Formally, given declared bound B(x) and recursive call with argument x':
 
-   ```
+   ```text
    Verify: cost_body(x) + B(x') ≤ B(x)
    ```
 
@@ -412,7 +412,7 @@ fn gcd(a: Int, b: Int) -> Int
 
 **Verification failure** produces a **warning** (not an error) — the program still compiles. This ensures gradual adoption.
 
-```
+```text
 WARNING [unverified-cost-bound] gcd's cost bound cannot be automatically verified.
   Declared: cost ≤ log(max(a, b))
   Reason: compiler cannot prove log(max(b, a % b)) < log(max(a, b))
@@ -497,7 +497,7 @@ Analysis: SCC = {is_even, is_odd}. Combined call pattern: `is_even(n) → is_odd
 
 **Step 1: max/min lifting.** Lift max/min to the top level using distribution rules:
 
-```
+```text
 e₁ + max(e₂, e₃) → max(e₁ + e₂, e₁ + e₃)
 e₁ * max(e₂, e₃) → max(e₁ * e₂, e₁ * e₃)    (valid since e₁ ≥ 1 on ℕ⁺)
 ```
@@ -515,7 +515,7 @@ Verification rules for max/min at the top level:
 
 **Step 2: Normal form conversion.** A *poly-log monomial* has the form:
 
-```
+```text
 t = c × n₁^a₁ × ... × nₖ^aₖ × log(n₁)^b₁ × ... × log(nₖ)^bₖ
 ```
 
@@ -523,7 +523,7 @@ where c ∈ ℕ⁺, aᵢ ∈ ℕ, bᵢ ∈ ℕ. We write this as the triple **(c
 
 The *normal form* of a CostExpr is a finite sum of poly-log monomials. Conversion algorithm NF:
 
-```
+```text
 NF(c)           = {(c, 0̄, 0̄)}
 NF(nᵢ)         = {(1, eᵢ, 0̄)}                              (eᵢ = i-th unit vector)
 NF(e₁ + e₂)    = NF(e₁) ∪ NF(e₂)
@@ -535,7 +535,7 @@ NF(log(nᵢ))    = {(1, 0̄, eᵢ)}
 
 Logarithm simplification (asymptotically equivalent):
 
-```
+```text
 log(e₁ * e₂) ≈ log(e₁) + log(e₂)
 log(e ^ k)   ≈ k × log(e)
 log(e₁ + e₂) ≈ log(max(e₁, e₂))
@@ -548,7 +548,7 @@ After conversion, merge like terms: monomials with the same (ā, b̄) have their
 
 **Definition 4.2 (Asymptotic dominance).** Monomial t₁ = (c₁, ā₁, b̄₁) is *dominated* by t₂ = (c₂, ā₂, b̄₂), written t₁ ≼ t₂, iff:
 
-```
+```text
 t₁ ≼ t₂  ⟺  ā₁ < ā₂  (componentwise ≤ and ≠)
            ∨  (ā₁ = ā₂ ∧ b̄₁ < b̄₂)
            ∨  (ā₁ = ā₂ ∧ b̄₁ = b̄₂ ∧ c₁ ≤ c₂)
@@ -556,7 +556,7 @@ t₁ ≼ t₂  ⟺  ā₁ < ā₂  (componentwise ≤ and ≠)
 
 **Algorithm COMPARE(NF(C), NF(B)):**
 
-```
+```text
 1. Merge like terms in NF(C) and NF(B)
 2. For each monomial sⱼ in NF(C):
      Find the highest-growth matching term tₖ in NF(B) such that sⱼ ≼ tₖ
@@ -590,6 +590,7 @@ This is in **P** (polynomial-time complexity class). ∎
 **Theorem 4.3 (Soundness).** If the algorithm outputs PASS, then there exists N₀ ∈ ℕ⁺ such that for all n̄ ∈ (ℕ⁺)ᵏ with min(n̄) ≥ N₀, we have C(n̄) ≤ B(n̄).
 
 *Proof sketch.*
+
 1. Normal form conversion preserves asymptotic equivalence (logarithm simplifications introduce only constant-factor errors).
 2. If every monomial in NF(C) is dominated by some monomial in NF(B):
    - When dominance is strict (polynomial exponent strictly less), there exists N₁ beyond which the higher-order term covers the lower-order one.
@@ -597,6 +598,7 @@ This is in **P** (polynomial-time complexity class). ∎
 3. Take N₀ = max(all per-pair Nᵢ). ∎
 
 **Conservatism.** The algorithm may return FAIL when the inequality actually holds (e.g., due to cancellation effects between terms). Mitigation:
+
 1. Sum unabsorbed terms from NF(C) and check if the aggregate is dominated by the leading term of NF(B).
 2. If still failing, attempt numerical sampling at several large values.
 
@@ -686,6 +688,7 @@ When an AI agent fills a Hole (see SEP-0003), it receives not just the type sign
 ```
 
 The agent knows:
+
 1. **What** to produce (the type)
 2. **How much** it can spend (the cost budget)
 3. **How often** the code runs (recursion context)
@@ -749,6 +752,7 @@ CostExpr is serialized as a JSON AST for tool consumption:
 ### LSP extensions
 
 The Language Server Protocol exposes:
+
 - `sporec/queryCost`: returns cost metadata for a function
 - `sporec/costBreakdown`: returns a per-expression cost tree for a function body
 - `sporec/costBudget`: for a Hole, returns the remaining cost budget
@@ -772,7 +776,7 @@ The Language Server Protocol exposes:
 
 **cost-exceeded:**
 
-```
+```text
 ERROR [cost-exceeded] bad_search's inferred cost exceeds declared bound.
   Inferred: n * log(n)
   Declared: ≤ n
@@ -786,7 +790,7 @@ ERROR [cost-exceeded] bad_search's inferred cost exceeds declared bound.
 
 **unbounded-cost:**
 
-```
+```text
 WARNING [unbounded-cost] fibonacci's cost cannot be statically determined.
   Recursion pattern: non-structural (exponential)
   Inferred complexity: O(2^n)
@@ -832,6 +836,7 @@ The cost system and capability system form a cross-validation network. If a func
 Use a full dependent type system to encode cost bounds as types, enabling machine-checked proofs.
 
 **Rejected because:**
+
 - Requires every function to carry a termination proof — too much burden for general-purpose programming.
 - 100% coverage means rejecting legitimate programs (e.g., Collatz-like functions).
 - Dramatically steeper learning curve.
@@ -841,6 +846,7 @@ Use a full dependent type system to encode cost bounds as types, enabling machin
 Rely entirely on runtime profiling and benchmarks.
 
 **Rejected because:**
+
 - Misses Spore's unique opportunity (no loops, ADTs, purity).
 - Performance regressions discovered too late.
 - No cost information for AI agents during hole-filling.
@@ -850,6 +856,7 @@ Rely entirely on runtime profiling and benchmarks.
 Skip Tier 2 — either the compiler infers the cost automatically or the function is unbounded.
 
 **Rejected because:**
+
 - Would leave ~20% of practically-bounded functions as `@unbounded`, significantly reducing the system's value.
 - Merge sort, quicksort, GCD, and many other well-known algorithms would lack cost bounds.
 
@@ -858,6 +865,7 @@ Skip Tier 2 — either the compiler infers the cost automatically or the functio
 Extend the grammar to support `n*(n-1)/2` and similar expressions.
 
 **Rejected because:**
+
 - Division introduces non-integer results and division-by-zero.
 - Subtraction breaks monotonicity (expressions can decrease as inputs grow).
 - The comparison problem becomes undecidable in general.
@@ -868,6 +876,7 @@ Extend the grammar to support `n*(n-1)/2` and similar expressions.
 Use an SMT solver (e.g., Z3) to verify `∀ n̄. C(n̄) ≤ B(n̄)`.
 
 **Rejected as the primary approach because:**
+
 - SMT solving is NP-complete in general — no polynomial-time guarantee.
 - Solver behavior is non-deterministic (different versions may give different results).
 - However, this remains a potential fallback for the compiler's "extra effort" phase after the main algorithm returns FAIL.
@@ -913,12 +922,14 @@ Cost analysis is introduced as a new compiler capability. No existing Spore code
 1. **Phase 1 (initial release):** All functions without cost annotations are implicitly treated as if cost analysis is not enabled. The compiler performs Tier 1 analysis silently and reports results only when explicitly queried (`sporec --query-cost`).
 
 2. **Phase 2 (opt-in):** Projects opt into cost checking via `spore.toml`:
+
    ```toml
    [cost]
    enabled = true
    alloc_weight = 2
    io_weight = 100
    ```
+
    Functions without cost bounds but with non-structural recursion receive warnings.
 
 3. **Phase 3 (default-on):** Cost analysis is enabled by default. Functions with unresolvable cost receive `unbounded-cost` warnings. Projects can silence with `[cost] enabled = false`.

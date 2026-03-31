@@ -21,7 +21,7 @@ This SEP specifies the type system for the Spore programming language. Spore's t
 
 The concrete type representation is the `Ty` enum:
 
-```
+```text
 Ty ::= Int | Float | Bool | Str | Unit
       | Named(name)
       | App(name, [Ty])
@@ -238,7 +238,7 @@ fn example(x: Int, y: String) -> Bool {
 
 The compiler reports:
 
-```
+```text
 Hole ?h1: expected type Int
 Hole ?h2: expected type Bool
 ```
@@ -249,7 +249,7 @@ Hole ?h2: expected type Bool
 
 The internal type representation is the `Ty` enum, defined in `spore-typeck/src/types.rs`:
 
-```
+```text
 τ ::= Int                          -- integer primitive
     | Float                        -- floating-point primitive
     | Bool                         -- boolean primitive
@@ -282,7 +282,7 @@ pub type CapSet = BTreeSet<String>;
 
 A `CapSet` is a sorted set of capability names. It appears as the third component of `Ty::Fn`:
 
-```
+```text
 Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 ```
 
@@ -295,7 +295,7 @@ Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 
 **Formal capability checking rule:**
 
-```
+```text
 Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f)
 C_caller ⊇ C_f
 ─────────────────────────────────────────
@@ -304,7 +304,7 @@ C_caller ⊇ C_f
 
 If `C_f ⊄ C_caller`, the checker emits:
 
-```
+```text
 missing capabilities [X, Y]: caller does not declare them
 ```
 
@@ -319,7 +319,7 @@ Spore uses **bidirectional type checking** with two modes:
 
 **Literals (synthesis):**
 
-```
+```text
 ─────────────────
 Γ ⊢ n ⇒ Int          (integer literal)
 
@@ -335,7 +335,7 @@ Spore uses **bidirectional type checking** with two modes:
 
 **Variable lookup (synthesis):**
 
-```
+```text
 x : τ ∈ Γ
 ──────────────
 Γ ⊢ x ⇒ τ
@@ -343,7 +343,7 @@ x : τ ∈ Γ
 
 **Function application (synthesis):**
 
-```
+```text
 Γ ⊢ f ⇒ Fn([σ₁, …, σₙ], τᵣ, C)
 Γ ⊢ eᵢ ⇐ σᵢ   for i ∈ 1..n
 C ⊆ C_current
@@ -353,7 +353,7 @@ C ⊆ C_current
 
 **Let binding (synthesis):**
 
-```
+```text
 Γ ⊢ e₁ ⇒ τ₁
 Γ, x : τ₁ ⊢ e₂ ⇒ τ₂
 ────────────────────────
@@ -362,7 +362,7 @@ C ⊆ C_current
 
 **If-else (synthesis):**
 
-```
+```text
 Γ ⊢ cond ⇐ Bool
 Γ ⊢ e_then ⇒ τ
 Γ ⊢ e_else ⇒ τ
@@ -372,7 +372,7 @@ C ⊆ C_current
 
 **Function body checking (check mode):**
 
-```
+```text
 fn f(x₁: σ₁, …, xₙ: σₙ) -> τᵣ uses [C] { body }
 
 Γ' = Γ, x₁ : σ₁, …, xₙ : σₙ
@@ -420,7 +420,7 @@ When a generic function is called, each type parameter is replaced by a fresh `T
 
 A substitution `σ : u32 → Ty` is a partial map from variable IDs to resolved types. Applying a substitution walks the type recursively:
 
-```
+```text
 apply_subst(Var(id))               = σ(id)            if id ∈ dom(σ)
 apply_subst(Var(id))               = Var(id)          otherwise
 apply_subst(Fn(ps, r, C))         = Fn(apply_subst(ps), apply_subst(r), C)
@@ -435,7 +435,7 @@ Note that `CapSet` is **not** subject to substitution — capabilities are alway
 
 The `unify` function is the heart of type inference. Given two types `expected` and `actual`, it either succeeds (possibly binding type variables) or emits an error:
 
-```
+```text
 unify(τ, τ) = ok                                        (reflexivity)
 unify(Error, _) = ok                                    (error recovery)
 unify(_, Error) = ok                                    (error recovery)
@@ -495,7 +495,7 @@ This two-pass design allows **forward references** — a function can call anoth
 
 Struct types are registered as a list of `(field_name, Ty)` pairs. Field access is checked by looking up the struct name in the registry and finding the named field:
 
-```
+```text
 Γ ⊢ e ⇒ Named(S)
 S.fields contains (f, τ_f)
 ────────────────────────────
@@ -504,7 +504,7 @@ S.fields contains (f, τ_f)
 
 Struct construction checks that all fields are present and each expression matches the declared field type:
 
-```
+```text
 S.fields = [(f₁, τ₁), …, (fₙ, τₙ)]
 Γ ⊢ eᵢ ⇐ τᵢ  for all i ∈ 1..n
 ────────────────────────────────────
@@ -515,7 +515,7 @@ S.fields = [(f₁, τ₁), …, (fₙ, τₙ)]
 
 Tuple types are represented as `Ty::Tuple(Vec<Ty>)`. Tuple construction synthesizes the type from its elements:
 
-```
+```text
 Γ ⊢ e₁ ⇒ τ₁  …  Γ ⊢ eₖ ⇒ τₖ
 ──────────────────────────────────
 Γ ⊢ (e₁, …, eₖ) ⇒ Tuple([τ₁, …, τₖ])
@@ -523,7 +523,7 @@ Tuple types are represented as `Ty::Tuple(Vec<Ty>)`. Tuple construction synthesi
 
 Tuple indexing extracts the type at a given position:
 
-```
+```text
 Γ ⊢ e ⇒ Tuple([τ₀, …, τₖ₋₁])
 0 ≤ i < k
 ────────────────────────────────
@@ -534,7 +534,7 @@ Tuple indexing extracts the type at a given position:
 
 Function types are `Ty::Fn(params, ret, CapSet)`:
 
-```
+```text
 Fn([σ₁, …, σₙ], τᵣ, C)
 ```
 
@@ -555,7 +555,7 @@ Expr::Var(name) => {
 
 **Display format for function types:**
 
-```
+```text
 (Int, String) -> Bool
 (Int) -> Int uses [FileRead, NetWrite]
 ```
@@ -579,7 +579,7 @@ The current implementation uses **equality-based** type compatibility (no subtyp
 
 **Arithmetic operators** (`+`, `-`, `*`, `/`):
 
-```
+```text
 Γ ⊢ e₁ ⇒ τ    Γ ⊢ e₂ ⇒ τ
 τ ∈ {Int, Float}
 ────────────────────────────
@@ -588,7 +588,7 @@ The current implementation uses **equality-based** type compatibility (no subtyp
 
 **Comparison operators** (`==`, `!=`, `<`, `<=`, `>`, `>=`):
 
-```
+```text
 Γ ⊢ e₁ ⇒ τ    Γ ⊢ e₂ ⇒ τ
 ────────────────────────────
 Γ ⊢ e₁ ⊗ e₂ ⇒ Bool
@@ -596,7 +596,7 @@ The current implementation uses **equality-based** type compatibility (no subtyp
 
 **Boolean operators** (`&&`, `||`):
 
-```
+```text
 Γ ⊢ e₁ ⇐ Bool    Γ ⊢ e₂ ⇐ Bool
 ──────────────────────────────────
 Γ ⊢ e₁ ∧∨ e₂ ⇒ Bool
@@ -604,7 +604,7 @@ The current implementation uses **equality-based** type compatibility (no subtyp
 
 **Unary negation** (`-`):
 
-```
+```text
 Γ ⊢ e ⇒ τ    τ ∈ {Int, Float}
 ───────────────────────────────
 Γ ⊢ -e ⇒ τ
@@ -612,7 +612,7 @@ The current implementation uses **equality-based** type compatibility (no subtyp
 
 **Logical not** (`!`):
 
-```
+```text
 Γ ⊢ e ⇐ Bool
 ──────────────
 Γ ⊢ !e ⇒ Bool
@@ -642,7 +642,7 @@ The decidable predicate language includes:
 
 **L0 checking rule:**
 
-```
+```text
 Γ ⊢ e ⇒ base_type
 eval(predicate[self ↦ e]) = true
 ────────────────────────────────
@@ -787,7 +787,7 @@ Every diagnostic is emitted in both machine-readable (JSON v0) and human-readabl
 
 For each hole, the checker reports:
 
-```
+```text
 Hole ?h1 in function `example`:
   expected type: Int
   available bindings: x: Int, y: String
@@ -819,6 +819,7 @@ Hole ?h1 in function `example`:
 ### Alternative 2: Hindley–Milner global inference
 
 **Rejected.** Full H-M inference infers function signatures, but this conflicts with Spore's "signatures are gravity centers" principle. Inferred signatures are:
+
 - Not visible to Agents reading code.
 - Unstable under refactoring (adding a statement can change the inferred type).
 - Hard to explain when inference fails.
@@ -828,6 +829,7 @@ Hole ?h1 in function `example`:
 ### Alternative 3: Higher-kinded types
 
 **Rejected.** HKTs would allow abstracting over `Option`, `List`, `Result`, etc. generically. However:
+
 - Capabilities replace the primary HKT use case (monad-based effect sequencing).
 - GATs cover 80% of the remaining use cases.
 - HKT error messages are notoriously difficult to understand.
@@ -838,6 +840,7 @@ Hole ?h1 in function `example`:
 ### Alternative 4: SMT-backed refinement types (Liquid Haskell style)
 
 **Rejected.** SMT solvers are:
+
 - Unpredictable (slight code changes can cause timeouts).
 - Inscrutable (error messages say "could not prove P" with no guidance).
 - Heavy (Z3 is a large dependency).
@@ -847,6 +850,7 @@ Hole ?h1 in function `example`:
 ### Alternative 5: Effect system via monads or algebraic effects
 
 **Rejected as primary mechanism.** Spore unifies capabilities and traits instead of using a separate effect system. This provides:
+
 - One mechanism for both "what does this type support" and "what does this context provide."
 - Reuse of the trait resolver and coherence checker.
 - Simpler mental model for users.
@@ -868,6 +872,7 @@ This is compatible with the current design but not yet implemented. The string-b
 ### Rust
 
 Spore's type system is most directly influenced by Rust:
+
 - Nominal types with trait bounds.
 - Associated types and GATs.
 - Sealed enums with exhaustive pattern matching.

@@ -231,7 +231,7 @@ fn identity[T](x: T) -> T {
 
 The full signature order is:
 
-```
+```text
 fn name[T](params) -> ReturnType ! [ErrorSet]
 where T: Bound
 uses [capabilities]
@@ -484,7 +484,7 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 
 **Integers:**
 
-```
+```text
 42          // decimal
 -123        // negative decimal
 1_000_000   // underscore separators
@@ -497,7 +497,7 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 
 **Floats:**
 
-```
+```text
 3.14
 -0.001
 1.0e-10
@@ -512,7 +512,7 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 
 **Strings:**
 
-```
+```text
 "Hello, World!"                    // regular string
 r"C:\Users\path\to\file"          // raw string (no escapes)
 f"Hello {name}, age {age}"        // format string
@@ -836,7 +836,7 @@ BinDigit        = "0" | "1" ;
 
 The function signature system is the heart of Spore's design. The clauses appear in this canonical order:
 
-```
+```text
 fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 [where <GenericName>: <Constraint>, ...]
 [uses [<Capability>, ...]]
@@ -893,6 +893,7 @@ All control flow constructs are expressions that produce values.
 **Lambda expressions** use `|params| body` syntax. Closures capture variables from the enclosing scope.
 
 **Pipe expressions** desugar as follows:
+
 - `x |> f` → `f(x)`
 - `x |> f(y, z)` → `f(x, y, z)`
 - `x |> f(_, y)` → `f(x, y)`
@@ -1015,7 +1016,7 @@ Any change to the following signature components produces a new snapshot hash an
 
 The Spore AST is designed as a regular tree with strongly typed nodes. Key node types:
 
-```
+```text
 Program
 ├── ImportDecl { path, alias? }
 ├── ModuleDecl { name, uses, items[] }
@@ -1080,7 +1081,8 @@ The AST serializes naturally to JSON, S-expressions, or any tree-structured form
 Spore's explicit syntax enables highly specific error messages:
 
 **Missing capability:**
-```
+
+```text
 error[E0301]: function `fetch_data` uses capability `NetRead` but does not declare it
   --> src/api.spore:12:5
    |
@@ -1092,7 +1094,8 @@ error[E0301]: function `fetch_data` uses capability `NetRead` but does not decla
 ```
 
 **Non-exhaustive match:**
-```
+
+```text
 error[E0401]: non-exhaustive match expression
   --> src/main.spore:25:5
    |
@@ -1103,7 +1106,8 @@ error[E0401]: non-exhaustive match expression
 ```
 
 **Loop keyword used:**
-```
+
+```text
 error[E0101]: `for` loops are not supported in Spore
   --> src/main.spore:10:5
    |
@@ -1145,6 +1149,7 @@ The parser can recover from common errors:
 ### Loop constructs
 
 We considered including a minimal loop construct (e.g., Rust's `loop` or a `foreach`) but rejected it because:
+
 - It would undermine the functional-first philosophy.
 - TCO guarantee makes recursion safe and efficient.
 - HOFs (`map`, `fold`, `filter`) cover the vast majority of iteration patterns.
@@ -1153,6 +1158,7 @@ We considered including a minimal loop construct (e.g., Rust's `loop` or a `fore
 ### Angle brackets for generics (`List<Int>`)
 
 Rejected because:
+
 - Angle brackets create parsing ambiguity with comparison operators (`a < b > c`).
 - Square brackets align with Python type hints (`List[int]`) which are increasingly familiar.
 - Gleam and other modern languages have validated this choice.
@@ -1160,6 +1166,7 @@ Rejected because:
 ### `with` clause for explicit effect properties
 
 The original design included `with [pure, deterministic]` for explicit property annotation. This was removed because:
+
 - Properties are fully deterministic given the `uses` set — annotation is redundant.
 - Redundant annotations can diverge from reality, creating false confidence.
 - The compiler can display inferred properties in IDE hover and `--explain` output.
@@ -1167,6 +1174,7 @@ The original design included `with [pure, deterministic]` for explicit property 
 ### Significant whitespace (Python/Haskell style)
 
 Rejected because:
+
 - Whitespace sensitivity hinders machine generation and transformation.
 - Copy-paste errors are harder to debug.
 - Curly braces provide explicit, unambiguous scope boundaries.
@@ -1174,6 +1182,7 @@ Rejected because:
 ### `do` notation for monadic composition
 
 Rejected in favor of the `?` operator and `|>` pipes because:
+
 - `?` is simpler for the common case of error propagation.
 - `|>` provides general-purpose composition without requiring monad understanding.
 - Keeping the concept count low aids learnability.
@@ -1181,6 +1190,7 @@ Rejected in favor of the `?` operator and `|>` pipes because:
 ### Rust-style `impl` blocks for methods
 
 Spore uses inline `implements` on struct declarations and `self` as a regular parameter in capabilities. Separate `impl` blocks were considered but rejected to:
+
 - Keep type-and-implementation co-located for readability.
 - Simplify the module structure.
 - Align with Roc's approach.
@@ -1188,6 +1198,7 @@ Spore uses inline `implements` on struct declarations and `self` as a regular pa
 ### Exception-based error handling
 
 Rejected because:
+
 - Invisible control flow violates the principle of explicit effects.
 - Error sets in signatures enable static analysis and agent reasoning.
 - `?` provides comparable ergonomics to exceptions for the happy path.
@@ -1212,7 +1223,7 @@ Influence on: square brackets for generics, use of `|>` pipe operator as a core 
 
 Influence on: the emphasis on helpful error messages, exhaustive pattern matching as a reliability tool, the no-runtime-exception philosophy, and progressive disclosure of type system features.
 
-### OCaml / F#
+### OCaml / F
 
 Influence on: algebraic data types with `|` variant syntax, pattern matching with guards, expression-based design, the pipe operator (`|>` originates from F#).
 

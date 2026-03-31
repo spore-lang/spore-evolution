@@ -120,6 +120,7 @@ alias Inv = billing.types.Invoice
 ```
 
 Key rules:
+
 - `import` operates on **modules** only. You cannot import a function directly.
 - `alias` operates on **items** only. You cannot alias a module.
 - No wildcard imports (`import billing.*` is not supported).
@@ -150,7 +151,7 @@ Visibility applies uniformly to functions, types, and aliases.
 
 A **package** is a directory containing a `spore.toml` manifest:
 
-```
+```text
 my-billing-lib/
 ├── spore.toml              -- package manifest
 ├── src/
@@ -200,7 +201,7 @@ The same application code can run on different Platforms—CLI, Web, WASM, Embed
 
 The compiler maps `.spore` files to modules using the path relative to `src/`:
 
-```
+```text
 module_name = path.relative_to("src/")
                   .strip_extension(".spore")
                   .replace("/", ".")
@@ -216,7 +217,7 @@ The compiler builds a directed acyclic graph (DAG) of module dependencies:
 2. Verify no circular dependencies exist (standard topological sort; cycles are compile errors).
 3. Determine topological build order. Modules at the same level compile in parallel.
 
-```
+```text
 $ sporec build --show-order
 
 Build order (topological):
@@ -236,7 +237,7 @@ Within a single module, functions may reference each other regardless of declara
 
 #### Import grammar (formal)
 
-```
+```text
 import_decl    ::= 'import' module_path ('as' IDENT)?
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
@@ -251,7 +252,7 @@ Every function carries two BLAKE3 hashes:
 
 **Signature hash (`sig`)**:
 
-```
+```text
 sig = BLAKE3(canonicalize(
     function_name,
     parameter_names,
@@ -269,7 +270,7 @@ The canonicalization process removes whitespace, sorts lexicographically where o
 
 **Implementation AST hash (`impl`)**:
 
-```
+```text
 impl = BLAKE3(compiled_AST(function_body))
 ```
 
@@ -325,7 +326,7 @@ Compatibility checking uses only `sig`: if `sig` is unchanged, dependents need n
 
 When a signature changes, all downstream modules referencing the old `sig` are flagged:
 
-```
+```text
 $ sporec check
 
 [warning] signature changed: billing.tax.calculate
@@ -377,7 +378,7 @@ alias Compute = billing.invoice.compute_totals          -- private alias
 
 Attempting to access a private item from another module:
 
-```
+```text
 [error] visibility violation at src/api/handler.spore:15
   billing.invoice.compute_totals is private
   ─── it is only visible within module billing.invoice
@@ -387,7 +388,7 @@ Attempting to access a private item from another module:
 
 Attempting to access a `pub(pkg)` item from an external package:
 
-```
+```text
 [error] visibility violation at src/handler.spore:8
   billing.invoice.validate is pub(pkg)
   ─── it is only visible within the 'my-billing-lib' package
@@ -465,6 +466,7 @@ main = { git = "https://github.com/spore-platform/cli", version = "1.0.0" }
 ```
 
 The compiler verifies:
+
 - Every capability used by application code is handled by some Platform.
 - The entry point type matches the Platform's requirement.
 - No two Platforms handle the same capability (unless priorities are explicit).
@@ -530,7 +532,7 @@ Test result: ok. 3 passed; 0 failed
 3. **Capabilities are explicit**. An auditor can inspect any function's `uses` clause to know exactly what it can do.
 4. **Supply-chain safety**: A downloaded package declaring `uses [Compute]` is provably pure.
 
-```
+```text
 $ spore audit billing-lib
 
 Package: billing-lib
@@ -616,7 +618,7 @@ http = {
 
 The `sig` hash identifies the API contract. The `impl` hash pins the exact implementation. There is no version range negotiation—no SAT solver is needed. Resolution is a simple hash lookup:
 
-```
+```text
 1. Read [dependencies] from spore.toml
 2. For each dependency:
    a. Check .spore-lock for cached hash
@@ -777,7 +779,7 @@ The compiler generates a capability routing table mapping each effect to its han
 
 All diagnostics follow a consistent pattern:
 
-```
+```text
 [error|warning|info] <category> at <location>
   <primary message>
   ─── <explanation>
@@ -883,6 +885,7 @@ spore migrate --from package.json --to spore.toml
 ```
 
 The tool:
+
 1. Reads the existing manifest.
 2. Resolves Git tags corresponding to version numbers.
 3. Computes BLAKE3 `sig` and `impl` hashes for each dependency.

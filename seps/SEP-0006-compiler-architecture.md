@@ -95,7 +95,7 @@ sporec --query-hole tax_logic --json
 
 **On success:**
 
-```
+```text
 $ sporec build src/main.spore
   Compiling main (src/main.spore)
   Compiling http (src/net/http.spore)
@@ -105,7 +105,7 @@ $ sporec build src/main.spore
 
 **On error (default mode):**
 
-```
+```text
 error[E0301]: type mismatch
   --> src/billing.spore:42:22
    |
@@ -117,7 +117,7 @@ help: try `Money.from_string("fifty dollars")`
 
 **In watch mode:**
 
-```
+```text
 $ spore watch
 [watch] Watching project: ./my-project (42 modules)
 [watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
@@ -148,7 +148,7 @@ verbose adds analysis detail to default; default is the minimal actionable view.
 
 ### Pipeline overview
 
-```
+```text
 Source Text (.spore files)
     │
     ▼
@@ -228,7 +228,7 @@ Properties:
 
 Core data structures:
 
-```
+```text
 Spanned<T> { node: T, span: Span }
 Span { file: FileId, start: u32, end: u32 }
 
@@ -319,7 +319,7 @@ There is **no separate low-level IR**. Cranelift IR serves as the LIR:
 
 ### Design rationale for IR layer count
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Why 3 IR layers, not more?                       │
 ├─────────────────────┬───────────────────────────────────────────────┤
@@ -374,7 +374,7 @@ fn codegen(db: &dyn Db, typed_hir: TypedHir) -> CompiledModule { ... }
 
 The incremental compilation strategy relies on two content-addressed hashes:
 
-```
+```text
                     ┌──────────────────────┐
                     │    File changed?     │
                     └──────────┬───────────┘
@@ -422,7 +422,7 @@ order. At each level, it recompiles affected modules in parallel, then checks
 whether *their* sig hashes changed before propagating further. This ensures
 minimal recompilation:
 
-```
+```text
 fn compile_batch(modules: Set<ModuleId>, graph: DepGraph):
     let levels = topological_levels(modules, graph)
     for level in levels:
@@ -451,7 +451,7 @@ spore watch --jobs 4               # Specify parallelism
 
 File system events are coalesced before triggering recompilation:
 
-```
+```text
 t=0ms    File A changed
 t=20ms   File B changed  ─┐ debounce window (100ms)
 t=80ms   File C changed   │
@@ -538,7 +538,7 @@ Watch mode **never exits** (except on Ctrl+C). Recovery behavior:
 
 Rust-inspired, concise, color-coded:
 
-```
+```text
 <severity>[<code>]: <headline>
   --> <file>:<line>:<col>
    |
@@ -569,7 +569,7 @@ Appends additional analysis blocks after each diagnostic:
 
 Example:
 
-```
+```text
 error[E0301]: type mismatch
   --> src/billing.spore:42:22
    |
@@ -717,7 +717,7 @@ programmatic reasoning without parsing human-readable text. Key fields:
 
 ### Agent hole-filling workflow
 
-```
+```text
 1. Start  spore watch --json
 2. Parse initial hole list from NDJSON stream
 3. Select a  ready_to_fill  hole → generate implementation → write to file
@@ -755,7 +755,7 @@ Fix applicability categories:
 
 ### LSP integration architecture
 
-```
+```text
 ┌──────────────┐   LSP Protocol   ┌──────────────┐  stdin/stdout  ┌──────────────┐
 │  Editor/IDE  │ ←──────────────→ │  Spore LSP   │ ←────────────→ │ spore watch  │
 │              │                   │  Server       │    (NDJSON)    │ --json       │
@@ -803,7 +803,7 @@ feedback matters.
 
 Every diagnostic follows the anatomy:
 
-```
+```text
 <severity>[<code>]: <headline message>
   --> <file>:<line>:<col>
    |
@@ -822,7 +822,7 @@ encouraged for complex errors.
 
 **Type error:**
 
-```
+```text
 error[E0301]: type mismatch
   --> src/billing.spore:42:22
    |
@@ -834,7 +834,7 @@ help: try `Money.from_string("fifty dollars")`
 
 **Capability violation:**
 
-```
+```text
 error[C0101]: undeclared capability
   --> src/report.spore:27:5
    |
@@ -848,7 +848,7 @@ help: add a `uses [NetRead]` clause to `fetch_data`
 
 **Cost violation:**
 
-```
+```text
 error[K0101]: cost budget exceeded
   --> src/analytics.spore:55:5
    |
@@ -862,7 +862,7 @@ help: filter `records` before scanning, or increase budget to `cost ≤ 10000`
 
 **Hole report:**
 
-```
+```text
 note[H0101]: hole `tax_logic` requires filling
   --> src/tax.spore:12:5
    |
@@ -1053,7 +1053,7 @@ emitted.
 If Spore later needs a MIR (e.g., for advanced optimization or analysis), it
 would be inserted between TypedHIR and Cranelift IR:
 
-```
+```text
 AST → HIR → TypedHIR → [future MIR] → Cranelift IR → Native
 ```
 
