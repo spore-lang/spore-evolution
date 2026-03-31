@@ -26,7 +26,7 @@ hooks = [
 repo = "https://github.com/rvben/rumdl-pre-commit"
 rev = "v0.1.63"
 hooks = [
-  { id = "rumdl" },
+  { id = "rumdl-fmt" },
 ]
 
 [[repos]]

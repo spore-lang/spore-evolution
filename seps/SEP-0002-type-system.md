@@ -847,6 +847,7 @@ fn safe_unwrap[T](opt: Option[T]) -> T {
 ```
 
 `Never` is the natural type for:
+
 - `panic(...)` and `abort(...)` calls
 - Diverging expressions (non-terminating recursion)
 - Exhaustive match arms that provably never execute

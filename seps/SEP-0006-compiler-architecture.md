@@ -1459,6 +1459,7 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Capability System integration
 
 Three enforcement levels:
+
 1. **Function level** (`C0101`): body uses operations beyond declared `uses`
 2. **Module level** (`C0102`): function `uses` exceeds module ceiling
 3. **Platform level** (`C0201`): package requests capabilities Platform does not grant
@@ -1755,7 +1756,7 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
     the PoC timeline and determines how much behavior can be validated before
     Cranelift codegen is ready.
 
-#### Diagnostic suppression mechanism
+### Diagnostic suppression mechanism
 
 Specific diagnostics can be suppressed using inline annotations:
 
@@ -1787,5 +1788,3 @@ Suppression is limited to **warnings only** — errors and notes cannot be suppr
 | **cost annotation** | A declared upper bound on a function's computational cost (`cost ≤ K`) |
 | **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
 | **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |
-
-

@@ -521,16 +521,19 @@ error[H0301]: circular hole dependency detected
 When a circular dependency is detected, the compiler suggests three strategies:
 
 1. **Add type annotation:** Place an explicit type annotation on one hole in the cycle, breaking the type dependency:
+
    ```text
    help: e.g., ?validate_order : ValidatedOrder
    ```
 
 2. **Split function:** Move the holes into separate functions. Each function's signature provides concrete type information, eliminating the circular inference:
+
    ```text
    help: extract ?validate_order into a standalone function with an explicit signature
    ```
 
 3. **Introduce intermediate binding:** Add a `let` binding with a concrete type between the holes, breaking the value dependency chain:
+
    ```text
    help: add `let intermediate: ConcreteType = ...` between the dependent holes
    ```
@@ -595,7 +598,7 @@ Therefore Lₖ₊₁ is exactly the set of newly fillable holes at round k+1. �
 | Parallel scheduling | O(\|V\|) | Traverse in-degree array to find ready set |
 | JSON serialization | O(\|V\| + \|E\|) | Linear scan of graph structure |
 
-**Space complexity:** O(|V| + |E|) for the graph structure and in-degree table.
+**Space complexity:** O(\|V\| + \|E\|) for the graph structure and in-degree table.
 
 #### Parallel Fill
 

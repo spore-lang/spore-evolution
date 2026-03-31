@@ -694,9 +694,9 @@ $ sporec check src/billing/invoice.spore
 **Full workflow**:
 
 ```bash
-$ sporec check src/              # see [info] diagnostics suggesting capabilities
-$ sporec --fixes src/            # auto-apply all capability declarations
-$ sporec check src/              # clean: no more [info] suggestions
+sporec check src/              # see [info] diagnostics suggesting capabilities
+sporec --fixes src/            # auto-apply all capability declarations
+sporec check src/              # clean: no more [info] suggestions
 ```
 
 The `--fixes` flag writes the inferred capability declaration as the first line of the module file.
@@ -1391,7 +1391,7 @@ Creating a new Platform follows six steps:
 **Step 1**: Initialize the Platform project.
 
 ```bash
-$ spore init my-platform --type platform
+spore init my-platform --type platform
 ```
 
 **Step 2**: Define the Platform contract in `platform.spore`:
