@@ -73,7 +73,7 @@ If a function needs no capabilities it is *pure* and the `uses` clause may be om
 fn add(a: Int, b: Int) -> Int {
     a + b
 }
--- equivalent to: fn add(a: Int, b: Int) -> Int uses [] { a + b }
+// equivalent to: fn add(a: Int, b: Int) -> Int uses [] { a + b }
 ```
 
 ### Built-in atomic capabilities
@@ -135,8 +135,8 @@ Higher-order combinators such as `map`, `filter`, and `fold` accept **only pure 
 ```spore
 fn process_scores(scores: List[Int]) -> List[String] {
     scores
-        .filter(|s| s >= 60)              -- pure: (Int) -> Bool
-        .map(|s| format("Pass: {}", s))   -- pure: (Int) -> String
+        .filter(|s| s >= 60)              // pure: (Int) -> Bool
+        .map(|s| format("Pass: {}", s))   // pure: (Int) -> String
 }
 ```
 
@@ -146,7 +146,7 @@ Attempting to pass an effectful closure is a compile error:
 fn bad_example(scores: List[Int]) -> List[Unit]
 uses [FileWrite]
 {
-    -- ❌ ERROR: map requires a pure closure, but this closure uses [FileWrite]
+    // ❌ ERROR: map requires a pure closure, but this closure uses [FileWrite]
     scores.map(|s| write_file("log.txt", s.to_string()))
 }
 ```
@@ -162,7 +162,7 @@ uses [NetRead, Spawn]
     parallel_scope {
         let tasks = urls.map(|url| {
             spawn {
-                -- spawn body uses [NetRead], ⊆ parent {NetRead, Spawn}  ✓
+                // spawn body uses [NetRead], ⊆ parent {NetRead, Spawn}  ✓
                 http.get(url)
             }
         })
@@ -191,6 +191,99 @@ The compiler automatically derives semantic properties from the declared capabil
 | `uses [NetRead, Spawn]` | ¬pure, deterministic |
 
 (*total requires a separate termination analysis; see Reference-level explanation §5.4.)
+
+### Incomplete functions — missing `uses` declarations
+
+A function that calls operations requiring capabilities but does **not** declare a `uses` clause is an *incomplete function*. The compiler treats this as an error with a fix suggestion:
+
+```spore
+fn save_data(data: Data) -> Unit {
+    write_file("out.txt", serialize(data))
+}
+```
+
+```text
+error[cap-violation]: function body uses undeclared capability
+  --> src/storage.spore:1:1
+   |
+ 1 | fn save_data(data: Data) -> Unit {
+   |    ^^^^^^^^^ no `uses` clause declared
+ 2 |     write_file("out.txt", serialize(data))
+   |     ^^^^^^^^^^ requires FileWrite
+   |
+   = declared: [] (pure — no `uses` clause)
+   = required: [FileWrite]
+   = excess:   [FileWrite]
+   = help: add a `uses` clause to the function signature:
+   |
+ 1 | fn save_data(data: Data) -> Unit
+ 2 | uses [FileWrite]
+   |
+```
+
+Running `sporec --fixes` auto-inserts the missing `uses` clause.
+
+### Module-level `uses` declarations
+
+A module may declare its capability ceiling with `module X uses [...]`:
+
+```spore
+module billing uses [NetRead, NetWrite, StateRead, StateWrite]
+```
+
+All functions within the module are constrained: their `uses` sets must be subsets of the module-level set. If a function exceeds the module ceiling the compiler emits a `cap-narrowing-violation` error.
+
+The module-level `uses` clause is **optional**. When omitted the compiler auto-infers the module's capability ceiling as the union of all its functions' capability sets. Running `sporec --fixes` inserts the inferred declaration.
+
+### `@allows` — restricting Hole candidates
+
+The `@allows` annotation constrains which functions an AI agent (or developer) may use to fill a Hole. It acts as a filter on `candidate_functions` in the `HoleReport`:
+
+```spore
+fn process_input(raw: String) -> SafeInput ! [ValidationError] {
+    @allows[validate, sanitize]
+    ?clean_input
+}
+```
+
+The generated `HoleReport` includes the restriction:
+
+```json
+{
+  "hole": "clean_input",
+  "expected_type": "SafeInput",
+  "allows": ["validate", "sanitize"],
+  "candidate_functions": [
+    "validate(raw: String) -> SafeInput ! [ValidationError]",
+    "sanitize(raw: String) -> SafeInput ! [ValidationError]"
+  ]
+}
+```
+
+Without `@allows`, all functions matching the type and capability constraints appear. With `@allows`, the candidate list is further filtered to only the named functions.
+
+### Pure recursive function example — fibonacci
+
+A pure recursive function requires no annotations:
+
+```spore
+fn fibonacci(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        n => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+```
+
+Compiler inference output:
+
+```text
+uses []
+// auto-inferred: pure, deterministic
+// total: structural recursion on n (decreasing) — provable
+cost ≤ O(2^n)
+```
 
 ---
 
@@ -280,6 +373,22 @@ $$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \empt
 $$\mathcal{P}(\text{deterministic}, S) = \begin{cases} \text{true} & \text{if } S \cap \{\text{Clock, Random}\} = \emptyset \\ \text{false} & \text{otherwise} \end{cases}$$
 
 $$\mathcal{P}(\text{total}, S) = \text{determined by a separate termination analysis (see §5.4)}$$
+
+#### 5.0 Edge cases in the `pure` formula
+
+The `𝒫(pure, S)` function has a gap: when `S` is non-empty but contains only capabilities outside the I/O set `{FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite}`, neither the `true` nor the `false` case applies directly. The following clarifications apply:
+
+| Capability set S | pure? | Rationale |
+|---|---|---|
+| `{}` | true | No capabilities at all |
+| `{Compute}` | true | `Compute` is not an I/O capability; it marks non-trivial pure computation |
+| `{Clock}` | false | Clock reads the external world (system time) |
+| `{Random}` | false | Random reads external entropy |
+| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
+| `{Exit}` | false | `exit` terminates the process — an observable external effect |
+| `{Compute, Spawn}` | true | Neither is an I/O capability |
+
+The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Compute, Spawn}`. All other non-empty capability sets that intersect with any capability outside this "pure-compatible" subset yield `𝒫(pure, S) = false`.
 
 #### 5.1 Implication chain
 
@@ -401,6 +510,8 @@ Spawn ∈ S_scope    S_body ⊆ S_scope
 Γ; S_scope ⊢ spawn { body } : Task[T]
 ```
 
+> **Note on spawn purity.** The `spawn` expression itself is **pure** — it merely creates a task descriptor (of type `Task[T]`). No side effect is executed at the point of `spawn`; the effect occurs when the task is later scheduled. This is why a closure containing only `spawn { ... }` satisfies `uses []` when passed to `map` or other pure-closure-requiring combinators.
+
 ### 9. Capability checking algorithm
 
 The compiler performs capability checking during type-checking as a single pass:
@@ -427,10 +538,10 @@ A closure defined within a context with capability set *S* has an inferred capab
 fn example() -> Unit
 uses [FileRead, NetRead]
 {
-    -- Inferred type: (String) -> Data uses [NetRead]
+    // Inferred type: (String) -> Data uses [NetRead]
     let fetch_fn = |url| http.get(url)
 
-    -- Inferred type: (Int) -> Int uses []  (pure)
+    // Inferred type: (Int) -> Int uses []  (pure)
     let double = |x| x * 2
 }
 ```
@@ -461,9 +572,36 @@ $$S_{\text{fill}} \subseteq S_{\text{available}}$$
 
 The Hole system filters candidate functions so that only those whose `uses S` satisfies `S ⊆ S_available` appear in the suggestion list.
 
+#### 11.1 Hole capability-violation diagnostic
+
+When an agent or developer fills a Hole with code that exceeds the available capabilities, the compiler emits a detailed diagnostic:
+
+```text
+ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised capabilities:
+  --> src/service.spore:15:5
+   |
+15 |     ?fetch_logic    // filled with: fetch_and_save(url)
+   |     ^^^^^^^^^^^^ hole fill exceeds available capabilities
+   |
+   = available capabilities: [NetRead]
+   = fill code requires:     [NetRead, FileWrite]
+   = excess capabilities:    [FileWrite]
+   = help: either add FileWrite to the enclosing function's `uses` clause,
+     or choose a candidate that only requires [NetRead]
+```
+
 ### 12. Interaction with the cost model
 
-Capability sets provide hard upper-bound constraints on cost dimensions:
+The cost model maintains a **four-dimensional cost vector**: `(compute, alloc, io, parallel)`.
+
+| Dimension | Abbreviation | Meaning | Unit |
+|---|---|---|---|
+| Compute | `C` | CPU operation steps | op (operation) |
+| Allocation | `A` | Heap memory allocation | cell (abstract memory unit) |
+| I/O | `W` | Side-effect / external call count | call |
+| Parallelism | `P` | Parallel execution width | lane |
+
+Capability sets provide hard upper-bound constraints on these cost dimensions:
 
 | Condition | Cost dimension constraint |
 |---|---|
@@ -787,3 +925,22 @@ This currently works only with pure `f`. If `f` has capabilities, should `apply`
 ### 8. Runtime capability tokens
 
 Should capability tokens have a runtime representation (e.g., for dependency injection in tests), or are they purely a compile-time concept? A hybrid model where capabilities are erased by default but can be reified for testing purposes may be desirable.
+
+---
+
+## Appendix A: Formal notation quick reference
+
+| # | Notation | Meaning |
+|---|----------|---------|
+| 1 | **E** | Universe of atomic capabilities |
+| 2 | S, S₁, S₂ | Capability sets (finite subsets of **E**) |
+| 3 | {} or ∅ | Empty capability set (pure function) |
+| 4 | S₁ ⊆ S₂ | S₁ is a subset of S₂ |
+| 5 | S₁ ∪ S₂ | Union of S₁ and S₂ |
+| 6 | S₁ ∩ S₂ | Intersection of S₁ and S₂ |
+| 7 | (T → R uses S) | Function type: parameter T, return R, capability set S |
+| 8 | Γ; S ⊢ e : T | Typing judgement: under context Γ and capability set S, expression e has type T |
+| 9 | 𝒫(prop, S) | Property inference function: determines property `prop` from capability set S |
+| 10 | <: | Subtype relation |
+| 11 | (C, A, W, P) | Four-dimensional cost vector: compute(op), alloc(cell), io(call), parallel(lane) |
+| 12 | `capability C = [A₁, ..., Aₙ]` | Named alias definition expanding to a flat set of atomic capabilities |

@@ -77,7 +77,6 @@ A hole is written with a `?` prefix followed by an identifier. Holes can appear 
 
 ```spore
 fn calculate_tax(income: Money, region: Region) -> Money ! [InvalidRegion]
-with [pure, deterministic]
     uses [TaxTable]
     cost ≤ 500
 {
@@ -101,7 +100,6 @@ A function may contain any number of independently named holes:
 
 ```spore
 fn reconcile(ledger: Ledger, txns: Vec<Tx>) -> Ledger ! [Mismatch]
-with [pure]
     cost ≤ 5000
 {
     let grouped     = group_by_account(txns)
@@ -115,14 +113,13 @@ Holes can also appear nested inside expressions, function arguments, and match a
 
 ```spore
 fn render(page: Page) -> Html ! [TemplateError]
-with [pure]
     uses [Templates]
     cost ≤ 800
 {
-    let nav = render_nav(?nav_items)                 -- hole as argument
+    let nav = render_nav(?nav_items)                 // hole as argument
     let content = match page.kind {
         Article(a)     => render_article(a),
-        Gallery(g)     => ?gallery_renderer,          -- hole in match arm
+        Gallery(g)     => ?gallery_renderer,          // hole in match arm
         _              => render_fallback(page),
     }
     compose(nav, content)
@@ -157,7 +154,6 @@ fn generate_invoice(
     items: Vec<LineItem>,
     tax_region: TaxRegion,
 ) -> Invoice ! [TaxCalculationError, InvalidLineItem]
-with [pure, deterministic]
     uses [TaxTable]
     cost ≤ 5000
 {
@@ -237,7 +233,9 @@ pub struct HoleInfo {
 }
 ```
 
-The `HoleReport` aggregates all holes in a module, with `to_json()` for machine consumption (no serde dependency required).
+**HoleInfo vs HoleReport:** `HoleInfo` is the **compiler-internal** representation (Rust struct in `spore-typeck`), while `HoleReport` is the **JSON output format** for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` via `to_json()` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
+
+The `HoleReport` aggregates all holes in a module, with `to_json()` for machine consumption. Hand-rolled JSON serialization is used in v0.1 to minimize dependencies; serde migration is tracked as future work (see Unresolved Questions §10).
 
 ### HoleReport v0.3
 
@@ -261,6 +259,36 @@ HoleReport v0.3 is a **superset** of v0.2. The schema version advances from `"sp
 | `candidates` | Functions in scope whose return type matches the hole's expected type |
 | `dependent_holes` | Holes that become reachable when this hole is filled |
 | `enclosing_function` | Full signature context of the containing function |
+
+#### Hole Type Inference Rule
+
+A hole's type is determined by the **intersection of all constraints** imposed by its context. Constraints flow from:
+
+1. **Let-binding annotations:** `let x: T = ?h` constrains `?h` to type `T`
+2. **Return position:** A hole in tail position inherits the function's return type
+3. **Function arguments:** `f(?h)` constrains `?h` to the parameter type of `f`
+4. **Match arms:** A hole in a match arm must have the same type as sibling arms
+5. **Operators:** `?h + x` where `x: Int` constrains `?h` to `Int` (or a type implementing `Add<Int>`)
+
+When multiple constraints agree, the intersection is the agreed-upon type. When constraints conflict, the compiler applies the **nearest constraint rule** (see Edge Cases §8.3) and emits a warning.
+
+When context provides **no constraints**, the hole is *unconstrained* — reported with type `_`. The HoleReport lists available bindings so the Agent can propose a type.
+
+#### Hole as Match Scrutinee
+
+When the scrutinee of a `match` is a hole, the compiler infers the hole's type from the **pattern types** in the match arms:
+
+```spore
+fn classify(data: RawData) -> Category ! [ParseError]
+{
+    match ?parsed_data {         // hole as scrutinee
+        Valid(v)   => categorize(v),
+        Invalid(e) => raise ParseError(e),
+    }
+}
+```
+
+The compiler infers: `?parsed_data` must have a type with at least variants `Valid(_)` and `Invalid(_)`. If a type in scope matches (e.g., `Result<ValidData, ErrorInfo>`), it is reported as the inferred type. All branches are reported as **blocked** (since the scrutinee is unknown, no branch can execute during simulation).
 
 #### Extension A: Candidate Scoring Vector
 
@@ -363,6 +391,43 @@ Suggestion generation rules:
 | Retryable (contains `Timeout`/`Retry`) | `"retry with backoff"` |
 | Error in enclosing function's `!` list | `"propagate to caller"` |
 
+#### Error System Integration (Three-Field Model)
+
+The enclosing function's declared error list (`! [Err1, Err2, Err3]`) is partitioned into three categories at each hole site:
+
+| Field | Meaning |
+|---|---|
+| `errors_to_handle` | Errors not yet handled by code before the hole. The filling should handle or propagate these. |
+| `errors_already_handled` | Errors that were caught/handled by code before the hole (e.g., via `catch` or `match`). The filling does not need to worry about these. |
+| `errors_passthrough` | Errors that can propagate upward to the caller. The filling may also propagate them but does not need explicit handling. |
+
+Example:
+
+```spore
+fn fetch_and_parse(url: Url) -> Document ! [NetworkError, ParseError, Timeout]
+    uses [Http]
+    cost ≤ 3000
+{
+    let response = http_get(url)          // may raise NetworkError, Timeout
+        |> catch Timeout => retry_once(url)  // Timeout handled here
+    ?parse_response
+}
+```
+
+HoleReport for `?parse_response`:
+
+```json
+{
+  "errors_to_handle": ["ParseError"],
+  "errors_already_handled": ["Timeout"],
+  "errors_passthrough": ["NetworkError"]
+}
+```
+
+- `ParseError`: the filling should handle or propagate it.
+- `Timeout`: handled before the hole; no action needed.
+- `NetworkError`: propagates to the caller; the filling may also propagate it without explicit handling.
+
 ### Hole Dependency Graph
 
 #### Definition
@@ -404,6 +469,39 @@ function build_hole_graph(module: TypedAST) -> Graph:
 
 `trace_data_source` follows SSA data-flow edges backward. `trace_type_source` follows type inference constraint chains backward. Both are exhaustive, guaranteeing no hidden dependencies.
 
+#### Data-Flow Tracing (`trace_data_source`)
+
+Traces an SSA binding backward to its origin:
+
+```pseudocode
+function trace_data_source(binding: Binding) -> Source:
+    match binding.origin:
+        Parameter(p)       => return ParameterSource(p)
+        LetBinding(expr)   => return trace_expr_source(expr)
+        HoleOutput(h)      => return HoleOutput(h)
+        FunctionCall(f, args) =>
+            args.iter().find_map(|arg|
+                match trace_data_source(arg):
+                    HoleOutput(h) => Some(HoleOutput(h))
+                    _             => None
+            ).unwrap_or(ConcreteSource(f))
+```
+
+#### Type Constraint Tracing (`trace_type_source`)
+
+Traces a type variable backward through the constraint graph:
+
+```pseudocode
+function trace_type_source(tv: TypeVar) -> Source:
+    constraints = get_constraints_for(tv)
+    constraints.iter().find_map(|c|
+        match c:
+            UnifyWith(HoleOutputType(h)) => Some(HoleOutput(h))
+            UnifyWith(ConcreteType(t))   => Some(ConcreteSource(t))
+            UnifyWith(OtherTypeVar(tv')) => Some(trace_type_source(tv'))
+    ).unwrap_or(Unconstrained)
+```
+
 #### Cycle Detection
 
 Circular hole dependencies are **compile errors**. Detection uses standard DFS coloring in O(|V| + |E|):
@@ -417,6 +515,25 @@ error[H0301]: circular hole dependency detected
   |
   = help: break the cycle by providing a concrete type annotation on one hole
 ```
+
+#### Cycle Fix Strategies
+
+When a circular dependency is detected, the compiler suggests three strategies:
+
+1. **Add type annotation:** Place an explicit type annotation on one hole in the cycle, breaking the type dependency:
+   ```text
+   help: e.g., ?validate_order : ValidatedOrder
+   ```
+
+2. **Split function:** Move the holes into separate functions. Each function's signature provides concrete type information, eliminating the circular inference:
+   ```text
+   help: extract ?validate_order into a standalone function with an explicit signature
+   ```
+
+3. **Introduce intermediate binding:** Add a `let` binding with a concrete type between the holes, breaking the value dependency chain:
+   ```text
+   help: add `let intermediate: ConcreteType = ...` between the dependent holes
+   ```
 
 #### Layered Topological Sort
 
@@ -444,6 +561,41 @@ function compute_fill_order(G: Graph) -> Result<List<Set<Hole>>, CycleError>:
 - Within each layer, holes are ranked by **transitive dependents count** (impact heuristic)
 
 **Complexity:** O(|V| + |E|) for construction, cycle detection, and topological sort.
+
+#### Completeness Theorem
+
+**Theorem (Completeness).** If the Hole Dependency Graph G = (V, E) is a DAG, then `compute_fill_order` discovers and outputs all fillable holes.
+
+**Proof.** By induction on layer index k.
+
+**Base case (k = 0):** L₀ = { h ∈ V | in-degree(h) = 0 }. These holes have no predecessors — their types, bindings, and cost budgets are fully determined. They are fillable. Since we take *all* zero in-degree nodes, no fillable hole is missed.
+
+**Inductive step (k → k+1):** Assume layers L₀ through Lₖ are correctly computed and all holes in them are filled. Let G' be the subgraph remaining after removing L₀ ∪ ... ∪ Lₖ.
+
+Lₖ₊₁ = { h ∈ V(G') | in-degree_{G'}(h) = 0 }
+
+For any h ∈ Lₖ₊₁: all predecessors of h in G lie in L₀ ∪ ... ∪ Lₖ (already filled), so h's constraints are fully resolved — h is fillable.
+
+Conversely, if a fillable hole h ∉ L₀ ∪ ... ∪ Lₖ₊₁, then h has in-degree > 0 in G', meaning an unfilled predecessor exists — contradicting fillability.
+
+Therefore Lₖ₊₁ is exactly the set of newly fillable holes at round k+1. ∎
+
+**Corollary.** The algorithm terminates in `depth(G) + 1` rounds, filling all holes.
+
+**Corollary.** Data-flow exhaustiveness: since `trace_data_source` and `trace_type_source` traverse all SSA edges and type constraint chains, no dependency is undetected.
+
+#### Complexity Analysis
+
+| Operation | Time Complexity | Notes |
+|-----------|----------------|-------|
+| Graph construction | O(\|V\| × B) | B = average bindings per hole |
+| Topological sort (layered) | O(\|V\| + \|E\|) | Kahn's algorithm variant |
+| Cycle detection | O(\|V\| + \|E\|) | DFS coloring (by-product of topo sort) |
+| Incremental update (single fill) | O(\|neighbors\|) | Only the filled hole's neighbors are touched |
+| Parallel scheduling | O(\|V\|) | Traverse in-degree array to find ready set |
+| JSON serialization | O(\|V\| + \|E\|) | Linear scan of graph structure |
+
+**Space complexity:** O(|V| + |E|) for the graph structure and in-degree table.
 
 #### Parallel Fill
 
@@ -473,6 +625,44 @@ When a hole is filled, the graph updates incrementally in O(|neighbors|):
 3. Update in-degrees of successors; those reaching zero enter `ready_to_fill`
 4. Check for newly revealed holes (filling may expose deeper code paths)
 5. Emit a `hole_graph_update` event
+
+#### Agent Allocation Strategy
+
+```pseudocode
+function assign_agents(ready: Set<Hole>, agents: List<Agent>) -> Assignment:
+    ranked = rank_within_layer(ready, G)  // sort by transitive dependents
+    assignment = {}
+    ranked.iter().enumerate().for_each(|(i, hole)|
+        agent = agents[i % agents.len()]   // round-robin
+        assignment[hole] = agent
+    )
+    return assignment
+```
+
+When fewer Agents are available than ready holes, round-robin assigns the highest-impact holes first.
+
+#### Conflict Resolution
+
+Two Agents must not simultaneously fill the same hole. Mutual exclusion uses file-level locking:
+
+```pseudocode
+function try_fill(agent: Agent, hole: Hole) -> FillResult:
+    if not acquire_lock(hole.file, agent.id):
+        return FillResult { status: "conflict", hole: hole.name,
+                            filled_by: lock_holder(hole.file) }
+
+    result = agent.generate_fill(hole)
+    verify = sporec_check(hole.file)
+
+    if verify.ok:
+        commit_fill(hole, result)
+        release_lock(hole.file, agent.id)
+        return FillResult { status: "success", hole: hole.name }
+    else:
+        rollback_fill(hole)
+        release_lock(hole.file, agent.id)
+        return FillResult { status: "verify_failed", errors: verify.errors }
+```
 
 ### Agent State Machine
 
@@ -572,6 +762,149 @@ The Agent reads diagnostics, understands the failure, and autonomously decides t
 
 - **No RETRY state**: REJECT returns full diagnostics; the Agent simply re-enters PROPOSE or ANALYZE. An explicit RETRY state would add complexity without information.
 - **No ESCALATE state**: If the Agent cannot fill a hole after repeated attempts, it marks it `agent_skipped`, continues with other `ready_to_fill` holes, and reports skipped holes in the final summary.
+
+---
+
+### Edge Cases
+
+#### Recursive Holes
+
+A hole in a recursive function is valid — `?name` is just an expression of some type. It does not call itself. The compiler detects recursive calls to partial functions and terminates simulation at depth 1:
+
+```spore
+fn factorial(n: Int) -> Int ! []
+    cost ≤ 1000
+{
+    if n <= 1 { 1 }
+    else { n * ?factorial_step }
+}
+```
+
+Here `?factorial_step` has type `Int`. The function is partial. If a recursive call to `factorial` occurs:
+
+```spore
+fn bad(n: Int) -> Int ! []
+{
+    ?self_ref + bad(n - 1)   // bad is partial; recursive call also partial
+}
+```
+
+The compiler reports:
+
+```text
+[partial] bad: (Int) -> Int ! []
+  holes: ?self_ref
+  note: recursive call to partial function bad — simulation terminates at depth 1
+```
+
+Simulation does not recurse into partial functions; it stops and emits a HoleReport at the hole site.
+
+#### Type Holes (`?T_Name`)
+
+Type holes are syntactically distinct from value holes. They use `?T_name` (uppercase convention) in **type positions** and represent unknown types:
+
+```spore
+fn convert(input: ?InputType) -> ?OutputType ! []
+{
+    ?conversion_logic
+}
+```
+
+**Semantics (experimental):**
+
+- Type holes make the entire **signature** incomplete. Unlike value holes (body-only), type holes affect the function's public contract.
+- The function **cannot** be exported (its signature hash is undefined).
+- The compiler emits a `type-hole` diagnostic, distinct from value-hole diagnostics.
+- Type holes are a **design-time sketching tool**, not a production feature.
+
+**Reporting:**
+
+```text
+$ sporec --holes --type-holes
+
+Type holes:
+  ?InputType   in convert (src/convert.spore:1)  — parameter type
+  ?OutputType  in convert (src/convert.spore:1)  — return type
+
+Value holes:
+  ?conversion_logic  in convert (src/convert.spore:5)  — body
+```
+
+**Intended behavior:** When both type holes and value holes are present, the compiler first attempts to infer type holes from usage context (e.g., if `convert` is called with a known argument type). If inference succeeds, the value hole's expected type becomes determined. If inference fails, the value hole is reported with type `_` (unconstrained).
+
+> **Status:** Type holes are marked experimental. The full specification is deferred to a future SEP. This section documents the intended semantics for design continuity.
+
+#### Conflicting Constraints
+
+When a hole has contradictory type constraints from its context, the compiler reports the conflict without failing:
+
+```spore
+fn conflicted(flag: Bool) -> Int ! []
+{
+    let x: String = ?ambiguous   // constraint 1: String (from let binding)
+    let y: Int = x               // constraint 2: Int (from assignment)
+    y
+}
+```
+
+**Resolution rule:** The compiler uses the **nearest constraint** — the one syntactically closest to the hole. In this case, the `let x: String` annotation is nearest, so `?ambiguous` is reported with type `String`.
+
+```text
+warning[H0002]: hole ?ambiguous has conflicting type constraints
+  constraint 1: String (from let binding on line 4)
+  constraint 2: Int    (from usage on line 5)
+  note: no type satisfies both constraints simultaneously.
+        The hole is reported with type `String` (nearest constraint).
+        Filling this hole will likely require restructuring the surrounding code.
+```
+
+The hole still appears in `--holes` output and still receives a HoleReport. The Agent sees the conflict and can propose a restructuring.
+
+#### Holes in Closures
+
+Closures can contain holes. The hole's context captures both the closure's own parameters and any outer bindings captured by the closure:
+
+```spore
+fn make_processor(config: Config) -> Fn(Data) -> Result ! [ProcessError]
+{
+    |data: Data| -> Result ! [ProcessError] {
+        ?process_with_config
+    }
+}
+```
+
+The HoleReport for `?process_with_config` includes both the closure parameter `data` and the captured `config`:
+
+```json
+{
+  "bindings": [
+    { "name": "data", "type": "Data", "simulated_value": { "kind": "symbolic", "origin": "closure parameter" } },
+    { "name": "config", "type": "Config", "simulated_value": { "kind": "symbolic", "origin": "captured from make_processor" } }
+  ]
+}
+```
+
+The `origin` field distinguishes closure parameters from captured bindings, enabling Agents to understand the binding's provenance.
+
+#### Holes and the `pure` Property
+
+A hole in a function inferred as `pure` (i.e., `uses []`) is itself pure by definition — it does nothing. The compiler does not flag a purity violation for the hole's presence. However, the **filling** must satisfy the purity constraint:
+
+**Formal rule:** If function `f` has `uses []` (and is therefore inferred as `pure`), any expression that replaces a hole `?h` in `f`'s body must also be pure — it may not call functions requiring IO or State capabilities.
+
+```spore
+fn pure_fn(x: Int) -> Int ! []
+{
+    ?must_be_pure   // ok: hole is inert
+}
+```
+
+If the Agent fills with an impure expression:
+
+```text
+[error] pure_fn is inferred as pure (uses []) but the filling of ?must_be_pure
+        calls print() which requires capability: IO
+```
 
 ---
 
@@ -881,7 +1214,7 @@ On failed fill: full diagnostic with `root_cause`, `fix_hints`, and `suggestion`
 
 4. **Scoring weight rigidity**: The hard-coded weights (0.40, 0.20, 0.25, 0.15) may not be optimal for all projects. However, making them configurable increases cognitive burden, and the expected variance across projects is low.
 
-5. **JSON without serde**: The current implementation hand-rolls JSON serialization. This is fragile and may produce invalid JSON in edge cases. A future migration to a proper serializer is warranted.
+5. **Hand-rolled JSON serialization**: The current implementation hand-rolls JSON serialization for v0.1 to minimize dependencies. This is intentionally simple but acknowledged as fragile for complex nested structures. serde migration is tracked as future work (see Unresolved Questions §10).
 
 6. **Parallel fill coordination overhead**: File-level locking for multi-Agent fills adds synchronization cost. For small projects this overhead dominates the benefit.
 

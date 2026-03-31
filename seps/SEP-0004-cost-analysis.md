@@ -211,7 +211,9 @@ The abstract machine maintains four independent cost dimensions:
 cost = C × 1 + A × α + W × β
 ```
 
-where `α` and `β` are project-configurable weights (default α = 2, β = 100). The `P` dimension is reported independently for resource planning and does not participate in the scalar sum.
+where `α` and `β` are project-configurable weights (default α = 2, β = 100). The `P` dimension is reported independently for resource planning and does not participate in the default scalar sum.
+
+> **Note on P dimension.** The default scalar formula excludes `P` because parallel lane count represents a resource-width metric rather than a cost-per-invocation metric. However, projects that need to account for parallelism in the scalar may define a custom weight scheme in `spore.toml` that includes a `γ` weight for P: `cost = C×1 + A×α + W×β + P×γ`. This is an opt-in extension; the default remains `γ = 0` (P excluded).
 
 ### 4.2 Primitive cost table
 
@@ -240,6 +242,7 @@ where `α` and `β` are project-configurable weights (default α = 2, β = 100).
 | Struct creation | field count |
 | List creation | element count + 1 header |
 | String creation | ⌈len / 8⌉ |
+| String concatenation | ⌈(len_a + len_b) / 8⌉ (new allocation) |
 | Enum / union | 1 (tag + max variant size) |
 | Deep copy | original cell count |
 | Borrow / reference | 0 |
@@ -257,7 +260,9 @@ Every system call (file read/write, network request, stdio, random number genera
 | Pattern match `match x { p₁ => A, p₂ => B, ... }` | `cost(x) + max(cost(A), cost(B), ...) + arms × 1` |
 | Function call `f(args)` | `Σ cost(argᵢ) + 3 + cost(f.body)` |
 | Pipe chain `x \|> f \|> g` | `cost(x) + cost(f) + cost(g)` |
-| Parallel `parallel { A, B }` | C, A, W: `max(cost(A), cost(B))`; P: `sum(P(A), P(B))` |
+| Parallel `parallel { A, B }` | C, A, W: `max(cost(A), cost(B)) + sync_overhead`; P: `sum(P(A), P(B))` |
+
+> **Concurrent sync overhead.** The `sync_overhead` is a configurable constant (default: 0) representing the synchronisation cost of joining parallel branches. It can be set in `spore.toml` as `[cost] sync_overhead = 10`. When set to 0 (the default), the parallel cost reduces to a simple `max`. Projects requiring precise modelling of fork/join overhead should configure this parameter.
 
 ### 4.4 CostExpr grammar
 
@@ -289,6 +294,8 @@ Var      ::= [a-z][a-z0-9_]*                       (* Lowercase identifier *)
 | Recursive cost definitions | Avoids fixpoint computation; recursion analysis is handled at a separate layer |
 | Negative numbers | Cost domain is ℕ (non-negative integers) |
 | Variable exponents `n^m` | Pushes comparison into the exponential polynomial domain, losing polynomial decidability |
+
+> **Note on subtraction discrepancy.** The cost-model spec (§6) includes subtraction in its symbolic cost operators (e.g., `(len(list) - 1) × cost(f)` for `reduce`). However, the decidability analysis forbids subtraction in CostExpr to maintain monotonicity and non-negativity. This SEP follows the decidability spec: **subtraction is not a valid CostExpr operator**. Where subtraction appears naturally (e.g., `n - 1`), the compiler uses the conservative upper bound (e.g., `n` instead of `n - 1`). Cost formulas in the HOF table that use subtraction (e.g., `reduce`) are computed internally by the compiler but are presented to the CostExpr verifier in their upper-bound form.
 
 #### Implementation (Rust)
 
@@ -351,6 +358,7 @@ The compiler recognizes the following decreasing patterns:
 | Tree child (unary) | `tree → tree.left` or `tree → tree.right` | Subtree relation | O(log n) balanced / O(n) worst |
 | Tree child (binary) | `tree → tree.left` and `tree → tree.right` | Subtree relation | O(n) |
 | Enum destructuring | `match x { Variant(inner) => f(inner) }` | Structural subterm | O(depth) |
+| Tuple projection | `(a, b) → a` or `(a, b) → b` (strictly smaller) | Structural subterm | Depends on projected component |
 | Integer halving | `n → n / 2` (with `n > 0` guard) | `<` on ℕ | O(log n) |
 
 **Detection algorithm** (implemented in `spore-typeck/src/cost.rs`):
@@ -447,6 +455,23 @@ fn collatz_steps(n: Int) -> Int {
 | Context restriction | `@unbounded` functions cannot be called directly in `cost ≤ K` contexts |
 | Hole interaction | Holes inside `@unbounded` functions report `cost_budget: unbounded` |
 
+**Impact scope tracking.** When a function is marked `@unbounded`, its unbounded status propagates through the call chain:
+
+- **Direct callers**: any function that calls an `@unbounded` function becomes `@unbounded` itself (unless the call is wrapped in `with_cost_limit`).
+- **Indirect callers**: if function A is `@unbounded` and B calls A, then B is also `@unbounded`. If C calls B, C is also `@unbounded`, and so on up the call chain.
+- **Isolation**: wrapping an `@unbounded` call in `with_cost_limit` halts the propagation. The wrapping function can declare `cost ≤ K` normally.
+
+The compiler tracks this propagation and reports the full impact scope in its diagnostic:
+
+```text
+WARNING [unbounded-function] collatz_steps is marked @unbounded.
+  Impact scope:
+    → analyze (direct caller)
+    → run_batch (calls analyze)
+    → main (calls run_batch)
+  Suggestion: wrap with `with_cost_limit` in `analyze` to contain the propagation.
+```
+
 ### 4.7 Higher-order function cost formulas
 
 Since Spore has no loops, higher-order functions are the *only* iteration mechanism besides recursion. The standard library has built-in cost formulas:
@@ -462,6 +487,44 @@ Since Spore has no loops, higher-order functions are the *only* iteration mechan
 | `reduce(list, f)` | `(len(list) - 1) × cost(f)` |
 
 Since higher-order function arguments `f` in Spore must be pure (no effect variables), `cost(f)` is always statically determinable. Substituting `cost(f)` into the formula yields a valid CostExpr.
+
+#### Nested higher-order function derivation example
+
+The following example demonstrates step-by-step cost derivation for nested higher-order functions:
+
+```spore
+fn matrix_sum(matrix: List[List[Int]]) -> Int {
+    matrix
+        |> map(|row| row |> fold(0, |a, b| a + b))
+        |> fold(0, |a, b| a + b)
+}
+```
+
+**Six-step derivation** (let `m = len(matrix)`, `n = len(row)` for a typical row):
+
+```text
+Step 1: inner closure cost
+  cost(|a, b| a + b) = 1 op                           // single addition
+
+Step 2: inner fold cost
+  cost(fold(row, 0, |a, b| a + b)) = n × cost(+) = n × 1 = n
+
+Step 3: map step cost (applying inner fold to each row)
+  map_step_cost = cost(inner_fold) = n
+
+Step 4: outer map cost
+  cost(map(matrix, inner_fold)) = m × map_step_cost + m
+                                = m × n + m
+
+Step 5: outer fold cost
+  cost(fold(mapped, 0, |a, b| a + b)) = m × 1 = m
+
+Step 6: total cost
+  total = cost(outer_map) + cost(outer_fold)
+        = (m × n + m) + m
+        = m × n + 2 × m
+        → O(m × n)
+```
 
 ### 4.8 Mutual recursion
 
@@ -643,6 +706,108 @@ The HoleReport includes the remaining cost budget, providing the AI agent (or de
 ```
 
 For holes inside recursive functions, the per-iteration budget is `total_budget / iterations - recursive_overhead`.
+
+### 4.14 Compile-time cost analysis pipeline
+
+The full cost analysis pipeline executes as part of the compilation process:
+
+```text
+Source Code
+  ↓
+[1] Parse to AST
+  ↓
+[2] Type Check + Capability Check
+  ↓
+[3] Abstract Interpretation (Cost Inference)
+    ├── Build control flow graph (CFG)
+    ├── Compute cost per basic block (from primitive cost table)
+    ├── Take max across branches
+    ├── Analyse recursion / iteration upper bounds
+    └── Generate symbolic CostExpr per function
+  ↓
+[4] Cost Verification
+    ├── Compare inferred CostExpr against declared `cost ≤ expr`
+    ├── PASS → compilation succeeds
+    ├── FAIL → compile error with four-dimensional breakdown
+    └── UNKNOWN → warning with suggestions
+  ↓
+[5] Cost metadata written to compilation output (JSON / binary)
+```
+
+### 4.15 Bounded type semantics
+
+Bounded types provide compile-time size information for cost verification:
+
+```spore
+fn process_batch(items: List[Order, max: 500]) -> BatchResult ! [TooLarge]
+    cost ≤ 25000
+    uses [Compute]
+{
+    items |> map(|order| validate(order)) |> fold(BatchResult.empty(), merge)
+}
+```
+
+`List[Order, max: 500]` means:
+
+1. **Compile-time**: the compiler uses 500 as the upper bound for `len(items)` in cost verification. It substitutes `n = 500` into the symbolic cost expression to verify `cost ≤ 25000`.
+2. **Runtime**: if a list exceeding 500 elements is passed, the call produces a `TooLarge` error at the call site. The function body itself never sees more than 500 elements.
+3. **Error propagation**: the `TooLarge` error must appear in the function's error set (`! [TooLarge]`) or in the caller's error handling.
+
+When no `max` constraint is present, the cost remains a symbolic expression in terms of `len(items)`.
+
+### 4.16 FFI extern function cost declarations
+
+Foreign functions have no Spore body for the compiler to analyse. They **must** declare their cost explicitly at the binding site:
+
+```spore
+extern fn c_sort[T](data: List[T]) -> List[T]
+    uses [Compute]
+    cost ≤ n * log(n)    // declared, not computed; n = len(data)
+```
+
+```spore
+extern fn openssl_encrypt(data: Bytes, key: Key) -> Bytes ! [CryptoError]
+    uses [Compute]
+    cost ≤ len(data) * 3 + 500
+```
+
+**Rules for extern fn cost:**
+
+| Rule | Description |
+|------|-------------|
+| Required declaration | `extern fn` without a `cost` clause is treated as `@unbounded` |
+| No body analysis | The compiler trusts the declared cost — no verification is possible |
+| Contagious unbounded | An `@unbounded` extern fn follows the same contagion rules as any `@unbounded` function |
+| Variable binding | Cost variables (`n`, `len(data)`) bind to parameter sizes at the call site |
+
+This ensures FFI boundaries maintain cost transparency — external code cannot silently introduce cost black holes.
+
+### 4.17 Polymorphic function cost resolution
+
+For generic functions like `map(f, list)`, cost depends on the concrete function `f`. Spore resolves this at the **call site**:
+
+```spore
+fn map[T, U](list: List[T], f: (T) -> U) -> List[U]
+    cost ≤ len(list) * cost(f) + len(list)
+{
+    // ...
+}
+```
+
+At each call site, `f` is concrete and `cost(f)` is known:
+
+```spore
+let result = map(items, |x| x * 2)
+// cost(|x| x * 2) = 1 op
+// total cost = len(items) * 1 + len(items) = 2 * len(items)
+```
+
+**Resolution rules:**
+
+1. `cost(f)` in a signature is a **meta-variable** that is substituted with the concrete function's cost at each call site.
+2. Since higher-order function arguments must be pure in Spore, `cost(f)` is always statically determinable at the call site.
+3. After substitution, the result is a standard CostExpr that can be verified normally.
+4. The compiler does **not** attempt abstract cost reasoning over uninstantiated type parameters — this keeps the system simple and deterministic.
 
 ---
 
@@ -941,17 +1106,103 @@ Cost analysis is introduced as a new compiler capability. No existing Spore code
 
 ---
 
+## Edge cases and limitations
+
+### Pure constant expressions
+
+When both C and B contain no variables, the comparison degenerates to numeric comparison:
+
+```text
+C = 42, B = 100
+Verification: 42 ≤ 100 → PASS
+```
+
+No asymptotic analysis is needed; the compiler computes directly.
+
+### Single-variable expressions
+
+With a single variable `n`, comparison reduces to standard Big-O notation comparison. Each normal-form monomial is `c × n^a × log(n)^b`, with the ordering:
+
+```text
+(c₁, a₁, b₁) ≼ (c₂, a₂, b₂) ⟺ a₁ < a₂
+                                  ∨ (a₁ = a₂ ∧ b₁ < b₂)
+                                  ∨ (a₁ = a₂ ∧ b₁ = b₂ ∧ c₁ ≤ c₂)
+```
+
+This is consistent with classical asymptotic order comparison.
+
+### Multi-variable partial order
+
+With k > 1 variables, the comparison uses componentwise partial ordering on exponent vectors. Two monomials may be **incomparable** (e.g., `n*m` vs. `n²`). Incomparable cases produce FAIL (conservative). Developers must restructure declarations to make them comparable, e.g., using `max(n*m, n^2)`.
+
+### Limitations
+
+| Limitation | Description | Workaround |
+|---|---|---|
+| No conditional cost | Cannot express "if sorted then O(n), else O(n²)" | Use `max(n, n^2) = n^2` (conservative) |
+| No amortized analysis | Cannot express "amortized O(1)" | Use worst-case cost |
+| No probabilistic analysis | Cannot express "expected O(n log n)" | Use worst-case cost |
+| No subtraction / division | Cannot exactly express `n*(n-1)/2` | Use `n^2` upper bound |
+| max/min nesting depth bounded | Deep nesting causes expression blowup | Compiler limits depth (default 8) |
+| Multi-variable incomparability | Partial order on exponent vectors can be inconclusive | Restructure declaration or use `max` |
+
+---
+
+## Cost drift detection
+
+Cost drift detection monitors divergence between compile-time cost predictions and actual runtime performance. While full implementation is deferred to a future SEP, the mechanism is specified here.
+
+**Tolerance threshold.** The configurable parameter `cost_drift_tolerance` defines the maximum allowed ratio of actual-to-predicted cost:
+
+```toml
+[cost]
+cost_drift_tolerance = 1.2   # allow 20% deviation
+```
+
+**Detection mechanism:**
+
+1. **Instrumentation**: when cost drift detection is enabled (`sporec --cost-instrument`), the compiler inserts lightweight counters at function entry/exit that track actual op/cell/call counts.
+2. **Sampling**: the runtime samples cost at configurable frequency (default: every 100th invocation) to minimize overhead.
+3. **Comparison**: at runtime, if `actual_cost / predicted_cost > cost_drift_tolerance`, a `CostDrift` warning is logged.
+4. **CI integration**: a post-test step `sporec --cost-drift-report` compares sampled costs against compile-time predictions and fails the build if drift exceeds the threshold.
+
+**Diagnostic format:**
+
+```text
+WARNING [cost-drift] function merge_sort: actual cost exceeds prediction.
+  Predicted: 1200 op
+  Actual (sampled): 1500 op
+  Drift ratio: 1.25 (threshold: 1.2)
+  Suggestion: review recent changes to merge_sort or update cost ≤ declaration
+```
+
+---
+
+## Design decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Recursion analysis tiers | 3 tiers (auto + declarative + escape) | Balances automation with expressiveness; ~90% coverage |
+| Structural recursion detection | Syntactic parameter-decreasing check | Simple, reliable, O(\|call_graph\|) complexity |
+| Verification failure handling | Warning, not error | Gradual adoption; does not block development |
+| `@unbounded` semantics | Contagious + isolatable via `with_cost_limit` | Ensures cost information propagates while providing an escape path |
+| `decreases` clause | Optional | Compiler auto-derives in most cases; manual only when needed |
+| Mutual recursion | SCC-based whole-group analysis | Natural fit with call-graph analysis |
+| Higher-order function cost | Compiler built-in formulas | No loops → HOFs are the only iteration mechanism; must be built-in |
+
+---
+
 ## Unresolved questions
 
 1. **Tail-call optimization and cost.** TCO changes stack space consumption but not computation cost. Should the cost model distinguish a "stack depth" dimension? Current decision: no — TCO is a codegen optimization that does not affect cost analysis.
 
 2. **Memoization and cost.** Should the compiler auto-detect memoizable recursion and adjust cost (e.g., `fibonacci` from O(2ⁿ) to O(n))? Current leaning: no auto-memoization, but the compiler suggests it in warnings.
 
-3. **Cost drift detection.** How to monitor divergence between compile-time predictions and actual runtime cost? A configurable tolerance threshold (e.g., `cost_drift_tolerance = 1.2` for 20% allowed deviation) is envisioned. Deferred to a future SEP.
+3. **Cost drift detection.** The mechanism, tolerance threshold, and CI integration are specified in the "Cost drift detection" section above. The remaining unresolved question is the design of a full runtime cost sampling framework — specifically, how to keep instrumentation overhead below 1% in production builds.
 
 4. **Probabilistic cost bounds.** Randomized algorithms (e.g., QuickSort with random pivot) have expected rather than worst-case cost. Should Spore support `cost ≤ O(n log n) expected`? Deferred to future work.
 
-5. **Polymorphic cost.** For generic functions like `map(f, list)`, cost depends on the concrete `f`. Current approach: cost is computed at each call site by substituting the concrete function. Open question: can we express `cost ≤ N × cost(f) + N` in the type signature and verify it abstractly?
+5. **Polymorphic cost (partially resolved).** The call-site instantiation approach is now specified in §4.17: `cost(f)` is substituted at each call site where `f` is concrete. The remaining open question is whether the signature-level notation `cost ≤ N × cost(f) + N` should be a first-class part of the CostExpr grammar, or remain an informal convention that the compiler resolves during monomorphisation.
 
 6. **Recursion depth limits.** Should the compiler enforce a compile-time recursion depth ceiling? Current decision: only `@unbounded` functions use runtime `with_cost_limit`. Whether to add a compile-time depth annotation (e.g., `max_depth ≤ 1000`) is unresolved.
 

@@ -74,6 +74,7 @@ For mutable state, use `Ref[T]` (which requires the `StateWrite` capability):
 ```spore
 let counter = Ref.new(0);
 counter.set(counter.get() + 1);
+counter.update(|x| x + 1);  // atomic read-modify-write
 ```
 
 ### Semicolons: statements vs. expressions
@@ -114,11 +115,11 @@ let category = if age < 13 {
 
 ```spore
 type Shape =
-    | Circle(radius: F64)
-    | Rectangle(width: F64, height: F64)
-    | Triangle(base: F64, height: F64);
+    | Circle(radius: Float)
+    | Rectangle(width: Float, height: Float)
+    | Triangle(base: Float, height: Float);
 
-fn area(shape: Shape) -> F64 {
+fn area(shape: Shape) -> Float {
     match shape {
         Circle(r) => 3.14159 * r * r,
         Rectangle(w, h) => w * h,
@@ -187,20 +188,107 @@ x |> f(y, z)    // equivalent to: f(x, y, z)
 x |> f(_, y)    // equivalent to: f(x, y)
 ```
 
+### Ranges and slices
+
+Ranges create sequences; slices extract sub-lists:
+
+```spore
+// Half-open range [start, end)
+let range1 = 1..10;      // 1, 2, 3, ..., 9
+
+// Closed range [start, end]
+let range2 = 1..=10;     // 1, 2, 3, ..., 10
+
+// Summing 1 to 100 using a range with fold
+let sum = (1..=100).fold(0, |acc, x| acc + x);
+
+// List slicing
+let sublist    = list[2..5];   // elements at index 2, 3, 4
+let all_from_3 = list[3..];   // index 3 to end
+let first_5    = list[..5];   // first 5 elements
+```
+
+### Method chaining and pipe equivalence
+
+Method chains and pipes are interchangeable styles:
+
+```spore
+// Method chain style (fluent API)
+let result = text
+    .trim()
+    .to_lowercase()
+    .split(" ")
+    .filter(|word| word.len() > 3)
+    .map(|word| capitalize(word))
+    .collect();
+
+// Equivalent pipe style
+let result = text
+    |> trim
+    |> to_lowercase
+    |> split(" ")
+    |> filter(|word| word.len() > 3)
+    |> map(|word| capitalize(word))
+    |> collect;
+```
+
 ### Error handling
 
 Errors are declared in the function signature with `!` and propagated with `?`:
 
 ```spore
 type FileError =
-    | NotFound(path: Str)
-    | PermissionDenied(path: Str)
-    | IoError(message: Str);
+    | NotFound(path: String)
+    | PermissionDenied(path: String)
+    | IoError(message: String);
 
-fn read_config(path: Str) -> Config ! [FileError, ParseError] {
+fn read_config(path: String) -> Config ! [FileError, ParseError] {
     let content = read_file(path)?;     // propagates FileError
     let config = parse_toml(content)?;  // propagates ParseError
     config
+}
+```
+
+#### Error conversion
+
+When a function's error set differs from a callee's, Spore can automatically convert errors if a conversion exists:
+
+```spore
+fn load_config(path: String) -> Config ! [ConfigError] {
+    let content = read_file(path)?;       // FileError -> ConfigError (auto-converted)
+    let config = parse_toml(content)?;    // ParseError -> ConfigError (auto-converted)
+    config
+}
+```
+
+The compiler looks for a `From` capability implementation (e.g., `impl From[FileError] for ConfigError`) to perform the conversion. If no conversion exists, the error type must be listed in the function's error set directly.
+
+#### Error recovery patterns
+
+Use `match` on `Result` to provide fallback values or retry logic:
+
+```spore
+// Default value fallback
+fn get_config() -> Config {
+    match load_config("config.toml") {
+        Ok(config) => config,
+        Err(_) => Config.default(),
+    }
+}
+
+// Retry with tail recursion (TCO guaranteed)
+fn fetch_with_retry(url: String, max_retries: Int) -> Data ! [NetworkError] {
+    fn retry(url: String, attempts: Int, max: Int) -> Data ! [NetworkError] {
+        match fetch(url) {
+            Ok(data) => data,
+            Err(NetworkError.Timeout) if attempts < max => {
+                sleep(1000);
+                retry(url, attempts + 1, max)  // tail recursion
+            },
+            Err(e) => throw e,
+        }
+    }
+    retry(url, 0, max_retries)
 }
 ```
 
@@ -250,7 +338,7 @@ fn add(a: Int, b: Int) -> Int {
 }
 
 // 2. Function with errors
-fn parse_int(input: Str) -> Int ! [InvalidFormat] {
+fn parse_int(input: String) -> Int ! [InvalidFormat] {
     ...
 }
 
@@ -279,11 +367,11 @@ Capabilities are Spore's unified trait/interface/effect mechanism:
 
 ```spore
 capability Display {
-    fn to_string(self) -> Str;
+    fn to_string(self) -> String;
 }
 
 capability Serialize {
-    fn serialize(self) -> Str ! [SerializeError];
+    fn serialize(self) -> String ! [SerializeError];
 }
 
 // Custom composite capabilities
@@ -300,18 +388,46 @@ The `uses` clause declares what capabilities a function requires. The compiler *
 
 The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
 
+The `uses` clause can mix capability names with specific resource instance bindings:
+
+```spore
+fn query_database(sql: String) -> Data ! [DbError]
+uses [Database, db_connection]
+{
+    ...
+}
+
+fn process_request(req: Request) -> Response ! [Error]
+uses [Network, Database, FileRead, db_pool, cache, logger]
+{
+    ...
+}
+```
+
 ### Struct and type definitions
 
 ```spore
 // Named-field struct
 struct User {
-    id: U64,
-    name: Str,
-    email: Str,
-} implements [Display, Serialize]
+    id: Int,
+    name: String,
+    email: String,
+}
+
+impl Display for User {
+    fn to_string(self) -> String {
+        f"User({self.name}, {self.email})"
+    }
+}
+
+impl Serialize for User {
+    fn serialize(self) -> String ! [SerializeError] {
+        ...
+    }
+}
 
 // Tuple struct
-struct Color(U8, U8, U8);
+struct Color(Int, Int, Int);
 
 // Unit struct
 struct NoData;
@@ -323,8 +439,28 @@ type BinaryTree[T] =
     | Empty;
 
 // Refinement type
-type PositiveInt = I32 if |n| n > 0;
-type Percentage = F64 if |p| p >= 0.0 && p <= 100.0;
+type PositiveInt = Int if |n| n > 0;
+type Percentage = Float if |p| p >= 0.0 && p <= 100.0;
+type I32 = Int if |n| n >= -2147483648 && n <= 2147483647;
+type U8 = Int if |n| n >= 0 && n <= 255;
+```
+
+Field punning allows omitting the value when the variable name matches the field name, both in construction and pattern matching:
+
+```spore
+let name = "Alice";
+let email = "alice@example.com";
+
+// Full form
+let user1 = User { name: name, email: email };
+
+// Punned form (equivalent)
+let user2 = User { name, email };
+
+// Punning in pattern matching
+match user {
+    User { name, email, .. } => f"Name: {name}, Email: {email}",
+}
 ```
 
 ### Strings
@@ -343,6 +479,17 @@ f"Result: {2 + 2}"
 // Template string (t-string) — returns a template object
 let tmpl = t"Dear {customer}, your order {id} is ready.";
 let msg = tmpl.bind([("customer", "Bob"), ("id", "12345")]);
+
+// Multi-line string (newlines are literal)
+let query = "SELECT *
+FROM users
+WHERE active = true";
+
+// Multi-line with f-string
+let html = f"<div>
+    <h1>{title}</h1>
+    <p>{body}</p>
+</div>";
 ```
 
 ### Lambdas
@@ -367,12 +514,61 @@ parallel_scope {
 }
 ```
 
+#### Channel communication
+
+Channels are multi-producer, single-consumer (MPSC). Senders can be cloned; receivers cannot:
+
+```spore
+let (tx, rx) = Channel.new[Int](buffer: 10);
+
+parallel_scope {
+    // Multiple producers via tx.clone()
+    let tx1 = tx.clone();
+    let tx2 = tx.clone();
+
+    spawn { tx1.send(1) };
+    spawn { tx2.send(2) };
+
+    spawn {
+        let a = rx.recv();
+        let b = rx.recv();
+        print(f"Received: {a}, {b}");
+    };
+}
+```
+
+#### Select and timeout
+
+`select` multiplexes across channels. Use recursion for event loops (no `for`/`loop`):
+
+```spore
+let (tx1, rx1) = Channel.new[Int](buffer: 1);
+let (tx2, rx2) = Channel.new[String](buffer: 1);
+
+// Recursive event loop (TCO guaranteed)
+fn event_loop(rx1: Channel.Receiver[Int], rx2: Channel.Receiver[String]) {
+    select {
+        value from rx1 => {
+            print(f"Got integer: {value}");
+        },
+        message from rx2 => {
+            print(f"Got string: {message}");
+        },
+        timeout 1000 => {
+            print("Timed out — stopping");
+            return;
+        },
+    }
+    event_loop(rx1, rx2)  // tail recursion
+}
+```
+
 ### Modules and imports
 
 ```spore
 module math uses [] {
-    pub fn add(a: I32, b: I32) -> I32 { a + b }
-    fn helper() -> I32 { 42 }  // private by default
+    pub fn add(a: Int, b: Int) -> Int { a + b }
+    fn helper() -> Int { 42 }  // private by default
 }
 
 import std.collections as collections;
@@ -400,7 +596,7 @@ The complete reserved keyword table:
 | `struct` | Struct type definition |
 | `type` | Type alias / sum type definition |
 | `capability` | Capability (trait) definition |
-| `implements` | Inline trait implementation declaration |
+| `impl` | Trait implementation block |
 | `pub` / `pub(pkg)` | Visibility modifiers (public / package-visible) |
 | `module` | Module definition |
 | `import` | Module import |
@@ -416,7 +612,7 @@ The complete reserved keyword table:
 | `return` | Early return from function |
 | `throw` | Throw an error value |
 | `trait` | Reserved (use `capability`) |
-| `impl` | Reserved |
+| `implements` | Reserved (use `impl ... for ...`) |
 | `as` | Rename in imports |
 | `in` | Reserved |
 | `mut` | Reserved |
@@ -561,14 +757,14 @@ TopLevelItem    = ImportDecl
                 | StructDecl
                 | TypeDecl
                 | CapabilityDecl
+                | ImplDecl
                 | ConstDecl
                 | FunctionDecl ;
 
 (* ─── Imports & Aliases ───────────────────────────── *)
 
 ImportDecl      = "import" ImportPath [ "as" Ident ] ";" ;
-ImportPath      = Ident { "." Ident } [ "." "{" Ident { "," Ident } "}" ]
-                | Ident { "." Ident } "." "*" ;
+ImportPath      = Ident { "." Ident } [ "." "{" Ident { "," Ident } "}" ] ;
 
 AliasDecl       = "alias" Ident "=" QualifiedIdent ";" ;
 
@@ -578,8 +774,7 @@ ModuleDecl      = "module" Ident [ UsesClause ] "{" { TopLevelItem } "}" ;
 
 (* ─── Struct ──────────────────────────────────────── *)
 
-StructDecl      = [ Visibility ] "struct" Ident [ TypeParams ] StructBody
-                  [ "implements" "[" CapabilityList "]" ] ;
+StructDecl      = [ Visibility ] "struct" Ident [ TypeParams ] StructBody ;
 
 StructBody      = "{" FieldList "}"            (* named-field struct *)
                 | "(" TypeList ")" ";"         (* tuple struct *)
@@ -614,6 +809,11 @@ CapabilityItem  = AssocType
 AssocType       = "type" Ident ";" ;
 
 CapabilityList  = Ident { "," Ident } ;
+
+(* ─── Impl (Trait Implementation) ─────────────────── *)
+
+ImplDecl        = "impl" Ident [ TypeParams ] "for" Ident [ TypeParams ]
+                  [ WhereClause ] "{" { FunctionDecl } "}" ;
 
 (* ─── Const ───────────────────────────────────────── *)
 
@@ -860,6 +1060,8 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
    - If `uses` contains `Random` or `Clock` → not deterministic
    - `total` is inferred by the compiler's termination checker
 
+   **Implication chain:** `pure` ⊃ `deterministic` — a pure function is necessarily deterministic (same inputs always produce same outputs). A deterministic function is not necessarily pure (it may perform IO that doesn't introduce non-determinism). `total` is orthogonal: a function can be total without being pure.
+
 5. **`cost ≤ N`** — An upper bound on the function's resource cost. Can reference parameters (e.g., `cost ≤ n * 10`).
 
 **Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost`.
@@ -868,12 +1070,12 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 ```spore
 capability Display {
-    fn to_string(self) -> Str;
+    fn to_string(self) -> String;
 }
 
 capability Collection {
     type Item;
-    fn len(self) -> U64;
+    fn len(self) -> Int;
     fn is_empty(self) -> Bool {
         self.len() == 0
     }
@@ -921,17 +1123,33 @@ Supported pattern forms:
 
 ### Type system
 
-**Primitive types:** `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, `F64`, `Bool`, `Str`, `Char`
+**Primitive types:** `Int` (arbitrary-precision integer), `Float` (arbitrary-precision float), `Bool`, `String`, `Char`. Specific fixed-width types (`I32`, `U64`, `F32`, etc.) are obtained via refinement types (e.g., `type I32 = Int if |n| n >= -2147483648 && n <= 2147483647`).
 
 **Collection types:** `List[T]`, `Map[K, V]`, `Set[T]`, `Array[T, N]`
 
 **Special types:** `Option[T]`, `Result[T, E]`, `Ref[T]`, `Channel[T]`, `Unit`
 
-**Const generics:** `struct Array[T, const N: U64] { ... }`
+**Const generics:** `struct Array[T, const N: Int] { ... }`
 
-**Refinement types:** `type PositiveInt = I32 if |n| n > 0;`
+```spore
+// Fixed-size array
+struct Array[T, const N: Int] {
+    data: List[T],  // length guaranteed to be N
+}
 
-**Function types:** `fn(I32, I32) -> I32`
+// Fixed-size matrix
+struct Matrix[T, const ROWS: Int, const COLS: Int] {
+    data: Array[Array[T, COLS], ROWS],
+}
+
+// Usage
+let vec3: Array[Float, 3] = Array.new([1.0, 2.0, 3.0]);
+let identity: Matrix[Float, 3, 3] = Matrix.identity();
+```
+
+**Refinement types:** `type PositiveInt = Int if |n| n > 0;`
+
+**Function types:** `fn(Int, Int) -> Int`
 
 ### Concurrency primitives
 
@@ -946,6 +1164,229 @@ Spore provides structured concurrency:
 ### Hole syntax
 
 Holes (`?`, `?name`, `?name : Type`) enable incremental development. A function with holes type-checks but cannot be compiled for real execution — only simulated. The compiler can suggest implementations based on available bindings and the `@allows` annotation.
+
+#### `@allows` annotation
+
+The `@allows` annotation constrains which functions the compiler (or an AI agent) may use to fill a hole:
+
+```spore
+@allows[validate, sanitize, format]
+fn process_input(raw: String) -> String ! [ValidationError] {
+    let validated = validate(raw)?;
+    let sanitized = sanitize(validated);
+    ?final_step  // this hole can only call validate/sanitize/format
+}
+
+@allows[add, multiply, negate]
+fn arithmetic(a: Int, b: Int) -> Int {
+    let x = ?step1 : Int;  // only add/multiply/negate
+    let y = ?step2 : Int;  // same constraint
+    x + y
+}
+```
+
+#### Hole + pipeline type inference
+
+The compiler infers hole types through pipeline chains:
+
+```spore
+fn example() {
+    let list = [1, 2, 3, 4, 5];
+    let result = list
+        |> filter(?)        // hole: fn(Int) -> Bool
+        |> map(?)           // hole: fn(Int) -> ?R
+        |> fold(0, ?);     // hole: fn(Int, ?R) -> Int
+}
+```
+
+#### HoleReport JSON format
+
+When queried (`sporec --query-hole ?name`), the compiler emits a structured report:
+
+```json
+{
+  "hole": "validate_logic",
+  "expected_type": "Receipt",
+  "bindings": {
+    "amount": "Money",
+    "method": "PaymentMethod"
+  },
+  "available_capabilities": ["NetRead"],
+  "candidate_functions": [
+    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds]"
+  ],
+  "error_types_to_handle": ["Declined", "InsufficientFunds"]
+}
+```
+
+## Complete examples
+
+### Expression parser and evaluator
+
+This example demonstrates algebraic data types, pattern matching, recursion, error handling, and cost bounds working together:
+
+```spore
+// Expression AST
+type Expr =
+    | Literal(Int)
+    | Variable(name: String)
+    | BinOp(op: Op, left: Expr, right: Expr)
+    | UnaryOp(op: UnaryOp, expr: Expr)
+    | Let(name: String, value: Expr, body: Expr)
+    | If(condition: Expr, then_branch: Expr, else_branch: Expr);
+
+type Op = Add | Sub | Mul | Div | Equal | LessThan;
+type UnaryOp = Negate | Not;
+
+type Env = Map[String, Int];
+
+type EvalError =
+    | UndefinedVariable(name: String)
+    | DivisionByZero
+    | TypeError(message: String);
+
+// Evaluator — pure recursion, no loops
+fn eval(expr: Expr, env: Env) -> Int ! [EvalError]
+cost ≤ expr_size(expr) * 10
+{
+    match expr {
+        Literal(n) => n,
+
+        Variable(name) => match env.get(name) {
+            Some(value) => value,
+            None => throw EvalError.UndefinedVariable(name),
+        },
+
+        BinOp(op, left, right) => {
+            let left_val = eval(left, env)?;
+            let right_val = eval(right, env)?;
+            eval_binop(op, left_val, right_val)?
+        },
+
+        UnaryOp(op, e) => {
+            let val = eval(e, env)?;
+            match op {
+                Negate => -val,
+                Not => if val == 0 { 1 } else { 0 },
+            }
+        },
+
+        Let(name, value_expr, body) => {
+            let value = eval(value_expr, env)?;
+            let new_env = env.insert(name, value);
+            eval(body, new_env)?
+        },
+
+        If(cond, then_branch, else_branch) => {
+            let cond_val = eval(cond, env)?;
+            if cond_val != 0 {
+                eval(then_branch, env)?
+            } else {
+                eval(else_branch, env)?
+            }
+        },
+    }
+}
+
+fn eval_binop(op: Op, left: Int, right: Int) -> Int ! [EvalError] {
+    match op {
+        Add => left + right,
+        Sub => left - right,
+        Mul => left * right,
+        Div => if right == 0 {
+            throw EvalError.DivisionByZero
+        } else {
+            left / right
+        },
+        Equal => if left == right { 1 } else { 0 },
+        LessThan => if left < right { 1 } else { 0 },
+    }
+}
+
+// Usage
+fn example() {
+    // let x = 10 in let y = 20 in x + y
+    let expr = Expr.Let(
+        "x",
+        Expr.Literal(10),
+        Expr.Let(
+            "y",
+            Expr.Literal(20),
+            Expr.BinOp(Op.Add, Expr.Variable("x"), Expr.Variable("y"))
+        )
+    );
+
+    match eval(expr, Map.empty()) {
+        Ok(result) => print(f"Result: {result}"),  // Result: 30
+        Err(e) => print(f"Error: {e}"),
+    }
+}
+```
+
+### Concurrent producer-consumer
+
+This example demonstrates channels, structured concurrency, tail-recursive message processing, and zero use of loop constructs:
+
+```spore
+type Task =
+    | Process(id: Int, data: String)
+    | Stop;
+
+// Producer generates tasks and sends them to a channel
+fn producer(tx: Channel.Sender[Task], task_count: Int) {
+    (1..=task_count)
+        .map(|i| Task.Process(i, f"Task data {i}"))
+        .for_each(|task| tx.send(task));
+    tx.send(Task.Stop);
+}
+
+// Consumer processes tasks via tail recursion
+fn consumer(id: Int, rx: Channel.Receiver[Task], result_tx: Channel.Sender[String]) {
+    fn process(id: Int, rx: Channel.Receiver[Task], result_tx: Channel.Sender[String]) {
+        match rx.recv() {
+            Task.Process(task_id, data) => {
+                let result = f"Consumer {id} processed task {task_id}: {data}";
+                result_tx.send(result);
+                process(id, rx, result_tx)  // tail recursion
+            },
+            Task.Stop => {},
+        }
+    }
+    process(id, rx, result_tx)
+}
+
+// Result collector using tail recursion
+fn collector(rx: Channel.Receiver[String], expected: Int) {
+    fn collect(rx: Channel.Receiver[String], remaining: Int) {
+        if remaining <= 0 { return }
+        let result = rx.recv();
+        print(result);
+        collect(rx, remaining - 1)  // tail recursion
+    }
+    collect(rx, expected)
+}
+
+fn main() {
+    let task_count = 10;
+    let consumer_count = 3;
+    let (task_tx, task_rx) = Channel.new[Task](buffer: 5);
+    let (result_tx, result_rx) = Channel.new[String](buffer: 10);
+
+    parallel_scope {
+        spawn { producer(task_tx, task_count) };
+
+        (1..=consumer_count).for_each(|i| {
+            let rx_clone = task_rx.clone();
+            let tx_clone = result_tx.clone();
+            spawn { consumer(i, rx_clone, tx_clone) };
+        });
+
+        spawn { collector(result_rx, task_count) };
+    }
+
+    print("All tasks completed!");
+}
+```
 
 ## Human experience impact
 
@@ -1020,7 +1461,8 @@ The Spore AST is designed as a regular tree with strongly typed nodes. Key node 
 Program
 ├── ImportDecl { path, alias? }
 ├── ModuleDecl { name, uses, items[] }
-├── StructDecl { name, type_params[], fields[], implements[] }
+├── StructDecl { name, type_params[], fields[] }
+├── ImplDecl { capability, type_params[], target_type, methods[] }
 ├── TypeDecl { name, type_params[], body: TypeAlias | SumType | Refinement }
 ├── CapabilityDecl { name, type_params[], items[] }
 ├── ConstDecl { name, type, value }
@@ -1138,7 +1580,7 @@ The parser can recover from common errors:
 
 4. **No custom operators**: Domains like linear algebra or DSLs sometimes benefit from custom operators. Spore sacrifices this for predictability.
 
-5. **Square bracket overload**: `[]` is used for generics, list literals, index access, and the `uses`/error/implements clauses. Context resolves ambiguity, but it adds parser complexity.
+5. **Square bracket overload**: `[]` is used for generics, list literals, index access, and the `uses`/error clauses. Context resolves ambiguity, but it adds parser complexity.
 
 6. **Keyword count**: The reserved keyword set is large (40+), which constrains identifier names and increases the language surface area.
 
@@ -1187,13 +1629,14 @@ Rejected in favor of the `?` operator and `|>` pipes because:
 - `|>` provides general-purpose composition without requiring monad understanding.
 - Keeping the concept count low aids learnability.
 
-### Rust-style `impl` blocks for methods
+### Roc-style inline `implements` for trait implementation
 
-Spore uses inline `implements` on struct declarations and `self` as a regular parameter in capabilities. Separate `impl` blocks were considered but rejected to:
+The original design used Roc-style inline `implements [...]` on struct declarations. This was replaced by Rust-style `impl Trait for Type { ... }` blocks because:
 
-- Keep type-and-implementation co-located for readability.
-- Simplify the module structure.
-- Align with Roc's approach.
+- Separate `impl` blocks allow implementing third-party capabilities for existing types.
+- Multiple implementations are visually distinct rather than packed into a single line.
+- It aligns with the Rust mental model that most Spore users already know.
+- The `implements` keyword is reserved for potential future use.
 
 ### Exception-based error handling
 
@@ -1209,11 +1652,11 @@ Rejected because:
 
 Heavy influence on: curly-brace syntax, semicolon semantics (expression vs. statement), `match` exhaustiveness, `?` error propagation, `where` clauses, `let` bindings, closure syntax (`|x| x`), pattern matching, enum/struct distinction.
 
-Departed from: Spore removes lifetime annotations, borrowing semantics, `mut` keyword, `loop`/`for`/`while`, `impl` blocks, and trait orphan rules.
+Departed from: Spore removes lifetime annotations, borrowing semantics, `mut` keyword, `loop`/`for`/`while`, and trait orphan rules. Spore adopts Rust-style `impl Trait for Type` blocks.
 
 ### Roc
 
-Influence on: inline `implements` for trait implementation, expression-based design, capabilities as the unified trait mechanism, no-loop philosophy, the idea of making side effects visible in signatures.
+Influence on: expression-based design, capabilities as the unified trait mechanism, no-loop philosophy, the idea of making side effects visible in signatures.
 
 ### Gleam
 
@@ -1261,7 +1704,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 2. **Capability composition rules**: When a function calls two sub-functions with different `uses` sets, is the resulting set the union? How are capability aliases expanded for comparison?
 
-3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = I32 if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
+3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = Int if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
 
 4. **`throw` semantics**: Is `throw` syntactic sugar for `return Err(...)`, or does it have distinct unwinding semantics? The current spec treats it as sugar but this needs formalization.
 

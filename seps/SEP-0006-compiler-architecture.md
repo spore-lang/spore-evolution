@@ -236,7 +236,7 @@ Module { items: Vec<Spanned<Item>> }
 Item = FnDef | StructDef | TypeDef | CapabilityDef | Import | ...
 FnDef {
     name, params, return_type, error_set,
-    where_clause, with_clause, cost_clause, uses_clause,
+    where_clause, cost_clause, uses_clause,
     body
 }
 Expr = Literal | Ident | BinOp | UnaryOp | Call
@@ -425,15 +425,38 @@ minimal recompilation:
 ```text
 fn compile_batch(modules: Set<ModuleId>, graph: DepGraph):
     let levels = topological_levels(modules, graph)
-    for level in levels:
-        parallel_for module_id in level:
+    levels.iter().for_each(|level|
+        level.par_iter().for_each(|module_id|
             compile(module_id)
             update_diagnostics(module_id)
             update_hole_report(module_id)
+        )
+    )
 ```
 
 Independent modules within the same topological level are compiled in parallel.
 Default parallelism = CPU core count; override with `--jobs N`.
+
+#### Change detection pseudocode
+
+```pseudocode
+fn on_file_changed(path: Path) -> ChangeResult:
+    let source = read_file(path)
+    let module_id = resolve_module(path)
+    let new_impl_hash = hash_impl(source)
+
+    if new_impl_hash == cache.get_impl_hash(module_id):
+        return ChangeResult::Unchanged
+
+    let new_sig_hash = compute_sig_hash(source)
+    let old_sig_hash = cache.get_sig_hash(module_id)
+    cache.update(module_id, new_impl_hash, new_sig_hash)
+
+    if new_sig_hash == old_sig_hash:
+        return ChangeResult::ImplOnly(module_id)
+    else:
+        return ChangeResult::SigChanged(module_id)
+```
 
 ### Watch mode
 
@@ -531,6 +554,208 @@ Watch mode **never exits** (except on Ctrl+C). Recovery behavior:
 | Circular dependency | Report error, interrupt affected module subtree |
 | File deleted | Remove from dependency graph, mark dependents as errored |
 | Compiler panic | Catch and report as internal error, continue watching |
+
+#### Complete watch terminal output
+
+```text
+$ spore watch
+[watch] Watching project: ./my-project (42 modules)
+[watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
+
+  Warnings:
+    src/net/http.spore:23:5  unused import: `Timeout`        [W0102]
+    src/db/query.spore:45:12 unused capability: `FileSystem`  [W0105]
+
+  Holes (5):
+    ◯ src/auth/login.spore:30   authenticate     : User -> Token
+    ◯ src/auth/login.spore:45   validate_token   : Token -> Bool
+    ◯ src/db/query.spore:12     execute_query    : Query -> Result
+    ◯ src/net/http.spore:67     handle_request   : Request -> Response
+    ◯ src/net/http.spore:89     parse_headers    : Bytes -> Headers
+
+[watch] Waiting for file changes...
+```
+
+#### Hole fill progressive watch session
+
+```text
+$ spore watch
+[watch] ✓ Initial compilation complete, 0 errors, 3 holes
+
+  Holes (3):
+    ◯ src/auth.spore:10  hash_password     : String -> HashedPassword
+    ◯ src/auth.spore:20  verify_password   : String -> HashedPassword -> Bool
+    ◯ src/app.spore:50   create_user       : UserInput -> Result User Error
+         ⚠ blocked: depends on hash_password, verify_password
+  Ready to fill: hash_password, verify_password
+
+// --- Developer fills hash_password ---
+
+[watch] ─── Change detected ────────────────────────
+[watch] File changed: src/auth.spore
+[watch] Recompiling: src/auth.spore ... OK (28ms)
+[watch] sig hash unchanged → skipping downstream
+  ✓ 0 errors, 2 holes (was: 3)
+    ● hash_password      [filled ✓]
+    ◯ verify_password   : String -> HashedPassword -> Bool
+    ◯ create_user       ⚠ blocked: depends on verify_password
+  Ready to fill: verify_password
+
+// --- Developer fills verify_password ---
+
+[watch] ─── Change detected ────────────────────────
+[watch] File changed: src/auth.spore
+[watch] Recompiling: src/auth.spore ... OK (31ms)
+[watch] sig hash changed → checking downstream:
+         └─ src/app.spore ... OK (22ms)
+  ✓ 0 errors, 1 hole
+    ● verify_password    [filled ✓]
+    ◯ create_user       → no longer blocked!
+  Ready to fill: create_user
+
+// --- Developer fills create_user ---
+
+[watch] ─── Change detected ────────────────────────
+[watch] File changed: src/app.spore
+[watch] Recompiling: src/app.spore ... OK (35ms)
+  ✓ 0 errors, 0 holes 🎉 All holes filled!
+```
+
+#### Hole status data structures
+
+```text
+type HoleReport:
+    total: Nat
+    filled_this_cycle: List Hole
+    ready_to_fill: List Hole        // dependencies satisfied, can implement now
+    blocked: List BlockedHole       // has unmet dependencies
+
+type Hole:
+    module: ModuleId
+    location: SourceLocation
+    name: String
+    signature: Type
+
+type BlockedHole:
+    hole: Hole
+    blocked_by: List ModuleId       // modules containing unfilled dependency holes
+```
+
+#### Module dependency graph structures
+
+```text
+type DepGraph:
+    nodes: Map ModuleId ModuleInfo
+    edges: Map ModuleId (Set ModuleId)      // module → modules it depends on
+    reverse: Map ModuleId (Set ModuleId)    // module → modules depending on it
+
+type ModuleInfo:
+    id: ModuleId
+    path: Path
+    impl_hash: Hash
+    sig_hash: Hash
+    capabilities: Set Capability
+    cost_annotation: CostBound
+    holes: List Hole
+```
+
+#### Dependency graph incremental update
+
+```pseudocode
+fn update_dep_graph(module_id: ModuleId, old_deps: Set<ModuleId>, new_deps: Set<ModuleId>):
+    // Remove stale edges
+    (old_deps - new_deps).iter().for_each(|dep|
+        graph.edges[module_id].remove(dep)
+        graph.reverse[dep].remove(module_id)
+    )
+    // Add new edges
+    (new_deps - old_deps).iter().for_each(|dep|
+        graph.edges[module_id].insert(dep)
+        graph.reverse[dep].insert(module_id)
+    )
+    // Cycle check
+    if has_cycle(graph, module_id):
+        emit_error("circular dependency", module_id)
+```
+
+#### Capability propagation watch output
+
+```text
+[watch] sig hash changed (capability set changed)
+[watch] Capability change: HttpClient: {Network} → {Network, FileSystem}
+[watch] Checking project capability ceiling...
+         ceiling allows: {Network, FileSystem, Clock} → ✓ within bounds
+[watch] Downstream capability compatibility:
+         ├─ src/api/client.spore → OK
+         └─ src/app.spore → propagation stops
+[watch] ✓ 3 modules recompiled, 0 errors, 1 capability warning
+```
+
+When the ceiling is exceeded:
+
+```text
+[watch] ✗ Error: HttpClient added capability `Crypto`
+         Project ceiling: {Network, FileSystem, Clock}
+         `Crypto` not in ceiling — update ceiling or remove usage
+```
+
+#### Cost propagation watch output
+
+```text
+[watch] Cost change: sort: O(n·log n) → O(n²)
+[watch] Checking downstream cost budgets:
+         ├─ src/data/table.spore
+         │   sort_column budget: O(n·log n) → ✗ exceeded
+         └─ src/app.spore
+             process_data budget: O(n²) → ✓ within bounds
+[watch] ✗ 1 error
+```
+
+#### LSP Diagnostics JSON conversion + `spore/holeUpdate` schema
+
+Watch events are converted to LSP messages by the Spore LSP server:
+
+```json
+{
+  "method": "textDocument/publishDiagnostics",
+  "params": {
+    "uri": "file:///project/src/auth.spore",
+    "diagnostics": [{
+      "range": {
+        "start": { "line": 22, "character": 9 },
+        "end": { "line": 22, "character": 24 }
+      },
+      "severity": 1,
+      "code": "E0301",
+      "source": "spore",
+      "message": "type mismatch: expected `Token`, found `String`"
+    }]
+  }
+}
+```
+
+#### `spore/holeUpdate` custom LSP notification
+
+```json
+{
+  "method": "spore/holeUpdate",
+  "params": {
+    "holes": [
+      {
+        "uri": "file:///project/src/auth.spore",
+        "range": {
+          "start": { "line": 29, "character": 4 },
+          "end": { "line": 29, "character": 50 }
+        },
+        "name": "authenticate",
+        "signature": "User -> Token",
+        "status": "ready_to_fill"
+      }
+    ],
+    "summary": { "total": 2, "ready": 1, "blocked": 1 }
+  }
+}
+```
 
 ### Diagnostic output formats
 
@@ -640,6 +865,28 @@ derived from a JSON field. Schema:
 }
 ```
 
+#### JSON field requirements
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `severity` | string | **required** | `"error"`, `"warning"`, or `"note"` |
+| `code` | string | **required** | Error code (e.g., `"E0301"`) |
+| `message` | string | **required** | Human-readable headline |
+| `location` | object | **required** | Primary source location with file and range |
+| `related` | array | optional | Related source locations with messages |
+| `inference_chain` | array | optional | Step-by-step type derivation (populated in `--verbose` and `--json`) |
+| `candidates` | array | optional | Conversions/overloads considered by the compiler |
+| `context` | object | **required** | Capability, cost, and scope context |
+| `context.capabilities` | string[] | **required** | Capabilities in scope at error site |
+| `context.cost_used` | int | optional | Cost accumulated before error site (null if no cost clause) |
+| `context.cost_budget` | int | optional | Total cost budget (null if no cost clause) |
+| `context.enclosing_function` | string | **required** | Name of the containing function |
+| `context.enclosing_module` | string | **required** | Module path |
+| `context.hole` | string | optional | Hole name if this diagnostic is hole-related (null otherwise) |
+| `suggested_fix` | object | optional | Machine-applicable fix suggestion |
+| `suggested_fix.applicability` | string | **required** (if `suggested_fix` present) | `"safe"`, `"unsafe"`, or `"informational"` |
+| `suggested_fix.edits` | array | **required** (if `suggested_fix` present) | List of text edits |
+
 LSP compatibility: the JSON schema maps directly to LSP `Diagnostic` objects.
 Spore extension fields (`inference_chain`, `candidates`, `context`) are placed
 in the standard LSP `data.spore` namespace.
@@ -659,6 +906,52 @@ All diagnostics carry categorized codes:
 
 Every code is queryable: `sporec --explain E0301` prints a detailed explanation
 with common causes, examples, and fix strategies.
+
+#### `sporec --explain` output format
+
+```text
+$ sporec --explain E0301
+
+  E0301: type mismatch
+
+  This error occurs when an expression has a type that is incompatible
+  with the type expected by its context. Common contexts include:
+
+  - Function arguments (actual type ≠ parameter type)
+  - Return statements (expression type ≠ declared return type)
+  - Variable bindings (right side type ≠ left side annotation)
+  - Struct fields (value type ≠ field type)
+  - Match arms (arm type ≠ sibling arm types)
+  - Pipe operator (left-hand type ≠ right-hand function's first parameter)
+
+  Example:
+      fn greet(name: String) -> String { ... }
+      greet(42)   // error: expected String, found Int
+
+  Common fixes:
+  - Use a conversion function (e.g. `Int.to_string(42)`)
+  - Change the declaration to accept the actual type
+  - Add a type annotation to guide inference
+
+  See also: E0302 (return type mismatch), E0401 (constraint not satisfied)
+```
+
+### Performance targets
+
+Target latencies (aspirational, not hard guarantees):
+
+| Operation | Target | Notes |
+|-----------|--------|-------|
+| Single module recompilation | < 100ms | Type check + capability + cost |
+| Dependency graph traversal | < 10ms | Topological sort of module DAG |
+| Hash computation (single module) | < 5ms | blake3 of module content |
+| Full project initial analysis (~100 modules) | < 5s | Cold start, parallel compilation |
+| End-to-end latency (file save → diagnostics) | < 200ms | Including 100ms debounce |
+| Hole report update | < 50ms | Incremental HoleReport regeneration |
+
+**Cache strategy:** Watch mode maintains in-memory caches for hashes, dependency graph, compilation artifacts, and hole state. Persistence to disk is not required for v0.1 but is a future option.
+
+**Parallelism:** Default = CPU core count. Override with `--jobs N`.
 
 ---
 
@@ -729,9 +1022,36 @@ programmatic reasoning without parsing human-readable text. Key fields:
 The NDJSON stream provides a continuous event bus: the agent subscribes to
 `incremental_compile`, `diagnostic`, and `hole_update` events without polling.
 
+#### Agent mode selection
+
+| Scenario | Recommended Mode | Rationale |
+|----------|-----------------|-----------|
+| Agent filling holes | `--json` | Parse diagnostics, apply fixes programmatically |
+| Agent debugging complex type error | `--json` | Use `inference_chain` and `candidates` for reasoning |
+| Agent in CI pipeline | `--json --stream` | Machine-readable, earliest feedback per diagnostic |
+| Human scanning build output | Default | Concise, color-coded, glanceable |
+| Human debugging inference failure | `--verbose` | See inference chain in terminal |
+| IDE / LSP client | `--json` | Map to LSP Diagnostics with Spore extensions in `data` |
+
+#### Agent error recovery
+
+When an Agent's fix introduces new errors, the diagnostic system supports iterative repair:
+
+```text
+1. Agent applies fix for E0301 (type mismatch)
+2. sporec --json → new E0303 (error type mismatch introduced by fix)
+3. Agent reads inference_chain for E0303 → understands the cascading error
+4. Agent applies a second fix addressing E0303
+5. sporec --json → 0 errors
+```
+
+The `inference_chain` and `candidates` fields are specifically designed to give Agents enough context to reason about errors **without re-reading source files**. The original diagnostic for the first error is preserved in the Agent's context, enabling diff-based reasoning.
+
 ### Auto-fix integration
 
 Agents can apply machine-applicable fixes automatically:
+
+> **Note:** DESIGN.md uses `--fixes` in some places; the canonical CLI flag is `--fix` (consistent with `compiler-output-v0.1` spec).
 
 ```bash
 # Apply all safe fixes
@@ -748,6 +1068,71 @@ Fix applicability categories:
 | `safe` | `--fix` | Preserves behavior and type safety |
 | `unsafe` | `--unsafe-fix` | May change behavior; apply with caution |
 | `informational` | *(manual)* | Requires judgment |
+
+#### Fix suggestion types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Replacement** | Replace a span with new text | `"fifty dollars"` → `Money.from_string("fifty dollars")` |
+| **Insertion** | Insert text at a position (zero-width range) | Adding `currency: Currency.USD` to struct literal |
+| **Deletion** | Remove a span (new_text is empty string) | Removing a redundant match arm |
+| **Multi-edit** | Multiple edits in one file | Adding `uses [NetRead]` clause and updating a binding |
+| **Multi-file** | Edits spanning multiple files | Adding `pub` in defining module and updating import in consumer |
+
+#### Fix suggestion JSON examples
+
+**Safe fix — missing import (Insertion):**
+
+```json
+{
+  "description": "add missing import for `DateTime`",
+  "applicability": "safe",
+  "edits": [
+    {
+      "file": "src/scheduler.spore",
+      "range": { "start": { "line": 2, "col": 1 }, "end": { "line": 2, "col": 1 } },
+      "new_text": "import time.DateTime\n"
+    }
+  ]
+}
+```
+
+**Unsafe fix — remove unused variable (Deletion):**
+
+```json
+{
+  "description": "remove unused variable `temp`",
+  "applicability": "unsafe",
+  "edits": [
+    {
+      "file": "src/billing.spore",
+      "range": { "start": { "line": 38, "col": 5 }, "end": { "line": 38, "col": 45 } },
+      "new_text": ""
+    }
+  ]
+}
+```
+
+**Multi-file fix — make function public (Multi-file):**
+
+```json
+{
+  "description": "make `helper_fn` public and update import",
+  "applicability": "unsafe",
+  "edits": [
+    {
+      "file": "src/utils.spore",
+      "range": { "start": { "line": 10, "col": 1 }, "end": { "line": 10, "col": 3 } },
+      "new_text": "pub fn"
+    },
+    {
+      "file": "src/api.spore",
+      "range": { "start": { "line": 3, "col": 1 }, "end": { "line": 3, "col": 1 } },
+      "new_text": "import utils.helper_fn\n"
+    }
+  ]
+}
+```
 
 ---
 
@@ -770,6 +1155,25 @@ NDJSON event stream into LSP messages:
 | `diagnostic` | `textDocument/publishDiagnostics` |
 | `incremental_compile` | Diagnostics refresh |
 | `hole_update` | Custom `spore/holeUpdate` notification |
+
+#### LSP Diagnostic field mapping (precise)
+
+| Spore JSON | LSP `Diagnostic` | Conversion |
+|------------|------------------|------------|
+| `severity: "error"` | `severity: 1` | Direct: error=1, warning=2, note=3 |
+| `severity: "warning"` | `severity: 2` | |
+| `severity: "note"` | `severity: 3` | |
+| `code` | `code` | Direct string copy |
+| `message` | `message` | Direct string copy |
+| `location.range.start.line` | `range.start.line` | Spore is 1-indexed; LSP is 0-indexed. Subtract 1. |
+| `location.range.start.col` | `range.start.character` | Spore is 1-indexed; LSP is 0-indexed. Subtract 1. |
+| `location.range.end.line` | `range.end.line` | Subtract 1 |
+| `location.range.end.col` | `range.end.character` | Subtract 1 |
+| `related` | `relatedInformation` | Map each entry to `DiagnosticRelatedInformation` |
+| `suggested_fix` | via `codeAction` | Mapped to LSP `CodeAction` with `edit.changes` |
+| `inference_chain` | `data.spore.inference_chain` | Spore extension in `data` field |
+| `candidates` | `data.spore.candidates` | Spore extension in `data` field |
+| `context` | `data.spore.context` | Spore extension in `data` field |
 
 Compilation is triggered by file-system save events, not LSP `didChange` — this
 avoids expensive compilation of half-edited states.
@@ -817,6 +1221,40 @@ help: <suggested fix>
 Severity, code, location, source context, and help are **mandatory** for every
 diagnostic. The `= note:` lines and `related` locations are optional but
 encouraged for complex errors.
+
+#### Multi-line error display
+
+When an error spans multiple lines, the gutter marks the full range:
+
+```text
+error[E0102]: struct missing required field `currency`
+  --> src/billing.spore:15:5
+   |
+15 | /   let invoice = Invoice {
+16 | |       amount: 100,
+17 | |       recipient: user,
+18 | |   }
+   | |___^ missing field `currency`
+   |
+help: add the missing field: `currency: Currency.USD`
+```
+
+The `/ | |___^` format connects multi-line spans visually.
+
+#### ANSI color scheme
+
+| Element | Color | ANSI Code |
+|---------|-------|-----------|
+| `error` + error code | Red (bold) | `\x1b[1;31m` |
+| `warning` + warning code | Yellow (bold) | `\x1b[1;33m` |
+| `note` | Blue (bold) | `\x1b[1;34m` |
+| `help` | Green (bold) | `\x1b[1;32m` |
+| `hint` | Cyan (bold) | `\x1b[1;36m` |
+| Line numbers | Bright blue | `\x1b[94m` |
+| Source text | Default | — |
+| Underline (`^^^`) | Matches severity color | — |
+
+Colors are disabled when output is piped (not a TTY) or when `--no-color` is passed. The `--json` mode never includes ANSI codes.
 
 ### Error categories and examples
 
@@ -892,6 +1330,154 @@ compilation rather than stopping at the first:
 **Deduplication policy:** when a single root cause produces multiple downstream
 errors, the compiler shows the root error in full and collapses downstream
 errors into `= note: N additional errors caused by this`.
+
+### Complete Error Code Registry
+
+All diagnostics carry a categorized code. Every code is queryable: `sporec --explain CODE`.
+
+#### E0xxx — Type Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| `E0101` | missing-field | Struct literal missing a required field |
+| `E0102` | unknown-field | Struct literal contains a field not in the type definition |
+| `E0103` | duplicate-field | Struct literal contains the same field twice |
+| `E0104` | field-type-mismatch | Struct field value type does not match declaration |
+| `E0105` | tuple-length-mismatch | Tuple has wrong number of elements |
+| `E0106` | missing-variant-field | Enum variant constructor missing a field |
+| `E0107` | record-vs-tuple | Used record syntax where tuple expected, or vice versa |
+| `E0108` | non-struct-field-access | Field access on a non-struct type |
+| `E0109` | private-field-access | Accessing a private field from outside the defining module |
+| `E0110` | spread-type-mismatch | Spread operator (`..base`) type does not match struct |
+| `E0201` | arity-mismatch | Function called with wrong number of arguments |
+| `E0202` | named-arg-mismatch | Named argument does not match any parameter |
+| `E0203` | missing-required-arg | Required argument not provided |
+| `E0204` | duplicate-arg | Same argument provided twice |
+| `E0301` | type-mismatch | Expression type incompatible with expected type |
+| `E0302` | return-type-mismatch | Function body returns wrong type |
+| `E0303` | error-type-mismatch | Function raises undeclared error type |
+| `E0304` | if-branch-mismatch | If/else branches have different types |
+| `E0305` | match-arm-mismatch | Match arms have different types |
+| `E0306` | operator-type-error | Operator applied to incompatible types |
+| `E0307` | index-type-error | Non-integer used as index |
+| `E0308` | not-callable | Attempt to call a non-function value |
+| `E0309` | pipe-type-mismatch | Pipe operator left-hand side incompatible with right-hand function |
+| `E0310` | lambda-return-mismatch | Lambda body type does not match expected return |
+| `E0401` | constraint-not-satisfied | Generic type does not satisfy trait constraint |
+| `E0402` | ambiguous-type | Type inference cannot determine a unique type |
+| `E0403` | recursive-type | Infinitely recursive type definition |
+| `E0404` | gat-mismatch | Generic associated type arguments do not match |
+| `E0501` | pattern-exhaustiveness | Match does not cover all variants |
+| `E0502` | pattern-type-mismatch | Pattern type does not match scrutinee type |
+| `E0503` | duplicate-pattern | Same pattern appears twice in match |
+| `E0504` | guard-type-error | Match guard expression is not Bool |
+
+#### W0xxx — Warnings
+
+| Code | Name | Description |
+|------|------|-------------|
+| `W0101` | unused-variable | Variable bound but never read |
+| `W0102` | unused-import | Module import never referenced |
+| `W0103` | unused-function | Private function never called |
+| `W0104` | unused-type | Private type never referenced |
+| `W0105` | unused-capability | Declared capability never exercised |
+| `W0201` | redundant-pattern | Match arm unreachable due to prior arm |
+| `W0202` | redundant-constraint | Generic constraint implied by another |
+| `W0203` | redundant-parentheses | Unnecessary parentheses around expression |
+| `W0301` | shadowing | Variable shadows binding in outer scope |
+| `W0302` | implicit-discard | Expression result discarded without explicit `_` |
+
+#### C0xxx — Capability Violations
+
+| Code | Name | Description |
+|------|------|-------------|
+| `C0101` | undeclared-capability | Function uses capability not in `uses` |
+| `C0102` | exceeds-ceiling | Function `uses` exceeds module ceiling |
+| `C0103` | callee-capability-leak | Calling function whose `uses` exceeds caller's |
+| `C0104` | transitive-capability | Transitive callee introduces undeclared capability |
+| `C0201` | platform-capability-denied | Package requests capability Platform does not grant |
+| `C0202` | platform-missing | No Platform provides required capability |
+| `C0301` | capability-purity-conflict | `uses []` (pure) function calls impure code |
+
+#### K0xxx — Cost Violations
+
+| Code | Name | Description |
+|------|------|-------------|
+| `K0101` | budget-exceeded | Concrete cost exceeds `cost ≤ K` |
+| `K0102` | symbolic-budget-exceeded | Symbolic cost may exceed bound for some inputs |
+| `K0103` | cost-underflow | Remaining budget negative after prior statements |
+| `K0201` | unbounded-call | Calling `unbounded` function without `with_cost_limit` |
+| `K0202` | unbounded-recursion | Recursive function without structural termination proof |
+| `K0301` | cost-declaration-missing | Function with cost-sensitive callees but no `cost ≤ K` |
+
+#### H0xxx — Hole Diagnostics
+
+| Code | Name | Description |
+|------|------|-------------|
+| `H0101` | hole-report | Standard hole report with type, bindings, candidates |
+| `H0102` | hole-type-conflict | Explicit annotation conflicts with inferred type |
+| `H0103` | hole-unconstrained | Hole has no type constraints from context |
+| `H0201` | partial-function | Function contains one or more unfilled holes |
+| `H0202` | hole-cost-tight | Remaining budget < 10% of total |
+| `H0301` | hole-duplicate-name | Two holes share a name in the same module |
+| `H0302` | hole-in-signature | Hole in signature position (not allowed for value holes) |
+| `H0303` | circular-hole-dependency | Circular hole dependency detected |
+
+#### M0xxx — Module Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| `M0101` | circular-dependency | Modules form a dependency cycle |
+| `M0102` | self-import | Module imports itself |
+| `M0103` | duplicate-module | Two files map to the same module path |
+| `M0201` | visibility-violation | Accessing private or `pub(pkg)` symbol from outside scope |
+| `M0202` | re-export-visibility | Re-exporting with broader visibility than original |
+| `M0203` | orphan-impl | Implementing external trait for external type |
+| `M0301` | import-not-found | Imported module or symbol does not exist |
+| `M0302` | ambiguous-import | Two imports bring same name into scope |
+| `M0303` | wildcard-import | Wildcard imports are not allowed in Spore |
+| `M0401` | snapshot-changed | Dependent signature hash changed; requires `--permit` |
+| `M0402` | snapshot-missing | Referenced snapshot not found in `.spore-lock` |
+
+### System integration
+
+Diagnostics do not exist in isolation — they connect to every major Spore subsystem:
+
+#### Hole System integration
+
+- `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
+- `sporec --query-hole <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
+- Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
+- The HoleReport JSON extends the diagnostic schema with a `hole_report` field
+
+#### Cost System integration
+
+- `K0101` (budget exceeded) includes cost breakdown in `inference_chain`
+- `K0102` (symbolic exceeded) includes the symbolic expression and concrete counterexample
+- `context.cost_used` and `context.cost_budget` are populated for **all** diagnostics in functions with `cost ≤ K`, not just cost errors
+
+#### Capability System integration
+
+Three enforcement levels:
+1. **Function level** (`C0101`): body uses operations beyond declared `uses`
+2. **Module level** (`C0102`): function `uses` exceeds module ceiling
+3. **Platform level** (`C0201`): package requests capabilities Platform does not grant
+
+`context.capabilities` in every diagnostic lists capabilities in scope, enabling Agents to reason about available operations.
+
+#### Snapshot System integration
+
+- `M0401` (snapshot-changed) emits both expected and actual signature hashes
+- The `suggested_fix` for `M0401` is always `informational` — the developer must explicitly run `spore --permit` to accept the change
+- `related` field points to the changed signature's declaration
+
+> **Note on `--permit`:** The `--permit` flag is a Codebase Manager (`spore`) command, not a compiler (`sporec`) flag. It updates `.spore-lock` to accept the new signature hash.
+
+#### Module System integration
+
+- `M0101` (circular dependency): `inference_chain` shows the full cycle path
+- `M0201` (visibility violation): `candidates` may list public alternatives
+- `M0301` (import not found): `suggested_fix` uses fuzzy matching for closest valid import
 
 ---
 
@@ -982,6 +1568,59 @@ after type checking.
 shares trait resolution infrastructure. Cost checking depends on fully resolved
 types and call graphs. Merging all three into a unified TypeCheck pass avoids
 redundant tree traversals and simplifies the impl hash boundary.
+
+### Why every diagnostic includes `help:`
+
+A diagnostic without a suggestion is a dead end. By mandating `help:` on every diagnostic:
+
+- Beginners always have a next step
+- Agents can extract fix suggestions without additional reasoning
+- The compiler team is forced to think about actionability when defining new error codes
+
+Some `help:` lines are concrete (`try Money.from_string(...)`) and some are strategic (`extract shared types into a new module`). Both are valuable.
+
+### Why category-based error codes
+
+Codes like `E0301` are more useful than raw names:
+
+- **Filterable:** `sporec --json | jq '.diagnostics[] | select(.code | startswith("K"))'` gives all cost errors
+- **Discoverable:** `sporec --explain E0301` opens documentation
+- **Stable:** codes don't change when messages are reworded; CI can allowlist specific codes
+- **Cross-referencing:** docs, forums, and issue trackers reference `E0301` unambiguously
+
+The prefix convention (E/W/C/K/H/M) maps directly to Spore's major subsystems.
+
+### Architectural Decision Records (ADRs)
+
+#### ADR-001: Developer-time DX scope
+
+**Decision:** Incremental compilation targets developer-time fast iteration, not production hot-swap.
+**Rationale:** DX is the highest-ROI investment; content-addressing naturally supports incremental compilation.
+**Consequence:** No runtime module replacement protocol; single-machine development scenarios only.
+
+#### ADR-002: Three capabilities
+
+**Decision:** "Program-as-Service" manifests as incremental compilation + real-time diagnostics + hole status tracking.
+**Rationale:** These cover the core feedback needs during coding: correctness, problem location, progress tracking.
+**Consequence:** `spore watch` is the unified carrier; JSON output contains all three information types.
+
+#### ADR-003: Module-level granularity
+
+**Decision:** The compilation unit is the module; sig hash unchanged → downstream skipped.
+**Rationale:** Modules have natural compilation boundaries (explicit export interfaces). Function-level granularity has diminishing returns.
+**Consequence:** Hash computation, dependency graph, and parallel compilation all operate at module granularity.
+
+#### ADR-004: File-save trigger
+
+**Decision:** Watch mode compiles on file-system save events, not per-keystroke.
+**Rationale:** Save is a natural "intent to check" signal; per-keystroke compilation produces noise from half-edited code.
+**Consequence:** Requires debounce; LSP triggers via FS events rather than `didChange`.
+
+#### ADR-005: Dual-format output
+
+**Decision:** Human-readable (default) + JSON (`--json`) output formats.
+**Rationale:** Terminal users need readable output; IDEs and agents need structured output.
+**Consequence:** Both formats derive from the same underlying `Diagnostic` struct; JSON is the superset.
 
 ---
 
@@ -1115,3 +1754,38 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
     tracking at runtime) or a minimal subset for early testing? This affects
     the PoC timeline and determines how much behavior can be validated before
     Cranelift codegen is ready.
+
+#### Diagnostic suppression mechanism
+
+Specific diagnostics can be suppressed using inline annotations:
+
+```spore
+#[allow(W0301)]
+let count = filtered.len()   // shadowing is intentional here
+```
+
+Project-level suppression via `spore.toml`:
+
+```toml
+[diagnostics]
+allow = ["W0302"]   # allow implicit discards project-wide
+```
+
+Suppression is limited to **warnings only** — errors and notes cannot be suppressed. The `#[allow(...)]` attribute applies to the next statement or the enclosing block.
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **impl hash** | Hash of module implementation content; determines whether to recompile this module |
+| **sig hash** | Hash of module public interface; determines whether downstream dependents need rechecking |
+| **hole** | Source-code placeholder (`?name`) for unfinished implementation, carrying type information |
+| **capability** | A declared system permission (e.g., `Network`, `FileSystem`) required to perform certain operations |
+| **capability ceiling** | Project-level maximum capability set; no module may exceed it |
+| **cost annotation** | A declared upper bound on a function's computational cost (`cost ≤ K`) |
+| **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
+| **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |
+
+
