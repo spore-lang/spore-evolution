@@ -155,6 +155,26 @@
       "discussion": "https://github.com/spore-lang/spore-evolution/discussions/8",
       "pr": null,
       "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0009-standard-library.md",
+      "sep": 9,
+      "title": "SEP-0009: Standard Library Surface",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore Contributors"
+      ],
+      "created": "2026-04-01",
+      "requires": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions",
+      "pr": null,
+      "superseded_by": null
     }
   ]
 }
