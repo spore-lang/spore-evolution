@@ -16,6 +16,8 @@ superseded_by: null
 
 # SEP-0004: Cost Analysis & Decidability
 
+> **Executive Summary**: Introduces 4-dimensional cost analysis with CostVector(compute, alloc, io, parallel), where cost expressions are restricted to a decidable grammar (+, ×, ^const, log, max, min). Provides a three-tier escape mechanism (@unbounded for opt-out, @allow for local override, advisory warnings for gradual adoption) and formal cost inference rules for higher-order function propagation. Targets O(n⁵) verification complexity.
+
 ## Summary
 
 This SEP specifies Spore's compile-time cost analysis system — a three-tier mechanism that statically determines or verifies upper bounds on resource consumption for every function. The system operates along four cost dimensions — **compute(op)**, **alloc(cell)**, **io(call)**, **parallel(lane)** — and leverages the fact that Spore has **no loops** (all iteration is expressed via recursion and higher-order functions) to make cost analysis equivalent to recursion analysis.
@@ -263,6 +265,89 @@ Every system call (file read/write, network request, stdio, random number genera
 | Parallel `parallel { A, B }` | C, A, W: `max(cost(A), cost(B)) + sync_overhead`; P: `sum(P(A), P(B))` |
 
 > **Concurrent sync overhead.** The `sync_overhead` is a configurable constant (default: 0) representing the synchronisation cost of joining parallel branches. It can be set in `spore.toml` as `[cost] sync_overhead = 10`. When set to 0 (the default), the parallel cost reduces to a simple `max`. Projects requiring precise modelling of fork/join overhead should configure this parameter.
+
+### Formal cost judgments
+
+**Notation:**
+- `K(e)` — cost of expression e as a CostVector
+- `⊕` — pointwise CostVector addition
+- `⊗` — CostVector scaling
+- `≤` — pointwise CostVector comparison (each dimension ≤)
+
+**Cost inference rules:**
+
+```
+[Cost-Literal]
+  K(literal) = (0, 0, 0, 0)
+
+[Cost-Var]
+  K(x) = (0, 0, 0, 0)
+
+[Cost-BinOp]
+  K(a op b) = K(a) ⊕ K(b) ⊕ (1, 0, 0, 0)
+
+[Cost-Alloc]
+  K(S { ... }) = K(field_exprs) ⊕ (0, 1, 0, 0)
+
+[Cost-App]
+  f has declared cost C_f(args)
+  K(f(args)) = K(args) ⊕ C_f(args)
+
+[Cost-If]
+  K(if c { t } else { e }) = K(c) ⊕ max(K(t), K(e))
+
+[Cost-Match]
+  K(match s { pᵢ => eᵢ }) = K(s) ⊕ max(K(e₁), ..., K(eₙ))
+
+[Cost-Let]
+  K(let x = e₁; e₂) = K(e₁) ⊕ K(e₂)
+
+[Cost-Spawn]
+  K(spawn e) = (1, 1, 0, 1) ⊕ K(e) projected onto parallel dimension
+  (parallel dimension tracks spawned lanes)
+
+[Cost-HOF-Map]
+  K(map(f, xs)) = |xs| ⊗ K_body(f) ⊕ (0, |xs|, 0, 0)
+
+[Cost-HOF-Fold]
+  K(fold(f, init, xs)) = |xs| ⊗ K_body(f)
+
+[Cost-HOF-Filter]
+  K(filter(p, xs)) = |xs| ⊗ K_body(p) ⊕ (0, |xs|, 0, 0)
+```
+
+**Verification judgment:**
+
+```
+[Cost-Verify]
+  fn f(x₁: T₁, ..., xₙ: Tₙ) -> R cost C_declared
+  K_inferred = infer_cost(body)
+  K_inferred ≤ C_declared  (pointwise, asymptotically)
+  ─────────────────────────────────────────────────────
+  f is cost-valid
+
+[Cost-Unbounded]
+  fn f(...) -> R cost @unbounded
+  ─────────────────────────────────────────────────────
+  f is cost-valid  (trivially, no verification needed)
+
+[Cost-Propagation]
+  fn f(...) -> R cost C_f
+  fn g(...) -> R' = ... f(args) ...
+  g has no cost annotation
+  ─────────────────────────────────────────────────────
+  inferred cost of g includes C_f(args) at each call site
+```
+
+**Decidability of cost comparison:**
+
+The cost expression language is intentionally restricted to ensure decidability:
+- Allowed operations: `+`, `×`, `^c` (constant exponent), `log`, `max`, `min`
+- Disallowed: arbitrary exponentiation, division, subtraction
+- Comparison `C₁ ≤ C₂` is decidable for this restricted grammar via:
+  1. Normalize both expressions to canonical form
+  2. Apply asymptotic dominance rules (e.g., `n² + n ≤ n²` simplifies to `n ≤ 0` for large n)
+  3. Verify each CostVector dimension independently
 
 ### 4.4 CostExpr grammar
 

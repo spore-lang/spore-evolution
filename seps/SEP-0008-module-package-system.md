@@ -16,6 +16,8 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
+> **Executive Summary**: Defines a content-addressed package system (SHA-256 over normalized source) with platform-as-package architecture, where platforms provide effect handlers via `foreign fn` declarations. Enforces visibility rules (pub/internal) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through capability isolation — downloaded packages declaring `uses [Compute]` provably cannot access IO.
+
 ## Summary
 
 This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a capability-based trust model secures the supply chain.

@@ -16,6 +16,8 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
+> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). Supports NDJSON watch mode for IDE integration, content-addressed caching via signature and implementation hashes, and a `--verbose` output mode for detailed diagnostic context.
+
 ## Summary
 
 This SEP specifies the architecture of the Spore compiler (`sporec`), covering the

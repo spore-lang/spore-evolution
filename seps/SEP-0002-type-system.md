@@ -15,6 +15,8 @@ superseded_by: null
 
 # SEP-0002: Type System
 
+> **Executive Summary**: Defines Spore's nominal-primary type system with bidirectional inference, unifying capabilities as traits on execution context. Features three-tier refinement types (L0 decidable constraints → L1 SMT-backed → L2 proof obligations), 13 compiler-known traits, generics with where-clause bounds, and enum/struct/capability as the core type constructors. Includes formal typing judgments for the core language.
+
 ## Summary
 
 This SEP specifies the type system for the Spore programming language. Spore's type system is a **nominal-primary, bidirectionally-inferred** system that sits between Rust and Haskell on the expressiveness spectrum — more targeted than full dependent types, yet richer than a Hindley–Milner core alone.
@@ -1040,6 +1042,138 @@ If `C_f ⊄ C_caller`, the checker emits:
 
 ```text
 missing capabilities [X, Y]: caller does not declare them
+```
+
+### Formal typing judgments
+
+The core type system uses bidirectional typing with capability context.
+
+**Notation:**
+- `Γ` — type environment (variable → type mapping)
+- `S` — capability set (subset of all capabilities)
+- `e` — expression
+- `T` — type
+- `⊢` — "entails" / judgment turnstile
+- `⇒` — type synthesis (infer)
+- `⇐` — type checking (against expected)
+
+**Core judgments:**
+
+```
+Γ; S ⊢ e ⇒ T        (synthesis: infer type of e)
+Γ; S ⊢ e ⇐ T        (checking: check e against T)
+```
+
+**Rules:**
+
+```
+[Var]
+  x : T ∈ Γ
+  ─────────────────
+  Γ; S ⊢ x ⇒ T
+
+[Literal-Int]
+  ─────────────────
+  Γ; S ⊢ n ⇒ Int
+
+[Literal-Str]
+  ─────────────────
+  Γ; S ⊢ s ⇒ String
+
+[Literal-Bool]
+  ─────────────────
+  Γ; S ⊢ b ⇒ Bool
+
+[Lambda]
+  Γ, x : T₁ ; S ⊢ body ⇐ T₂
+  ─────────────────────────────
+  Γ; S ⊢ (fn(x: T₁) -> T₂ { body }) ⇒ T₁ → T₂ uses S
+
+[App]
+  Γ; S ⊢ f ⇒ T₁ → T₂ uses S_f
+  Γ; S ⊢ arg ⇐ T₁
+  S_f ⊆ S
+  ─────────────────────────────
+  Γ; S ⊢ f(arg) ⇒ T₂
+
+[Let]
+  Γ; S ⊢ e₁ ⇒ T₁
+  Γ, x : T₁ ; S ⊢ e₂ ⇒ T₂
+  ─────────────────────────────
+  Γ; S ⊢ (let x = e₁; e₂) ⇒ T₂
+
+[If]
+  Γ; S ⊢ cond ⇐ Bool
+  Γ; S ⊢ then_branch ⇒ T
+  Γ; S ⊢ else_branch ⇐ T
+  ─────────────────────────────
+  Γ; S ⊢ (if cond { then } else { else }) ⇒ T
+
+[Match]
+  Γ; S ⊢ scrutinee ⇒ T_s
+  ∀i: pattern_i exhaustive over T_s
+  ∀i: Γ, bindings(pattern_i) ; S ⊢ body_i ⇒ T
+  ─────────────────────────────────────────────
+  Γ; S ⊢ (match scrutinee { pattern_i => body_i }) ⇒ T
+
+[StructConstruct]
+  struct S { f₁: T₁, ..., fₙ: Tₙ } ∈ Γ
+  ∀i: Γ; S_cap ⊢ eᵢ ⇐ Tᵢ
+  ─────────────────────────────
+  Γ; S_cap ⊢ S { f₁: e₁, ..., fₙ: eₙ } ⇒ S
+
+[FieldAccess]
+  Γ; S ⊢ e ⇒ T_struct
+  T_struct has field f : T_f
+  ─────────────────────────────
+  Γ; S ⊢ e.f ⇒ T_f
+
+[EnumConstruct]
+  type E { ..., V(T₁, ..., Tₙ), ... } ∈ Γ
+  ∀i: Γ; S ⊢ eᵢ ⇐ Tᵢ
+  ─────────────────────────────
+  Γ; S ⊢ V(e₁, ..., eₙ) ⇒ E
+
+[Spawn]
+  Γ; S ⊢ e ⇒ T uses S_e
+  Compute ∈ S
+  ─────────────────────────────
+  Γ; S ⊢ spawn e ⇒ Task[T]
+
+[Await]
+  Γ; S ⊢ e ⇒ Task[T]
+  ─────────────────────────────
+  Γ; S ⊢ await e ⇒ T
+
+[CapabilityCheck]
+  Γ; S ⊢ e ⇒ T uses S_required
+  S_required ⊆ S
+  ─────────────────────────────
+  (e is valid in capability context S)
+
+[Sub]
+  Γ; S ⊢ e ⇒ T₁
+  T₁ <: T₂
+  ─────────────────────────────
+  Γ; S ⊢ e ⇐ T₂
+```
+
+**Subtyping rules:**
+
+```
+[Sub-Refl]
+  T <: T
+
+[Sub-Fn]
+  T₁' <: T₁    T₂ <: T₂'    S ⊆ S'
+  ─────────────────────────────
+  (T₁ → T₂ uses S) <: (T₁' → T₂' uses S')
+  (contravariant params, covariant return, covariant capabilities)
+
+[Sub-Task]
+  T <: T'
+  ─────────────────────────────
+  Task[T] <: Task[T']
 ```
 
 ### 4.3 Bidirectional type inference

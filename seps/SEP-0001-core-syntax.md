@@ -14,6 +14,8 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
+> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations.
+
 ## Summary
 
 This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with capability-based security, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), capability requirements (`uses`), error sets (`!`), and cost bounds (`cost`) as composable clauses. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
