@@ -16,6 +16,8 @@ superseded_by: null
 
 # SEP-0007: Concurrency Model
 
+> **Executive Summary**: Defines structured concurrency with `spawn`/`await`/`select` primitives, where `Task[T]` serves as a typed future representing an asynchronous computation. Introduces Lanes as the parallel cost dimension (tracked in CostVector), hierarchical cancellation scoping tied to lexical blocks, and channel-based communication (Chan[T]) with bounded buffers for inter-task messaging.
+
 ## Summary
 
 This proposal defines the concurrency model for the Spore programming language. The model is built on four pillars:

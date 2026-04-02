@@ -17,6 +17,8 @@ superseded_by: null
 
 # SEP-0005: Hole System & Agent Protocol
 
+> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, capability, and cost context. Specifies a structured JSON protocol for human–agent communication, with advisory fill ordering based on dependency analysis, cross-module hole aggregation, and a state machine (Open → Filling → Filled → Accepted) for collaborative code completion.
+
 ## Summary
 
 This SEP specifies Spore's **Hole System** — a first-class language mechanism that treats unfinished code as a structured, typed, compiler-mediated collaboration interface between humans and AI Agents.

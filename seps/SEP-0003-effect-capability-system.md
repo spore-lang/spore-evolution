@@ -15,6 +15,8 @@ superseded_by: null
 
 # SEP-0003: Effect & Capability System
 
+> **Executive Summary**: Defines Spore's effect system as a capability-based model with 11 atomic capabilities (Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit). Capabilities compose algebraically (commutative, idempotent, associative) and are checked via subset inclusion — a function requiring capabilities S can only be called from a context providing S′ ⊇ S. Module-level `uses` declarations set the ambient capability ceiling.
+
 ## Summary
 
 This SEP introduces Spore's **capability-based effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic capabilities* it requires. The compiler verifies that a function body never exercises a capability absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and capability narrowing.

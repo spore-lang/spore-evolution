@@ -1,0 +1,145 @@
+# Spore Glossary
+
+Unified terminology index for the Spore language. Each term links to the SEP where it is authoritatively defined.
+
+## A
+
+**Atomic capability** (SEP-0003): One of the 11 indivisible capabilities in Spore's effect system: Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit.
+
+**`@allow`** (SEP-0004): Annotation that locally suppresses a cost budget violation, used as a second-tier escape for cost analysis.
+
+**`@unbounded`** (SEP-0004): Annotation declaring that a function's cost is intentionally unanalyzed, opting out of cost verification entirely.
+
+**`await`** (SEP-0007): Expression that blocks until a `Task[T]` completes and extracts its result value of type `T`.
+
+## B
+
+**Bidirectional inference** (SEP-0002): Type inference strategy combining synthesis (bottom-up, infer type from expression) and checking (top-down, verify expression against expected type).
+
+## C
+
+**Capability** (SEP-0003): A named permission that a function must hold to perform certain effects. Also serves as a trait on execution context (SEP-0002).
+
+**Capability ceiling** (SEP-0003): The maximum set of capabilities available in a module, declared via `uses [...]` at module level.
+
+**Capability narrowing** (SEP-0003): Restricting the available capability set when entering a nested scope, ensuring inner code cannot exceed outer permissions.
+
+**Capability set (CapSet)** (SEP-0003): An unordered collection of capabilities associated with a function or scope, written as `uses [Cap1, Cap2]`.
+
+**Capability alias** (SEP-0003): A named shorthand for a set of capabilities, e.g., `capability FileIO = [FileRead, FileWrite]`.
+
+**`Chan[T]`** (SEP-0007): Bounded channel type for inter-task message passing, parameterized by the message type.
+
+**Content-addressed package** (SEP-0008): Package identified by SHA-256 hash of its normalized source, enabling reproducible builds and cache deduplication.
+
+**Cost budget** (SEP-0004): The declared cost bound on a function, verified at compile time against inferred cost of the function body.
+
+**Cost dimension** (SEP-0004): One of four orthogonal resource axes in a CostVector: compute, alloc, io, parallel.
+
+**Cost expression (CostExpr)** (SEP-0004): Arithmetic expression over cost variables, restricted to `+`, `×`, `^const`, `log`, `max`, `min` to ensure decidability.
+
+**CostVector** (SEP-0004): A 4-tuple `(compute(op), alloc(cell), io(call), parallel(lane))` representing multidimensional resource usage.
+
+## D
+
+**Derivable trait** (SEP-0002): A compiler-known trait whose implementation can be auto-generated from the type's structure, using the `deriving [...]` syntax.
+
+**Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (capability), K (cost), M (module), W (warning).
+
+## E
+
+**Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the capability system.
+
+**Effect handler** (SEP-0008): Platform-provided implementation of a capability's operations, connecting `foreign fn` declarations to native code.
+
+**Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant1(T), Variant2 }`.
+
+**Executive Summary** (SEP-0000): Required 2–4 sentence overview placed after YAML front matter in every SEP, describing core contribution and impact.
+
+## F
+
+**`foreign fn`** (SEP-0008): Function declaration whose implementation is provided by the platform rather than written in Spore. Used for I/O bindings.
+
+## G
+
+**Generics** (SEP-0002): Parametric polymorphism using type variables, written as `fn f[T](x: T)` with optional `where` clause bounds.
+
+## H
+
+**Hole** (SEP-0005): A typed placeholder in source code written as `?name`, representing incomplete code that carries type, capability, and cost context for agent-assisted completion.
+
+**Hole context** (SEP-0005): The full type environment, capability set, cost budget, and dependency information associated with a typed hole.
+
+**Hole state machine** (SEP-0005): Lifecycle of a hole: Open → Filling → Filled → Accepted.
+
+## I
+
+**Implementation hash (impl hash)** (SEP-0006): Content hash of a function's full body, used for incremental compilation — a change in impl hash triggers recompilation.
+
+**Import resolution** (SEP-0008): The process of mapping `import pkg.module` declarations to concrete module files and verifying symbol visibility.
+
+## L
+
+**Lane** (SEP-0007): The parallel cost dimension — each `spawn` creates a new lane, tracked in CostVector's `parallel` field.
+
+## M
+
+**Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and capability requirements.
+
+## N
+
+**NDJSON (Newline-Delimited JSON)** (SEP-0006): Output format for watch mode, where each compiler event is a single JSON object on one line, enabling streaming IDE integration.
+
+**Nominal typing** (SEP-0002): Types are distinguished by name, not structure. Two structs with identical fields but different names are different types.
+
+**`Never`** (SEP-0002): The bottom type — uninhabited, used as the return type of functions that never return (e.g., `exit()`).
+
+## O
+
+**`Option[T]`** (SEP-0009): Prelude type representing an optional value: `Some(T)` or `None`.
+
+## P
+
+**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded), granting capabilities and defining the program entry point.
+
+**Prelude** (SEP-0009): The set of types and functions available in every Spore module without explicit import.
+
+## R
+
+**Refinement type** (SEP-0002): Type augmented with a predicate constraint. Three tiers: L0 (decidable, compile-time), L1 (SMT-backed), L2 (proof obligation).
+
+**`Result[T, E]`** (SEP-0009): Prelude type representing success (`Ok(T)`) or failure (`Err(E)`).
+
+## S
+
+**`select`** (SEP-0007): Expression that awaits the first of multiple tasks to complete, enabling concurrent race patterns.
+
+**SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to the Spore language, following a structured review process.
+
+**Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, capabilities), used for dependency tracking — a change in sig hash invalidates all callers.
+
+**`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` capability.
+
+**Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
+
+**Structured concurrency** (SEP-0007): Concurrency model where all spawned tasks are scoped to their parent block, ensuring no task outlives its creator.
+
+## T
+
+**`Task[T]`** (SEP-0007): Typed future representing an asynchronous computation that will produce a value of type `T`.
+
+**Typed hole** (SEP-0005): See **Hole**.
+
+## U
+
+**`uses` clause** (SEP-0003): Annotation on a function or module declaring required capabilities, written as `uses [Cap1, Cap2]`.
+
+## V
+
+**Visibility** (SEP-0008): Access control on module exports: `pub` (public to all), `pub(pkg)` (package-internal), or private (default, module-only).
+
+## W
+
+**Watch mode** (SEP-0006): Compiler mode that continuously monitors source files and emits NDJSON events on changes, designed for IDE integration.
+
+**`where` clause** (SEP-0002): Constraint block on generic functions specifying trait bounds, written as `where T: Eq + Hash`.
