@@ -6,7 +6,7 @@ type: Standards Track
 authors:
   - Spore Contributors
 created: 2026-04-01
-requires: [1, 2, 3, 4]
+requires: [1, 2, 3, 4, 7, 8]
 discussion: "https://github.com/spore-lang/spore-evolution/discussions"
 pr: null
 superseded_by: null

@@ -7,6 +7,7 @@ authors:
   - Spore maintainers
 created: 2026-03-31
 requires:
+  - 1
   - 3
   - 4
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/7"
@@ -16,7 +17,7 @@ superseded_by: null
 
 # SEP-0007: Concurrency Model
 
-> **Executive Summary**: Defines structured concurrency with `spawn`/`await`/`select` primitives, where `Task[T]` serves as a typed future representing an asynchronous computation. Introduces Lanes as the parallel cost dimension (tracked in CostVector), hierarchical cancellation scoping tied to lexical blocks, and channel-based communication (Chan[T]) with bounded buffers for inter-task messaging.
+> **Executive Summary**: Defines structured concurrency with `spawn`/`await`/`select` primitives, where `Task[T]` serves as a typed future representing an asynchronous computation. Introduces Lanes as the parallel cost dimension (tracked in CostVector), hierarchical cancellation scoping tied to lexical blocks, and channel-based communication (Channel[T]) with bounded buffers for inter-task messaging.
 
 ## Summary
 
@@ -1171,7 +1172,7 @@ The concurrency model is introduced as a new language feature. There is no exist
 
 ### Interaction with existing SEPs
 
-- **SEP-0003 (Signature Syntax):** The `uses [Spawn, ...]` clause and `cost ≤ N` declarations are extensions to the signature syntax defined in SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
+- **SEP-0001 (Core Syntax, extended by SEP-0003 for capabilities):** The `uses [Spawn, ...]` clause and `cost ≤ N` declarations are extensions to the signature syntax defined in SEP-0001, with capability annotations from SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
 - **SEP-0004 (Cost Model):** This SEP adds the fourth dimension `parallel(lane)` to the cost model. Existing cost annotations (which only use `C`, `A`, `W`) remain valid; the `P` dimension defaults to `0` for functions without `Spawn`.
 
 ### Migration path for developers from other languages

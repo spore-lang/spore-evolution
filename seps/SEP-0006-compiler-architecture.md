@@ -9,6 +9,9 @@ created: 2026-03-31
 requires:
   - 1
   - 2
+  - 3
+  - 4
+  - 5
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/6"
 pr: null
 superseded_by: null

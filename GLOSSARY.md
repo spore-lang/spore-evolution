@@ -6,6 +6,8 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Atomic capability** (SEP-0003): One of the 11 indivisible capabilities in Spore's effect system: Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit.
 
+**`Add`** (SEP-0002): Compiler-known trait for the `+` operator, enabling operator overloading on user-defined types.
+
 **`@allow`** (SEP-0004): Annotation that locally suppresses a cost budget violation, used as a second-tier escape for cost analysis.
 
 **`@unbounded`** (SEP-0004): Annotation declaring that a function's cost is intentionally unanalyzed, opting out of cost verification entirely.
@@ -28,7 +30,9 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Capability alias** (SEP-0003): A named shorthand for a set of capabilities, e.g., `capability FileIO = [FileRead, FileWrite]`.
 
-**`Chan[T]`** (SEP-0007): Bounded channel type for inter-task message passing, parameterized by the message type.
+**`Clone`** (SEP-0002): Compiler-known trait for explicitly duplicating a value.
+
+**`Channel[T]`** (SEP-0007): Bounded channel type for inter-task message passing, parameterized by the message type.
 
 **Content-addressed package** (SEP-0008): Package identified by SHA-256 hash of its normalized source, enabling reproducible builds and cache deduplication.
 
@@ -42,11 +46,23 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## D
 
+**`Debug`** (SEP-0002): Compiler-known trait for programmer-facing string representation, used in diagnostics and logging.
+
+**`Default`** (SEP-0002): Compiler-known trait providing a default value for a type.
+
+**`Deserialize`** (SEP-0002): Compiler-known trait for converting serialized data back into a typed value.
+
 **Derivable trait** (SEP-0002): A compiler-known trait whose implementation can be auto-generated from the type's structure, using the `deriving [...]` syntax.
+
+**`Display`** (SEP-0002): Compiler-known trait for user-facing string representation.
+
+**`Div`** (SEP-0002): Compiler-known trait for the `/` operator, enabling operator overloading on user-defined types.
 
 **Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (capability), K (cost), M (module), W (warning).
 
 ## E
+
+**`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
 
 **Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the capability system.
 
@@ -66,9 +82,13 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## H
 
+**`Hash`** (SEP-0002): Compiler-known trait for computing hash values, often required alongside `Eq` for use in hash-based collections.
+
 **Hole** (SEP-0005): A typed placeholder in source code written as `?name`, representing incomplete code that carries type, capability, and cost context for agent-assisted completion.
 
 **Hole context** (SEP-0005): The full type environment, capability set, cost budget, and dependency information associated with a typed hole.
+
+**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, capability, and cost dependencies for parallel fill scheduling.
 
 **Hole state machine** (SEP-0005): Lifecycle of a hole: Open → Filling → Filled → Accepted.
 
@@ -84,6 +104,8 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## M
 
+**`Mul`** (SEP-0002): Compiler-known trait for the `*` operator, enabling operator overloading on user-defined types.
+
 **Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and capability requirements.
 
 ## N
@@ -96,6 +118,8 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## O
 
+**`Ord`** (SEP-0002): Compiler-known trait for total ordering comparison, enabling `<`, `>`, `<=`, `>=` operators.
+
 **`Option[T]`** (SEP-0009): Prelude type representing an optional value: `Some(T)` or `None`.
 
 ## P
@@ -106,11 +130,13 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## R
 
-**Refinement type** (SEP-0002): Type augmented with a predicate constraint. Three tiers: L0 (decidable, compile-time), L1 (SMT-backed), L2 (proof obligation).
+**Refinement type** (SEP-0002): Type augmented with a predicate constraint. Three tiers: L0 (decidable, compile-time), L1 (abstract interpretation), L2 (proof obligation).
 
 **`Result[T, E]`** (SEP-0009): Prelude type representing success (`Ok(T)`) or failure (`Err(E)`).
 
 ## S
+
+**`Serialize`** (SEP-0002): Compiler-known trait for converting a typed value into a serialized format.
 
 **`select`** (SEP-0007): Expression that awaits the first of multiple tasks to complete, enabling concurrent race patterns.
 
@@ -119,6 +145,8 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 **Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, capabilities), used for dependency tracking — a change in sig hash invalidates all callers.
 
 **`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` capability.
+
+**`Sub`** (SEP-0002): Compiler-known trait for the `-` operator, enabling operator overloading on user-defined types.
 
 **Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
 

@@ -15,7 +15,7 @@ superseded_by: null
 
 # SEP-0002: Type System
 
-> **Executive Summary**: Defines Spore's nominal-primary type system with bidirectional inference, unifying capabilities as traits on execution context. Features three-tier refinement types (L0 decidable constraints → L1 SMT-backed → L2 proof obligations), 13 compiler-known traits, generics with where-clause bounds, and enum/struct/capability as the core type constructors. Includes formal typing judgments for the core language.
+> **Executive Summary**: Defines Spore's nominal-primary type system with bidirectional inference, unifying capabilities as traits on execution context. Features three-tier refinement types (L0 decidable constraints → L1 abstract-interpretation → L2 proof obligations), 13 compiler-known traits, generics with where-clause bounds, and enum/struct/capability as the core type constructors. Includes formal typing judgments for the core language.
 
 ## Summary
 
