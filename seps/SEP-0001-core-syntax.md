@@ -1725,3 +1725,315 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 11. **Standard capability taxonomy**: What is the canonical set of built-in capabilities (`Compute`, `NetRead`, `NetWrite`, `FileRead`, `FileWrite`, `StateRead`, `StateWrite`, `Clock`, `Random`, etc.)? This needs a separate SEP.
 
 12. **Error type subtyping**: If function `f` declares `! [NetworkError]` and function `g` declares `! [NetworkError, ParseError]`, can `g` call `f` directly? How does error set subtyping work?
+
+## Appendix A: Small-step operational semantics
+
+This appendix formalizes the evaluation rules for core Spore expressions using small-step operational semantics. All Spore code evaluates under a **call-by-value** strategy.
+
+### Notation
+
+- `e ↝ e'` — expression `e` reduces to `e'` in one step
+- `v` — a value (fully evaluated: literal, closure, struct/enum instance, list)
+- `E[·]` — evaluation context (position where the next reduction occurs)
+- `σ` — runtime environment (variable → value mapping)
+- `H` — effect handler table (capability → handler mapping)
+- `e[x ↦ v]` — substitute `v` for `x` in `e`
+
+### Values
+
+```text
+v ::= n                           (integer literal)
+    | f                           (float literal)
+    | true | false                (boolean)
+    | "s"                         (string literal)
+    | 'c'                         (char literal)
+    | ()                          (unit)
+    | S { f₁: v₁, ..., fₙ: vₙ } (struct instance)
+    | V(v₁, ..., vₙ)             (enum variant instance)
+    | V                           (zero-field enum variant)
+    | [v₁, ..., vₙ]              (list)
+    | <closure: λ(x₁...xₙ).e, σ> (closure with captured env)
+```
+
+### Evaluation contexts
+
+Evaluation contexts define the order of evaluation (left-to-right, call-by-value):
+
+```text
+E ::= □                                            (hole)
+    | E op e₂                                      (left of binop)
+    | v₁ op E                                      (right of binop)
+    | f(v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ)         (function argument)
+    | let x = E; e₂                                (let initializer)
+    | if E { e₁ } else { e₂ }                      (if condition)
+    | match E { arms }                              (match scrutinee)
+    | S { f₁: v₁, ..., fᵢ: E, ..., fₙ: eₙ }      (struct field)
+    | V(v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ)         (enum constructor arg)
+    | E.field                                       (field access receiver)
+    | E |> f                                        (pipe left-hand side)
+    | [v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ]          (list element)
+    | E?                                            (try operator operand)
+    | spawn E                                       (spawn body — eager eval)
+```
+
+### Core reduction rules
+
+**Literals and variables:**
+
+```text
+[E-Var]
+  σ(x) = v
+  ──────────────
+  σ ⊢ x ↝ v
+
+(Variables resolve to their bound value in the environment.)
+```
+
+**Arithmetic and comparison:**
+
+```text
+[E-BinOp]
+  v₁ op v₂ = v₃   (where op is +, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||)
+  ──────────────────
+  v₁ op v₂ ↝ v₃
+
+[E-StrConcat]
+  "s₁" + "s₂" ↝ "s₁s₂"
+
+[E-UnaryNeg]
+  -n ↝ (-n)
+
+[E-UnaryNot]
+  !b ↝ ¬b
+```
+
+**Let binding:**
+
+```text
+[E-Let]
+  σ ⊢ let x = v; e₂ ↝ σ[x ↦ v] ⊢ e₂
+
+(Bind the value and continue evaluating the body with extended environment.)
+```
+
+**Function application (β-reduction):**
+
+```text
+[E-App]
+  σ ⊢ f(v₁, ..., vₙ)
+  where f is defined as fn f(x₁, ..., xₙ) { body }
+  ─────────────────────────────────────────────────
+  σ[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ⊢ body
+
+[E-ClosureApp]
+  <closure: λ(x₁...xₙ).body, σ_captured>(v₁, ..., vₙ)
+  ─────────────────────────────────────────────────────
+  σ_captured[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ⊢ body
+
+(Closures evaluate in their captured environment, extended with arguments.)
+```
+
+**Lambda creation:**
+
+```text
+[E-Lambda]
+  σ ⊢ |x₁, ..., xₙ| body ↝ <closure: λ(x₁...xₙ).body, σ>
+
+(Captures the current environment.)
+```
+
+**Conditionals:**
+
+```text
+[E-IfTrue]
+  if true { e₁ } else { e₂ } ↝ e₁
+
+[E-IfFalse]
+  if false { e₁ } else { e₂ } ↝ e₂
+```
+
+**Pattern matching:**
+
+```text
+[E-Match]
+  match v { p₁ => e₁, ..., pₙ => eₙ }
+  where pᵢ is the first pattern matching v with bindings B
+  ──────────────────────────────────────────────────────
+  ↝ eᵢ[B]
+
+(Try patterns top-to-bottom. First match wins. Apply bindings to body.)
+```
+
+Pattern matching sub-rules:
+
+```text
+[Pat-Wildcard]
+  _ matches any v, bindings = ∅
+
+[Pat-Var]
+  x matches any v, bindings = {x ↦ v}
+
+[Pat-Literal]
+  n matches n, bindings = ∅     (and similarly for string, bool literals)
+
+[Pat-Constructor]
+  V(p₁, ..., pₖ) matches V(v₁, ..., vₖ)
+  if each pᵢ matches vᵢ with bindings Bᵢ
+  bindings = B₁ ∪ ... ∪ Bₖ
+
+[Pat-Struct]
+  S { f₁: p₁, ..., fₖ: pₖ } matches S { ..., fᵢ: vᵢ, ... }
+  if each pᵢ matches vᵢ with bindings Bᵢ
+  bindings = B₁ ∪ ... ∪ Bₖ
+
+[Pat-Or]
+  (p₁ | p₂) matches v if p₁ matches v or p₂ matches v
+
+[Pat-List-Empty]
+  [] matches []
+
+[Pat-List-Cons]
+  [p₁, ..rest] matches [v₁, v₂, ..., vₙ]
+  if p₁ matches v₁ with bindings B₁
+  rest binds to [v₂, ..., vₙ]
+  bindings = B₁ ∪ {rest ↦ [v₂, ..., vₙ]}
+
+[Pat-Guard]
+  p if cond => e
+  p matches v with bindings B, and B ⊢ cond ↝ true
+```
+
+**Struct and enum construction:**
+
+```text
+[E-StructLit]
+  S { f₁: v₁, ..., fₙ: vₙ } ↝ S { f₁: v₁, ..., fₙ: vₙ }
+
+(Struct literals with all fields evaluated are values.)
+
+[E-EnumConstruct]
+  V(v₁, ..., vₙ) ↝ V(v₁, ..., vₙ)
+
+(Fully evaluated variant constructors are values.)
+```
+
+**Field access:**
+
+```text
+[E-FieldAccess]
+  S { ..., f: v, ... }.f ↝ v
+```
+
+**Pipe operator:**
+
+```text
+[E-Pipe]
+  v |> f ↝ f(v)
+
+(Pipe desugars to function application.)
+```
+
+**Block expressions:**
+
+```text
+[E-Block]
+  { stmt₁; stmt₂; ...; stmtₙ; tail }
+  ↝ evaluate stmt₁, then { stmt₂; ...; stmtₙ; tail }
+
+[E-BlockTail]
+  { v } ↝ v
+```
+
+**Try (? operator):**
+
+```text
+[E-TryOk]
+  Ok(v)? ↝ v
+
+[E-TryErr]
+  Err(e)? ↝ throw Err(e)
+
+(Unwraps Ok, propagates Err to the nearest error boundary.)
+```
+
+**Throw and error propagation:**
+
+```text
+[E-Throw]
+  throw v ↝ RuntimeError(v)
+
+(Propagates up the call stack until caught by a match or error boundary.)
+```
+
+### Effect dispatch
+
+```text
+[E-ForeignCall]
+  H(capability, fn_name) = handler
+  handler(v₁, ..., vₙ) ↝ᵢₒ v
+  ──────────────────────────────────
+  foreign_fn(v₁, ..., vₙ) ↝ v
+
+(Foreign function calls are dispatched to the platform's effect handler table.
+The handler may perform real I/O — this is the only impure reduction rule.)
+```
+
+### Concurrency (structured)
+
+```text
+[E-Spawn]
+  spawn e ↝ Task(e, fresh_id)
+
+(Creates a new task. In the PoC interpreter, evaluates synchronously.
+In a production runtime, this would fork a lightweight thread.)
+
+[E-Await]
+  await Task(v, id) ↝ v
+
+(Blocks until the task completes and extracts its value.
+In PoC, this is a no-op since spawn already evaluated.)
+
+[E-Select]
+  select { task₁ => e₁, ..., taskₙ => eₙ }
+  where taskᵢ is the first to complete with value v
+  ────────────────────────────────────────────────
+  ↝ eᵢ[result ↦ v]
+```
+
+### Hole evaluation
+
+```text
+[E-Hole]
+  ?name ↝ RuntimeError("hit unfilled hole `?name`")
+
+(Holes are compile-time constructs. Reaching one at runtime is always an error.)
+```
+
+### List operations (builtins)
+
+```text
+[E-ListLen]
+  len([v₁, ..., vₙ]) ↝ n
+
+[E-ListMap]
+  map([v₁, ..., vₙ], f) ↝ [f(v₁), ..., f(vₙ)]
+
+[E-ListFilter]
+  filter([v₁, ..., vₙ], p) ↝ [vᵢ | p(vᵢ) = true]
+
+[E-ListFold]
+  fold([v₁, ..., vₙ], init, f) ↝ f(...f(f(init, v₁), v₂)..., vₙ)
+
+[E-ListEach]
+  each([v₁, ..., vₙ], f) ↝ f(v₁); ...; f(vₙ); ()
+```
+
+### Properties
+
+1. **Determinism**: All pure reduction rules are deterministic. Non-determinism arises only from `select` (which task completes first) and `Random` effects.
+
+2. **Type preservation (subject reduction)**: If `Γ; S ⊢ e : T` and `e ↝ e'`, then `Γ; S ⊢ e' : T`. (Proof sketch: by induction on the typing derivation — see SEP-0002 typing judgments.)
+
+3. **Progress**: If `Γ; S ⊢ e : T` and `e` is not a value, then either `e ↝ e'` for some `e'`, or `e` is a `foreign fn` call awaiting I/O. (Holes are ruled out at type-check time in complete programs.)
+
+4. **Capability soundness**: If a function has `uses []` (no capabilities), its evaluation never reaches an `[E-ForeignCall]` rule. (By the capability subset check in SEP-0003.)

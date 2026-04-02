@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0000: Spore Enhancement Proposal Process
 
-> **Executive Summary**: Defines the governance process for evolving the Spore language through structured proposals (SEPs). Establishes a Draft → Review → Accepted lifecycle, required sections by proposal type, machine-verifiable metadata (YAML front matter + JSON index), and dual review criteria for both human and agent experience impact.
+> **Executive Summary**: Defines the governance process for evolving Spore through structured proposals (SEPs). Establishes a Draft → Review → Accepted lifecycle, required sections by proposal type, machine-verifiable metadata (YAML front matter + JSON index), and dual review criteria for both human and agent experience impact.
 
 ## Summary
 

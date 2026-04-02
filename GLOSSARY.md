@@ -1,6 +1,6 @@
 # Spore Glossary
 
-Unified terminology index for the Spore language. Each term links to the SEP where it is authoritatively defined.
+Unified terminology index for Spore. Each term links to the SEP where it is authoritatively defined.
 
 ## A
 
@@ -114,7 +114,7 @@ Unified terminology index for the Spore language. Each term links to the SEP whe
 
 **`select`** (SEP-0007): Expression that awaits the first of multiple tasks to complete, enabling concurrent race patterns.
 
-**SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to the Spore language, following a structured review process.
+**SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to Spore, following a structured review process.
 
 **Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, capabilities), used for dependency tracking — a change in sig hash invalidates all callers.
 
