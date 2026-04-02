@@ -269,6 +269,7 @@ Every system call (file read/write, network request, stdio, random number genera
 ### Formal cost judgments
 
 **Notation:**
+
 - `K(e)` — cost of expression e as a CostVector
 - `⊕` — pointwise CostVector addition
 - `⊗` — CostVector scaling
@@ -276,7 +277,7 @@ Every system call (file read/write, network request, stdio, random number genera
 
 **Cost inference rules:**
 
-```
+```text
 [Cost-Literal]
   K(literal) = (0, 0, 0, 0)
 
@@ -318,7 +319,7 @@ Every system call (file read/write, network request, stdio, random number genera
 
 **Verification judgment:**
 
-```
+```text
 [Cost-Verify]
   fn f(x₁: T₁, ..., xₙ: Tₙ) -> R cost C_declared
   K_inferred = infer_cost(body)
@@ -342,6 +343,7 @@ Every system call (file read/write, network request, stdio, random number genera
 **Decidability of cost comparison:**
 
 The cost expression language is intentionally restricted to ensure decidability:
+
 - Allowed operations: `+`, `×`, `^c` (constant exponent), `log`, `max`, `min`
 - Disallowed: arbitrary exponentiation, division, subtraction
 - Comparison `C₁ ≤ C₂` is decidable for this restricted grammar via:

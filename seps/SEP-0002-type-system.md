@@ -1049,6 +1049,7 @@ missing capabilities [X, Y]: caller does not declare them
 The core type system uses bidirectional typing with capability context.
 
 **Notation:**
+
 - `Γ` — type environment (variable → type mapping)
 - `S` — capability set (subset of all capabilities)
 - `e` — expression
@@ -1059,14 +1060,14 @@ The core type system uses bidirectional typing with capability context.
 
 **Core judgments:**
 
-```
+```text
 Γ; S ⊢ e ⇒ T        (synthesis: infer type of e)
 Γ; S ⊢ e ⇐ T        (checking: check e against T)
 ```
 
 **Rules:**
 
-```
+```text
 [Var]
   x : T ∈ Γ
   ─────────────────
@@ -1160,7 +1161,7 @@ The core type system uses bidirectional typing with capability context.
 
 **Subtyping rules:**
 
-```
+```text
 [Sub-Refl]
   T <: T
 

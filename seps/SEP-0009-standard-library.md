@@ -663,7 +663,7 @@ These 13 traits have special compiler support (SEP-0002). The stdlib provides th
 
 The stdlib I/O layer uses the platform effect handler mechanism from SEP-0008:
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │  User Code                              │
 │  fn main() uses [FileRead] {            │
