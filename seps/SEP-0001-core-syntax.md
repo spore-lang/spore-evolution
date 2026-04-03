@@ -190,6 +190,13 @@ x |> f(y, z)    // equivalent to: f(x, y, z)
 x |> f(_, y)    // equivalent to: f(x, y)
 ```
 
+The `_` placeholder also works outside pipe contexts as general partial application:
+
+```spore
+let double_map = map(_, |x| x * 2);    // |list| map(list, |x| x * 2)
+let add5 = add(_, 5);                   // |x| add(x, 5)
+```
+
 ### Ranges and slices
 
 Ranges create sequences; slices extract sub-lists:
@@ -1103,6 +1110,31 @@ All control flow constructs are expressions that produce values.
 - `x |> f(_, y)` → `f(x, y)`
 - `x |> .method()` → `x.method()`
 
+**Placeholder partial application** (`_` in call arguments): The `_` token in a function call argument position creates a partial application — the call expression desugars to a lambda:
+
+- `f(a, _, c)` → `|_x| f(a, _x, c)` (unary function)
+- `f(_, b, _)` → `|_x1, _x2| f(_x1, b, _x2)` (binary function, parameters ordered by `_` occurrence)
+- `f(_, _)` → `|_x1, _x2| f(_x1, _x2)` (binary function)
+
+This generalizes the pipe-specific `x |> f(_, y)` syntax to any call expression. The desugaring happens at parse time and only applies to the **current call level** — nested calls desugar independently:
+
+```spore
+// Nested: outer and inner both desugar independently
+f(_, g(_, c))
+// → |_x| f(_x, |_y| g(_y, c))   -- WRONG: g(_, c) is a closure value, not a call
+// → |_x| f(_x, g(_, c))         -- CORRECT: inner g(_, c) is itself a partial application value
+```
+
+Combined with the pipe operator, this enables fluent data pipelines:
+
+```spore
+data
+    |> normalize
+    |> transform(config, _)           // transform(config, data)
+    |> validate(schema, _)            // validate(schema, data')
+    |> persist(db, _)                 // persist(db, data'')
+```
+
 **Error propagation (`?`)**: `expr?` evaluates `expr`. If the result is `Ok(v)`, yields `v`. If `Err(e)`, immediately returns `Err(e)` from the enclosing function. The error type must be in the function's declared error set.
 
 ### Pattern matching details
@@ -1718,7 +1750,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 8. **Tail-call optimization scope**: Is TCO guaranteed only for direct self-recursion, or for mutual recursion and continuation-passing style as well?
 
-9. **Partial application**: The pipe operator supports `x |> f(_, y)` placeholder syntax. Should Spore support general partial application beyond pipe contexts?
+9. **Partial application**: ~~The pipe operator supports `x |> f(_, y)` placeholder syntax. Should Spore support general partial application beyond pipe contexts?~~ **Resolved**: Yes. The `_` placeholder syntax works in any function call position, not just pipe contexts. `f(a, _, c)` desugars to `|_x| f(a, _x, c)`. Multiple `_` placeholders produce multi-parameter lambdas with parameters ordered by occurrence. See §3.12 for desugaring rules.
 
 10. **Pattern matching on strings**: The current spec shows string literal patterns. Should Spore support regex patterns or prefix/suffix matching in `match` arms?
 
