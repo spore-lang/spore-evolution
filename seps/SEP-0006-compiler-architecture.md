@@ -762,6 +762,107 @@ Watch events are converted to LSP messages by the Spore LSP server:
 }
 ```
 
+### CLI subcommand design
+
+The `spore` binary exposes a unified command hierarchy for all developer-facing
+tooling. Each subcommand corresponds to a distinct phase of the developer
+workflow.
+
+#### Command table
+
+| Command | Purpose | Exit code |
+|---------|---------|-----------|
+| `spore run <file>` | Parse → check → interpret (execute) | 0 on success, 1 on runtime error |
+| `spore check <file...>` | Type-check + lint + cost/capability checking | 0 if clean, 1 if any error |
+| `spore format <file...>` | Format source code (import ordering, indentation, clause layout) | 0 if already formatted, 1 if rewritten (with `--check`: 1 if would change) |
+| `spore build <file>` | Full compilation (parse → check → codegen) | 0 on success, 1 on error |
+| `spore holes <file>` | Report typed holes and their environments | 0 always |
+| `spore watch [--json]` | Watch mode — incremental check on save | Runs until interrupted |
+| `spore test` | Run test functions via Test Platform | 0 all pass, 1 any fail |
+| `spore audit [package]` | Audit capability usage across modules | 0 clean, 1 findings |
+
+#### `spore check` — unified checking
+
+`spore check` performs **all** static analysis in a single pass:
+
+1. **Parsing** — syntax errors (E0001–E0099)
+2. **Type checking** — type mismatches, unresolved names (E0100–E0499)
+3. **Capability checking** — missing `uses` declarations (C0001–C0099)
+4. **Cost checking** — budget overflows (K0001–K0099)
+5. **Lint warnings** — unused variables, shadowing, style (W0001–W0499)
+
+```bash
+# Check a single file
+spore check src/main.sp
+
+# Check multiple files
+spore check src/*.sp
+
+# Check with verbose output (show inference chains)
+spore check --verbose src/main.sp
+
+# Check with JSON output for CI
+spore check --json src/main.sp
+```
+
+Flags:
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Show inference chains and candidate types |
+| `--json` | Machine-readable LSP-compatible JSON output |
+| `--no-lint` | Skip lint warnings (only errors) |
+| `--deny-warnings` | Treat warnings as errors (for CI) |
+
+#### `spore format` — code formatter
+
+Formats Spore source code according to the canonical style:
+
+```bash
+# Format files in-place
+spore format src/main.sp
+
+# Check if formatted (non-zero exit if changes needed)
+spore format --check src/main.sp
+
+# Format stdin → stdout
+echo 'fn f()->Int{42}' | spore format --stdin
+```
+
+Formatting rules:
+- **Import ordering**: `uses` clauses sorted alphabetically, grouped by origin
+- **Clause ordering**: `where` → `uses` → `cost` → `!` (per SEP-0001)
+- **Indentation**: 4 spaces, no tabs
+- **Trailing commas**: Always in multi-line constructs
+- **Line width**: 100 columns soft limit
+
+Flags:
+
+| Flag | Description |
+|------|-------------|
+| `--check` | Exit 1 if any file would change (don't modify) |
+| `--stdin` | Read from stdin, write to stdout |
+| `--diff` | Show diff instead of modifying files |
+
+#### `spore test` — test runner
+
+Discovers and runs functions annotated with `#[test]`:
+
+```bash
+spore test                    # Run all tests
+spore test --filter "auth*"   # Run matching tests
+spore test --json             # Machine-readable output
+```
+
+#### Future commands (planned)
+
+| Command | Description | SEP |
+|---------|-------------|-----|
+| `spore audit` | Capability usage audit | SEP-0008 |
+| `spore explain <code>` | Explain a diagnostic code | SEP-0006 |
+| `spore init` | Initialize a new Spore project | — |
+| `spore add <dep>` | Add a dependency | SEP-0008 |
+
 ### Diagnostic output formats
 
 #### Default format
