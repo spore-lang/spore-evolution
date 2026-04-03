@@ -14,6 +14,8 @@ superseded_by: null
 
 # SEP-0000: Spore Enhancement Proposal Process
 
+> **Executive Summary**: Defines the governance process for evolving Spore through structured proposals (SEPs). Establishes a Draft → Review → Accepted lifecycle, required sections by proposal type, machine-verifiable metadata (YAML front matter + JSON index), and dual review criteria for both human and agent experience impact.
+
 ## Summary
 
 This document defines the initial process for proposing, discussing, reviewing, accepting, and evolving substantial changes to Spore.
@@ -229,6 +231,14 @@ Implementation maturity is typically gradual and should be tracked elsewhere, fo
 
 This separation keeps SEP status focused on design governance rather than release management.
 
+### Draft status during the bootstrap phase
+
+During Spore's bootstrap phase, maintainers may keep repository-defining SEPs in `Draft`
+while the process, terminology, and review mechanics are still settling. In this phase,
+`Draft` means "still revisable as process text," not "non-authoritative." Repository
+planning, templates, and follow-on SEPs may still treat these draft SEPs as the current
+design baseline until they are explicitly superseded or replaced.
+
 ## Roles and responsibilities
 
 ### Author / champion
@@ -275,50 +285,55 @@ templates/informational.md
 
 ## Required sections by SEP type
 
+All SEP types require an **Executive Summary** — a blockquote of 2–4 sentences placed immediately after the YAML front matter, before the first heading. The executive summary should concisely state the core contribution, key design decisions, and expected impact.
+
 ### Standards Track
 
 Standards Track SEPs should include:
 
-1. Summary
-2. Motivation
-3. Guide-level explanation
-4. Reference-level explanation
-5. Human experience impact
-6. Agent experience impact
-7. Structured representation / protocol impact
-8. Diagnostics impact
-9. Drawbacks
-10. Alternatives considered
-11. Prior art
-12. Backward compatibility and migration
-13. Unresolved questions
+1. Executive Summary (blockquote before first heading)
+2. Summary
+3. Motivation
+4. Guide-level explanation
+5. Reference-level explanation
+6. Human experience impact
+7. Agent experience impact
+8. Structured representation / protocol impact
+9. Diagnostics impact
+10. Drawbacks
+11. Alternatives considered
+12. Prior art
+13. Backward compatibility and migration
+14. Unresolved questions
 
 ### Process
 
 Process SEPs should include:
 
-1. Summary
-2. Motivation
-3. Goals
-4. Non-goals
-5. Proposal
-6. Lifecycle and transition rules
-7. Roles and responsibilities
-8. Drawbacks
-9. Alternatives considered
-10. Migration or rollout impact
-11. Unresolved questions
+1. Executive Summary (blockquote before first heading)
+2. Summary
+3. Motivation
+4. Goals
+5. Non-goals
+6. Proposal
+7. Lifecycle and transition rules
+8. Roles and responsibilities
+9. Drawbacks
+10. Alternatives considered
+11. Migration or rollout impact
+12. Unresolved questions
 
 ### Informational
 
 Informational SEPs should include:
 
-1. Summary
-2. Motivation
-3. Discussion
-4. Prior art or references
-5. Implications for Spore
-6. Unresolved questions or future directions
+1. Executive Summary (blockquote before first heading)
+2. Summary
+3. Motivation
+4. Discussion
+5. Prior art or references
+6. Implications for Spore
+7. Unresolved questions or future directions
 
 Not every proposal needs identical depth in every section, but omission of required sections should be exceptional and explicit.
 
