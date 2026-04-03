@@ -14,6 +14,8 @@ This repository is the long-lived home for major language, tooling, and process 
 
 ## Current entry points
 
+- [`VISION.md`](VISION.md) — design philosophy and core principles
+- [`ROADMAP.md`](ROADMAP.md) — long-term plan organized by system area
 - [`seps/SEP-0000-process.md`](seps/SEP-0000-process.md) — the draft SEP process
 - [`seps-index.json`](seps-index.json) — generated machine-readable SEP index
 - [`templates/standards-track.md`](templates/standards-track.md) — Standards Track template
