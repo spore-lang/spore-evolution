@@ -1,0 +1,15 @@
+extends: substitution
+message: "Use the canonical SEP heading '%s' instead of '%s'."
+level: warning
+ignorecase: false
+scope: heading
+swap:
+  "Executive summary": "Executive Summary"
+  "executive summary": "Executive Summary"
+  "Non Goals": "Non-goals"
+  "Non goals": "Non-goals"
+  "non goals": "Non-goals"
+  "Open Questions": "Unresolved Questions"
+  "open questions": "Unresolved Questions"
+  "Alternatives Considered": "Alternatives considered"
+  "Backward compatibility": "Backward Compatibility"

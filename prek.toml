@@ -26,28 +26,28 @@ hooks = [
 repo = "https://github.com/rvben/rumdl-pre-commit"
 rev = "v0.1.63"
 hooks = [
-  { id = "rumdl-fmt" },
+  { id = "rumdl-fmt", exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/crate-ci/typos"
 rev = "v1.33.1"
 hooks = [
-  { id = "typos", args = ["--force-exclude"] },
+  { id = "typos", args = ["--force-exclude"], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/vale-cli/vale"
 rev = "v3.14.1"
 hooks = [
-  { id = "vale", args = ["--glob=*.md", "."] },
+  { id = "vale", args = ["--minAlertLevel=error", "--glob=*.md", "."], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/lycheeverse/lychee"
 rev = "v0.15.1"
 hooks = [
-  { id = "lychee", args = ["--no-progress", "./**/*.md"] },
+  { id = "lychee", args = ["--no-progress", "./**/*.md"], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]

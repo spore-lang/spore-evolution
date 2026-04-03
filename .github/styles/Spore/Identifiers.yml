@@ -1,0 +1,20 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: warning
+ignorecase: false
+swap:
+  Ast: AST
+  ast: AST
+  Hir: HIR
+  hir: HIR
+  Typedhir: TypedHIR
+  typedhir: TypedHIR
+  Ir: IR
+  ir: IR
+  Lsp: LSP
+  lsp: LSP
+  Ndjson: NDJSON
+  ndjson: NDJSON
+  Holereport: HoleReport
+  holereport: HoleReport
+  Sporec: sporec
