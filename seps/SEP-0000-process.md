@@ -231,6 +231,14 @@ Implementation maturity is typically gradual and should be tracked elsewhere, fo
 
 This separation keeps SEP status focused on design governance rather than release management.
 
+### Draft status during the bootstrap phase
+
+During Spore's bootstrap phase, maintainers may keep repository-defining SEPs in `Draft`
+while the process, terminology, and review mechanics are still settling. In this phase,
+`Draft` means "still revisable as process text," not "non-authoritative." Repository
+planning, templates, and follow-on SEPs may still treat these draft SEPs as the current
+design baseline until they are explicitly superseded or replaced.
+
 ## Roles and responsibilities
 
 ### Author / champion

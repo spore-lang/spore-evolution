@@ -70,8 +70,6 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant1(T), Variant2 }`.
 
-**Executive Summary** (SEP-0000): Required 2–4 sentence overview placed after YAML front matter in every SEP, describing core contribution and impact.
-
 ## F
 
 **`foreign fn`** (SEP-0008): Function declaration whose implementation is provided by the platform rather than written in Spore. Used for I/O bindings.
@@ -171,3 +169,11 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 **Watch mode** (SEP-0006): Compiler mode that continuously monitors source files and emits NDJSON events on changes, designed for IDE integration.
 
 **`where` clause** (SEP-0002): Constraint block on generic functions specifying trait bounds, written as `where T: Eq + Hash`.
+
+## Process terms
+
+**Discussion** (SEP-0000): The canonical public thread where a pitch is debated before a
+formal SEP draft is proposed.
+
+**Pitch** (SEP-0000): A public discussion-stage proposal that tests whether an idea is
+worth turning into a repository-backed SEP.

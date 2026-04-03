@@ -1,6 +1,6 @@
 # spore-evolution
 
-Proposal repository for the Spore programming language.
+Proposal repository for the Spore programming project.
 
 This repository is the long-lived home for major language, tooling, and process proposals that affect Spore as a whole.
 
@@ -26,15 +26,10 @@ This repository is the long-lived home for major language, tooling, and process 
 
 **SEP** stands for **Spore Enhancement Proposal**.
 
-An SEP is the design record for substantial changes to:
-
-- Spore itself
-- the standard library or core tools
-- diagnostics and machine-readable language protocols
-- package/module/effect/capability/cost systems
-- the Spore evolution process itself
-
-Small bug fixes, routine refactors, editorial changes, and implementation-only work should usually go through normal repository pull requests instead of the SEP process.
+An SEP is the design record for changes to Spore semantics, standard-library
+surface, tooling protocols, cross-cutting system design, or the project process itself.
+For the decision threshold, lifecycle, and authoring rules, see
+[`seps/SEP-0000-process.md`](seps/SEP-0000-process.md).
 
 ## Status
 

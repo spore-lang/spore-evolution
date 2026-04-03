@@ -1,6 +1,6 @@
 extends: substitution
 message: "Use the canonical SEP heading '%s' instead of '%s'."
-level: warning
+level: error
 ignorecase: false
 scope: heading
 swap:
@@ -12,4 +12,3 @@ swap:
   "Open Questions": "Unresolved Questions"
   "open questions": "Unresolved Questions"
   "Alternatives Considered": "Alternatives considered"
-  "Backward compatibility": "Backward Compatibility"
