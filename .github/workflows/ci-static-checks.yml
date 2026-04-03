@@ -25,6 +25,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install lychee
+        uses: taiki-e/install-action@v2
+        with:
+          tool: lychee@0.15.1
+
       - name: Run prek
         uses: j178/prek-action@v2
         env:
