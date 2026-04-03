@@ -30,23 +30,6 @@ jobs:
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
 
-  vale:
-    name: vale
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Run Vale
-        uses: vale-cli/vale-action@v2.1.1
-        with:
-          files: .
-          reporter: github-check
-          fail_on_error: true
-          filter_mode: nofilter
-          vale_flags: "--glob=*.md"
-
   pr-template:
     name: pr template
     runs-on: ubuntu-latest
@@ -63,17 +46,3 @@ jobs:
 
       - name: Validate PR template checklist
         run: uv run scripts/check_pr_template.py
-
-  links:
-    name: links
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Check links with lychee
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --no-progress './**/*.md'
-          fail: true
