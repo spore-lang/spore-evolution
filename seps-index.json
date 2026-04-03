@@ -15,6 +15,172 @@
       "discussion": null,
       "pr": null,
       "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0001-core-syntax.md",
+      "sep": 1,
+      "title": "SEP-0001: Core Syntax & Signatures",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/1",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0002-type-system.md",
+      "sep": 2,
+      "title": "SEP-0002: Type System",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        1
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/2",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0003-effect-capability-system.md",
+      "sep": 3,
+      "title": "SEP-0003: Effect & Capability System",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        2
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/3",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0004-cost-analysis.md",
+      "sep": 4,
+      "title": "SEP-0004: Cost Analysis & Decidability",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        2,
+        3
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/4",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0005-hole-system.md",
+      "sep": 5,
+      "title": "SEP-0005: Hole System & Agent Protocol",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        2,
+        3,
+        4
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/5",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0006-compiler-architecture.md",
+      "sep": 6,
+      "title": "SEP-0006: Compiler Architecture",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/6",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0007-concurrency-model.md",
+      "sep": 7,
+      "title": "SEP-0007: Concurrency Model",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        1,
+        3,
+        4
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/7",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0008-module-package-system.md",
+      "sep": 8,
+      "title": "SEP-0008: Module & Package System",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-03-31",
+      "requires": [
+        1,
+        3
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/8",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
+      "path": "seps/SEP-0009-standard-library.md",
+      "sep": 9,
+      "title": "SEP-0009: Standard Library Surface",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore Contributors"
+      ],
+      "created": "2026-04-01",
+      "requires": [
+        1,
+        2,
+        3,
+        4,
+        7,
+        8
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions",
+      "pr": null,
+      "superseded_by": null
     }
   ]
 }

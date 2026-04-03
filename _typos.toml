@@ -8,3 +8,4 @@ extend-ignore-re = [
 [default.extend-words]
 spore = "spore"
 seps = "seps"
+THIR = "THIR"

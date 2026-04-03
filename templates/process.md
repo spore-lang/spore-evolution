@@ -14,6 +14,8 @@ superseded_by: null
 
 # Draft SEP: Title
 
+> **Executive Summary**: _2–4 sentences describing the core contribution, key design decisions, and expected impact on the Spore ecosystem._
+
 ## Summary
 
 ## Motivation

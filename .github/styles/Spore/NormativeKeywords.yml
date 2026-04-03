@@ -1,0 +1,12 @@
+extends: substitution
+message: "Use RFC 2119 keyword '%s' instead of '%s' when writing normative requirements."
+level: suggestion
+ignorecase: false
+swap:
+  must: MUST
+  "must not": MUST NOT
+  should: SHOULD
+  "should not": SHOULD NOT
+  may: MAY
+  required: REQUIRED
+  optional: OPTIONAL
