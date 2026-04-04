@@ -958,6 +958,76 @@ Target latencies (aspirational, not hard guarantees):
 
 **Parallelism:** Default = CPU core count. Override with `--jobs N`.
 
+### CLI subcommand design
+
+#### `spore check`
+
+`spore check` performs all static analyses without code generation. It is the
+primary command for verifying correctness during development.
+
+```bash
+spore check src/main.spore          # check a single entry point
+spore check src/**/*.sp             # check all source files
+spore check --deny-warnings .       # treat warnings as errors (for CI)
+```
+
+##### Implementation strategy
+
+`spore check` runs a **single compilation pipeline** that performs all static
+analyses in one pass:
+
+```text
+Source → Parse → Name Resolution → Type Inference
+                                    ├── Capability Check (inline)
+                                    ├── Cost Analysis (post-typecheck)
+                                    └── Lint Pass (post-typecheck)
+```
+
+All diagnostics are collected into a single `Vec<Diagnostic>` and sorted by file
+position. This ensures the developer sees **all** issues in one invocation rather
+than fixing types first, then capabilities, then costs.
+
+**Cost violations** are emitted as **warnings** (severity = Warning, code prefix
+`K`), not errors. They do not cause a non-zero exit code unless `--deny-warnings`
+is passed.
+
+**Lint warnings** (severity = Warning, code prefix `W`) follow the same rule.
+
+#### `spore format`
+
+`spore format` rewrites source files to conform to the canonical Spore style.
+
+```bash
+spore format src/**/*.sp            # format files in place
+spore format --check src/**/*.sp    # exit 1 if any file would change (no writes)
+```
+
+##### Implementation strategy
+
+The formatter is **AST-based**: it parses source code into an AST, then
+pretty-prints the AST according to canonical rules. This ensures output is always
+syntactically valid and produces consistent results regardless of input formatting.
+
+```text
+Source → Parse → AST → Pretty-print → Formatted source
+```
+
+**Comment preservation** is a known challenge for AST-based formatters. The current
+implementation attaches comments to adjacent AST nodes during parsing (stored as
+leading/trailing trivia on `Spanned<T>`). Future work may adopt a CST
+(Concrete Syntax Tree) approach for perfect fidelity.
+
+**CI integration**: `spore format --check` is designed for CI pipelines. It exits
+with code 1 if any file would change, without modifying files. Combined with
+`spore check --deny-warnings`, these two commands form a complete CI static
+analysis gate:
+
+```yaml
+# Example CI step
+- run: spore format --check src/**/*.sp
+- run: spore check --deny-warnings src/**/*.sp
+```
+
 ---
 
 ## Human experience impact
