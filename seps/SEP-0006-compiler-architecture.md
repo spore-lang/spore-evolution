@@ -762,6 +762,25 @@ Watch events are converted to LSP messages by the Spore LSP server:
 }
 ```
 
+### CLI implementation stack
+
+The `spore` binary is built on a curated set of Rust crates chosen for
+correctness, minimal footprint, and future Spore self-hosting feasibility:
+
+| Crate | Purpose | Bootstrap path |
+|-------|---------|---------------|
+| `bpaf` | Argument parsing (derive-based) | Parser combinator — natural fit for Spore |
+| `ariadne` | Diagnostic rendering (span-based) | Thin wrapper on ANSI formatting |
+| `owo-colors` | Terminal color output | Pure ANSI escape sequences |
+| `notify` | File system watching (`watch` mode) | System call wrapper |
+| `serde_json` | JSON serialization (`--json` flag) | Spore will need JSON support |
+| `tracing` | Structured logging (`--verbose`) | Replaceable with print-based logging |
+
+**Self-hosting consideration:** Every crate above wraps a concept that Spore
+must eventually implement natively (parsing, formatting, file I/O, JSON). The
+Rust CLI serves as the reference implementation; the Spore bootstrap will
+reimplement these as Spore libraries using the `basic-cli` platform.
+
 ### Diagnostic output formats
 
 #### Default format
