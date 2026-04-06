@@ -15,13 +15,17 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines Spore's effect system with 11 atomic effects (Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit) and user-defined effects. Effects compose algebraically and are checked via subset inclusion. Effect handlers (`handler`/`handle ... with`) enable testability and platform abstraction. The `effect` keyword defines both atomic effects and effect aliases (using `|` for union).
+> **Executive Summary**: Defines Spore's effect system as a flat capability-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The surface syntax uses `effect`, `handler`, and `handle ... with`, while semantic checking remains a subset test over capability sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
 
 ## Summary
 
 This SEP introduces Spore's **effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic effects* it requires. The compiler verifies that a function body never exercises an effect absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and effect narrowing.
 
-The design is intentionally **flat and monomorphic**: effects are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`effect X = A | B`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
+The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the capability set used for subset checks, platform ceilings, and machine-readable fields such as `available_capabilities`.
+
+The design is intentionally **flat and monomorphic**: effect sets are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`effect X = A | B`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
+
+Concrete surface syntax for `effect`, `handler`, `perform`, and `handle ... with` is defined in SEP-0001. This SEP focuses on semantics, algebra, typing, protocol fields, and diagnostics.
 
 ---
 
@@ -50,7 +54,7 @@ Modern programs interleave pure computation with diverse side effects — file I
 | Composable aliases | `effect` keyword for named groups and aliases |
 | Sound subtyping | Set inclusion on effect sets |
 | Auto-inferred properties | `pure`, `deterministic`, `total` derived from `uses` |
-| Agent integration | Effect set emitted in `HoleReport` JSON |
+| Agent integration | Capability set emitted in `HoleReport` JSON |
 
 ---
 
@@ -69,6 +73,14 @@ uses [FileRead]
 }
 ```
 
+A function that interacts with the terminal declares `Console`:
+
+```spore
+fn greet(name: String) uses [Console] {
+    println("Hello, " + name)
+}
+```
+
 If a function needs no effects it is *pure* and the `uses` clause may be omitted entirely:
 
 ```spore
@@ -80,21 +92,47 @@ fn add(a: Int, b: Int) -> Int {
 
 ### Built-in atomic effects
 
-Spore ships with the following atomic effects:
+Spore ships with the following intent-oriented atomic effects. Each one answers: "What does this code intend to do with the outside world?"
 
-| Effect | Semantics | Typical operations |
+| Effect | Intent | Typical operations |
 |---|---|---|
-| `FileRead` | Read from the filesystem | `read_file`, `list_dir` |
-| `FileWrite` | Write to the filesystem | `write_file`, `create_dir`, `delete` |
-| `NetRead` | Read from the network | `http.get`, `tcp.recv` |
-| `NetWrite` | Write to the network | `http.post`, `tcp.send` |
-| `StateRead` | Read mutable state | `state.get`, `cache.lookup` |
-| `StateWrite` | Write mutable state | `state.set`, `cache.insert` |
-| `Spawn` | Create concurrent tasks | `spawn { ... }` |
-| `Clock` | Read system clock | `now()`, `elapsed()` |
-| `Random` | Generate random values | `random()`, `uuid()` |
-| `Compute` | Non-trivial pure computation | Compiler-implicit |
-| `Exit` | Terminate the process | `exit()`, `abort()` |
+| `Console` | User interaction (terminal I/O) | `println`, `eprintln`, `read_line` |
+| `FileRead` | Persistent data access | `File.read`, `Dir.list` |
+| `FileWrite` | Persistent data modification | `File.write`, `Dir.create`, `File.delete` |
+| `NetConnect` | External communication (outbound) | `http.get`, `http.post`, `tcp.connect` |
+| `NetListen` | Service provision (inbound) | `tcp.listen`, `http.serve` |
+| `Env` | Configuration access | `Env.get`, `Env.vars` |
+| `Spawn` | Subprocess management | `Cmd.exec`, `spawn { ... }` |
+| `Clock` | Time-dependent computation | `now()`, `elapsed()` |
+| `Random` | Non-deterministic computation | `random()`, `uuid()` |
+| `Exit` | Process lifecycle control | `exit()`, `abort()` |
+
+### Design rationale: intent-oriented built-in effects
+
+The guiding principle is: **each built-in effect answers "What does this code intend to do with the outside world?"** This leads to several deliberate design choices:
+
+1. **No `Compute` effect.** Pure computation is the default state — no effect declaration is needed. Every function can compute; effects describe what *additional* external powers a function needs beyond pure computation. A function with `uses []` (or no `uses` clause) is pure and can compute freely.
+
+2. **No `StateRead`/`StateWrite`.** Mutable state is tracked by the language semantics, not by built-in external effect names. The built-in effects describe interactions with the *external world* — the filesystem, the network, the terminal, the clock. Internal mutable state (for example, a local cache) is an implementation detail, not an intent to interact with the outside world.
+
+3. **`NetConnect`/`NetListen` instead of `NetRead`/`NetWrite`.** The old names described data direction, but the real intent distinction is *client vs server*. An HTTP client both reads and writes the network, but its intent is "connect to an external service." Similarly, a server both reads and writes, but its intent is "listen for incoming connections."
+
+4. **`Console` for terminal I/O.** `println("hello")` is user interaction, not file writing, even though stdout is technically a file descriptor. Distinguishing terminal I/O from filesystem I/O reflects a real difference in intent.
+
+5. **`Env` for environment variables.** Reading environment variables is configuration access, distinct from reading files. Separating `Env` from `FileRead` enables finer-grained control.
+
+### Platform mapping: basic-cli
+
+The `basic-cli` platform maps standard library operations to built-in effects as follows:
+
+| Operation | Required effect |
+|---|---|
+| `Stdout.println`, `Stderr.println` | `Console` |
+| `Stdin.read_line` | `Console` |
+| `File.read`, `Dir.list` | `FileRead` |
+| `File.write`, `Dir.create` | `FileWrite` |
+| `Env.get`, `Env.vars` | `Env` |
+| `Cmd.exec` | `Spawn` |
 
 ### Defining effect aliases
 
@@ -102,15 +140,15 @@ The `effect` keyword creates a **named alias** that expands into a flat set of a
 
 ```spore
 effect FileIO = FileRead | FileWrite
-effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
-effect FullIO = FileIO | NetRead | NetWrite
+effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
+effect Server = NetListen | FileRead | FileWrite | Clock | Random
+effect HttpClient = NetConnect | Clock
 ```
 
 Aliases expand recursively and flatten:
 
 ```text
-FullIO → {FileIO, NetRead, NetWrite}
-       → {FileRead, FileWrite, NetRead, NetWrite}
+CLI → {Console, FileRead, FileWrite, Env, Spawn, Exit}
 ```
 
 Aliases are purely syntactic sugar. After expansion, only atomic effects remain.
@@ -118,17 +156,17 @@ Aliases are purely syntactic sugar. After expansion, only atomic effects remain.
 ### Using effects in practice
 
 ```spore
-effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
+effect HttpClient = NetConnect | Clock
 
-fn query_user(id: UserId) -> User ! [DbError, NotFound]
-uses [DatabaseAccess]
+fn query_api(url: Url) -> Data ! [NetworkError]
+uses [HttpClient]
 {
-    let conn = pool.get_connection()
-    conn.query("SELECT * FROM users WHERE id = ?", id)
+    let response = http.get(url)
+    parse_json(response.body)
 }
 ```
 
-After alias expansion this is equivalent to `uses [NetRead, NetWrite, StateRead, StateWrite]`.
+After alias expansion this is equivalent to `uses [NetConnect, Clock]`.
 
 ### Pure closures in higher-order functions
 
@@ -159,12 +197,12 @@ When you need side effects during iteration, use the structured concurrency patt
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetworkError]
-uses [NetRead, Spawn]
+uses [NetConnect, Spawn]
 {
     parallel_scope {
         let tasks = urls.map(|url| {
             spawn {
-                // spawn body uses [NetRead], ⊆ parent {NetRead, Spawn}  ✓
+                // spawn body uses [NetConnect], ⊆ parent {NetConnect, Spawn}  ✓
                 http.get(url)
             }
         })
@@ -175,9 +213,9 @@ uses [NetRead, Spawn]
 
 Why does this type-check?
 
-1. `fetch_all` declares `uses [NetRead, Spawn]`.
-2. `spawn { ... }` requires `Spawn ∈ {NetRead, Spawn}` — satisfied.
-3. Inside the spawn body, `http.get` requires `NetRead`; `{NetRead} ⊆ {NetRead, Spawn}` — satisfied.
+1. `fetch_all` declares `uses [NetConnect, Spawn]`.
+2. `spawn { ... }` requires `Spawn ∈ {NetConnect, Spawn}` — satisfied.
+3. Inside the spawn body, `http.get` requires `NetConnect`; `{NetConnect} ⊆ {NetConnect, Spawn}` — satisfied.
 4. The closure passed to `map` returns `Task[Response]`. The `spawn` expression itself is pure (it merely creates a task handle), so the closure satisfies `uses []`.
 
 ### Auto-inferred properties
@@ -187,10 +225,10 @@ The compiler automatically derives semantic properties from the declared effect 
 | Declared `uses` | Inferred properties |
 |---|---|
 | `uses []` (or omitted) | pure, deterministic, total* |
-| `uses [Compute]` | deterministic |
+| `uses [Console]` | ¬pure |
 | `uses [FileRead]` | ¬pure, deterministic |
 | `uses [Random]` | ¬pure, ¬deterministic |
-| `uses [NetRead, Spawn]` | ¬pure, deterministic |
+| `uses [NetConnect, Spawn]` | ¬pure, deterministic |
 
 (*total requires a separate termination analysis; see Reference-level explanation §5.4.)
 
@@ -230,7 +268,7 @@ Running `sporec --fixes` auto-inserts the missing `uses` clause.
 A module may declare its effect ceiling with `module X uses [...]`:
 
 ```spore
-module billing uses [NetRead, NetWrite, StateRead, StateWrite]
+module billing uses [NetConnect, FileRead, Clock]
 ```
 
 All functions within the module are constrained: their `uses` sets must be subsets of the module-level set. If a function exceeds the module ceiling the compiler emits a `cap-narrowing-violation` error.
@@ -309,7 +347,7 @@ Effect sets obey standard finite-set algebra:
 |---|---|---|
 | Commutativity | {A, B} = {B, A} | Declaration order is irrelevant |
 | Idempotence | {A, A} = {A} | Duplicate declarations collapse |
-| Associativity | Nested aliases flatten | `[FileIO, NetRead]` = `[FileRead, FileWrite, NetRead]` |
+| Associativity | Nested aliases flatten | `[FileIO, NetConnect]` = `[FileRead, FileWrite, NetConnect]` |
 | Identity element | {} (empty set) | The identity for union: S ∪ {} = S |
 
 #### Set operations
@@ -370,7 +408,7 @@ $$(T_1, T_2) \to R \equiv (T_1, T_2) \to R \ \textbf{uses}\ \{\}$$
 
 The compiler derives semantic properties from the `uses` set via the property-inference function **𝒫**:
 
-$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{false} & \text{if } S \cap \{\text{FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite}\} \neq \emptyset \end{cases}$$
+$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{true} & \text{if } S \subseteq \{\text{Spawn}\} \\ \text{false} & \text{otherwise} \end{cases}$$
 
 $$\mathcal{P}(\text{deterministic}, S) = \begin{cases} \text{true} & \text{if } S \cap \{\text{Clock, Random}\} = \emptyset \\ \text{false} & \text{otherwise} \end{cases}$$
 
@@ -378,18 +416,18 @@ $$\mathcal{P}(\text{total}, S) = \text{determined by a separate termination anal
 
 #### 5.0 Edge cases in the `pure` formula
 
-The `𝒫(pure, S)` function has a gap: when `S` is non-empty but contains only effects outside the I/O set `{FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite}`, neither the `true` nor the `false` case applies directly. The following clarifications apply:
+The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Spawn}`. Pure computation requires no declared effect — it is the default. `Spawn` is pure-compatible because `spawn` merely creates a task descriptor; the effect is deferred. All other built-in effects represent interactions with the external world and therefore make a function impure.
 
 | Effect set S | pure? | Rationale |
 |---|---|---|
 | `{}` | true | No effects at all |
-| `{Compute}` | true | `Compute` is not an I/O effect; it marks non-trivial pure computation |
+| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
+| `{Console}` | false | Console interacts with the terminal — an external I/O channel |
 | `{Clock}` | false | Clock reads the external world (system time) |
 | `{Random}` | false | Random reads external entropy |
-| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
-| `{Compute, Spawn}` | true | Neither is an I/O effect |
-
-The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Compute, Spawn}`. All other non-empty effect sets that intersect with any effect outside this "pure-compatible" subset yield `𝒫(pure, S) = false`.
+| `{Env}` | false | Env reads the process environment — an external configuration source |
+| `{Exit}` | false | `exit` terminates the process — an observable external effect |
+| `{NetConnect}` | false | Outbound network access is external I/O |
 
 #### 5.1 Implication chain
 
@@ -404,7 +442,7 @@ A pure function (`uses {}`) trivially satisfies the deterministic condition beca
 ```spore
 /// @idempotent
 fn sync_user(user_id: UserId) -> SyncResult ! [NetworkError]
-uses [NetRead, NetWrite, StateRead, StateWrite]
+uses [NetConnect, FileRead]
 { ... }
 ```
 
@@ -413,7 +451,7 @@ uses [NetRead, NetWrite, StateRead, StateWrite]
 ```spore
 /// @unbounded
 fn event_loop() -> Never
-uses [NetRead, NetWrite]
+uses [NetListen, Console]
 {
     loop { handle_next_event() }
 }
@@ -537,9 +575,9 @@ A closure defined within a context with effect set *S* has an inferred effect se
 
 ```spore
 fn example() -> Unit
-uses [FileRead, NetRead]
+uses [FileRead, NetConnect]
 {
-    // Inferred type: (String) -> Data uses [NetRead]
+    // Inferred type: (String) -> Data uses [NetConnect]
     let fetch_fn = |url| http.get(url)
 
     // Inferred type: (Int) -> Int uses []  (pure)
@@ -549,7 +587,7 @@ uses [FileRead, NetRead]
 
 ### 11. Interaction with the Hole system
 
-When the compiler encounters a Hole (`?name`), the generated `HoleReport` includes the effect set available at that program point:
+When the compiler encounters a Hole (`?name`), the generated `HoleReport` includes the capability set available at that program point. The field is named `available_capabilities` for protocol compatibility, but its elements are the same intent-oriented effect names described in this SEP:
 
 ```json
 {
@@ -559,10 +597,10 @@ When the compiler encounters a Hole (`?name`), the generated `HoleReport` includ
     "url": "Url",
     "timeout": "Duration"
   },
-  "available_effects": ["NetRead"],
+  "available_capabilities": ["NetConnect"],
   "cost_budget": 5000,
   "candidate_functions": [
-    "http.get(url: Url) -> Data ! [NetworkError] uses [NetRead]"
+    "http.get(url: Url) -> Data ! [NetworkError] uses [NetConnect]"
   ]
 }
 ```
@@ -575,7 +613,7 @@ The Hole system filters candidate functions so that only those whose `uses S` sa
 
 #### 11.1 Hole effect-violation diagnostic
 
-When an agent or developer fills a Hole with code that exceeds the available effects, the compiler emits a detailed diagnostic:
+When an agent or developer fills a Hole with code that exceeds the available set, the compiler emits a detailed diagnostic:
 
 ```text
 ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised effects:
@@ -584,11 +622,11 @@ ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised effects:
 15 |     ?fetch_logic    // filled with: fetch_and_save(url)
    |     ^^^^^^^^^^^^ hole fill exceeds available effects
    |
-   = available effects: [NetRead]
-   = fill code requires:     [NetRead, FileWrite]
-   = excess effects:    [FileWrite]
+   = available capabilities: [NetConnect]
+   = fill code requires:     [NetConnect, FileWrite]
+   = excess capabilities:    [FileWrite]
    = help: either add FileWrite to the enclosing function's `uses` clause,
-     or choose a candidate that only requires [NetRead]
+     or choose a candidate that only requires [NetConnect]
 ```
 
 ### 12. Interaction with the cost model
@@ -607,19 +645,24 @@ Effect sets provide hard upper-bound constraints on these cost dimensions:
 | Condition | Cost dimension constraint |
 |---|---|
 | `uses {}` | `io = 0` (guaranteed no I/O overhead) |
-| S ∩ {NetRead, NetWrite, FileRead, FileWrite} ≠ ∅ | `io > 0` possible |
+| S ∩ {NetConnect, NetListen, FileRead, FileWrite, Console} ≠ ∅ | `io > 0` possible |
 | `Spawn ∈ S` | `parallel > 0` possible |
-| `uses [Compute]` | Only `compute` and `alloc` dimensions may be non-zero |
 
 The relationship is a **necessary condition**: if the effect set excludes all I/O effects, the cost model's I/O dimension is provably zero.
 
-$$S \cap \{\text{NetRead, NetWrite, FileRead, FileWrite}\} = \emptyset \implies \text{cost}_{\text{io}} = 0$$
+$$S \cap \{\text{NetConnect, NetListen, FileRead, FileWrite, Console}\} = \emptyset \implies \text{cost}_{\text{io}} = 0$$
 
 ### 13. Effects as typed constructs
 
 Effects are not merely string tags — each effect is a **typed construct** whose methods define the operations available when the effect is in scope:
 
 ```spore
+effect Console {
+    fn println(msg: String) -> Unit
+    fn eprintln(msg: String) -> Unit
+    fn read_line() -> String ! [IoError]
+}
+
 effect FileRead {
     fn read_file(path: String) -> Bytes ! [IoError]
     fn list_dir(path: String) -> List[String] ! [IoError]
@@ -629,6 +672,11 @@ effect FileWrite {
     fn write_file(path: String, data: Bytes) -> Unit ! [IoError]
     fn create_dir(path: String) -> Unit ! [IoError]
     fn delete(path: String) -> Unit ! [IoError]
+}
+
+effect Env {
+    fn get(name: String) -> Option[String]
+    fn vars() -> List[(String, String)]
 }
 ```
 
@@ -711,7 +759,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Ergonomics
 
-- Effect aliases (`effect DatabaseAccess = NetRead | NetWrite | ...`) reduce boilerplate for common groups.
+- Effect aliases (`effect CLI = Console | FileRead | FileWrite | ...`) reduce boilerplate for common groups.
 - Auto-inferred properties eliminate the need for manual `pure` / `deterministic` annotations.
 - The compiler provides actionable diagnostics when a function body exceeds its declared effects.
 
@@ -726,7 +774,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Structured effect information in HoleReport
 
-LLM-based agents filling Holes receive the `available_effects` field in the JSON `HoleReport`. This enables agents to:
+LLM-based agents filling Holes receive the `available_capabilities` field in the JSON `HoleReport`. This enables agents to:
 
 1. **Constrain code generation.** The agent knows which operations are permissible and avoids generating code that would fail effect checks.
 2. **Filter candidate functions.** Only functions whose `uses S` satisfies S ⊆ S_available are presented as candidates.
@@ -753,7 +801,7 @@ The canonical serialised form of a function type includes the CapSet:
   "kind": "Fn",
   "params": ["Int", "Int"],
   "return": "Int",
-  "effects": [],
+  "capabilities": [],
   "errors": []
 }
 ```
@@ -763,7 +811,7 @@ The canonical serialised form of a function type includes the CapSet:
   "kind": "Fn",
   "params": ["Url"],
   "return": "Response",
-  "effects": ["NetRead"],
+  "capabilities": ["NetConnect"],
   "errors": ["NetworkError"]
 }
 ```
@@ -776,7 +824,9 @@ All effect alias definitions are collected into a structured registry available 
 {
   "aliases": {
     "FileIO": ["FileRead", "FileWrite"],
-    "DatabaseAccess": ["NetRead", "NetWrite", "StateRead", "StateWrite"]
+    "CLI": ["Console", "FileRead", "FileWrite", "Env", "Spawn", "Exit"],
+    "Server": ["NetListen", "FileRead", "FileWrite", "Clock", "Random"],
+    "HttpClient": ["NetConnect", "Clock"]
   }
 }
 ```
@@ -965,9 +1015,9 @@ Can third-party libraries define new atomic effects? If so, how are they scoped 
 
 Is `FileRead` / `FileWrite` the right granularity, or should effects be path-scoped (e.g., `FileRead("/etc/config")`)? Path-scoping adds expressiveness but complicates the set algebra.
 
-### 5. Relationship between `Compute` and `uses []`
+### 5. Granularity of `Console` capability
 
-Currently `uses []` implies pure, and `uses [Compute]` allows non-trivial computation. Should `Compute` be implicit in all functions (since all functions compute), or should it be reserved for functions that perform expensive computation? The distinction matters for the cost model.
+Should `Console` be split further (e.g., `ConsoleRead` for stdin vs `ConsoleWrite` for stdout/stderr)? A single `Console` is simpler and covers the common case where terminal I/O is bidirectional, but finer granularity may be useful for sandboxing scenarios where a program should print output but not read input.
 
 ### 6. Effect evolution and deprecation
 

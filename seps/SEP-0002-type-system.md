@@ -124,7 +124,7 @@ fn add(a: Int, b: Int) -> Int {
 }
 
 fn fetch_page(url: String) -> String ! [NetworkError]
-uses [NetRead]
+uses [NetConnect]
 cost <= 5000
 {
     http_get(url)
@@ -402,54 +402,29 @@ where T: Eq + Hash + Display
 
 This is one of Spore's central design decisions. **Traits** and **effects** are separate constructs:
 
-- **`trait`** defines type interfaces — capabilities that types implement. Used with `where T: Trait` bounds.
-- **`effect`** defines external operations — ways a function interacts with the outside world. Used with `uses [Effect]` declarations.
+- **`trait`** defines type interfaces. Used with `where T: Trait` bounds.
+- **`effect`** defines external operations and named effect aliases. Used with `uses [Effect]` declarations.
+- **`handler`** provides concrete implementations for effect operations; handler semantics are specified in SEP-0003.
 
 These two systems are never mixed: `where` is for traits, `uses` is for effects.
 
-##### Effect definitions
+Concrete surface syntax for `trait`, `effect`, `handler`, and `handle ... with` is centralized in SEP-0001 (§"Traits, effects, and the `uses` clause" and the EBNF grammar). This SEP only depends on the semantic split:
 
 ```spore
-// An effect defines operations that interact with the external world
-effect FileRead {
-    fn read_file(path: Path) -> Bytes ! [IoError]
+trait Serialize {
+    fn serialize(self) -> Bytes ! [SerializeError]
 }
 
-effect FileWrite {
-    fn write_file(path: Path, data: Bytes) -> Unit ! [IoError]
-}
-```
+effect HttpClient = NetConnect | Clock
 
-##### Effect aliases
-
-Effect aliases use `|` for union, consistent with type union syntax:
-
-```spore
-effect FileIO = FileRead | FileWrite
-effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
-
-fn generate_report(org_id: OrgId, period: DateRange) -> Report ! [ConnectionLost]
-uses [DatabaseAccess]
-cost <= 12000
+fn fetch_page(url: Url) -> Response ! [NetworkError]
+uses [HttpClient]
 {
-    // can use any function requiring subsets of DatabaseAccess
+    ...
 }
 ```
 
-##### Effect handlers
-
-Effects can be intercepted and reinterpreted via handlers:
-
-```spore
-handler MockFileRead for FileRead {
-    fn read_file(path: Path) -> Bytes ! [IoError] {
-        self.mock_fs.get(path)
-    }
-}
-
-// Bind handler at call site
-handle load_config("app.toml") with MockFileRead { mock_fs: test_data }
-```
+`where` constrains trait obligations; `uses` constrains effect requirements. Effect algebra and handler installation are specified in SEP-0003.
 
 #### Associated types
 
@@ -1048,7 +1023,7 @@ Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 
 1. A function may only call another function whose CapSet is a **subset** of its own.
 2. A pure function has `CapSet = ∅`.
-3. CapSets propagate through higher-order calls: passing a `Fn(...) uses [NetRead]` to a higher-order function requires the caller to declare `NetRead`.
+3. CapSets propagate through higher-order calls: passing a `Fn(...) uses [NetConnect]` to a higher-order function requires the caller to declare `NetConnect`.
 4. `uses [Cap1, Cap2]` in source syntax maps directly to `CapSet = {"Cap1", "Cap2"}`.
 
 **Formal effect checking rule:**
@@ -1159,7 +1134,7 @@ The core type system uses bidirectional typing with effect context.
 
 [Spawn]
   Γ; S ⊢ e ⇒ T uses S_e
-  Compute ∈ S
+  Spawn ∈ S
   ─────────────────────────────
   Γ; S ⊢ spawn e ⇒ Task[T]
 
@@ -1463,7 +1438,7 @@ Expr::Var(name) => {
 
 ```text
 (Int, String) -> Bool
-(Int) -> Int uses [FileRead, NetWrite]
+(Int) -> Int uses [FileRead, NetConnect]
 ```
 
 ### 4.9 Subtyping
@@ -1807,7 +1782,7 @@ Type errors are emitted as structured JSON for Agent consumption:
 | Type mismatch | `type mismatch in function 'add': expected 'Int', got 'String'` |
 | Undefined variable | `undefined variable 'x'` |
 | Arity mismatch | `function 'add' expects 2 arguments, got 3` |
-| Missing effect | `missing effects [NetRead]: caller does not declare them` |
+| Missing effect | `missing effects [NetConnect]: caller does not declare them` |
 | Non-exhaustive match | `non-exhaustive match: missing variant 'Triangle'` |
 | Cannot negate type | `cannot negate type 'String'` |
 | Cannot apply `!` | `cannot apply '!' to type 'Int'` |

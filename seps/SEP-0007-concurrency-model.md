@@ -81,7 +81,7 @@ Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` spl
 // No async annotation needed—concurrency declared via the Spawn effect
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
 cost ≤ urls.len * per_fetch
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         urls.map(|url| spawn { fetch(url) })
@@ -105,6 +105,8 @@ Both functions use identical call syntax—no red/blue distinction. The concurre
 
 This section introduces the concurrency primitives through progressive examples.
 
+Concrete surface syntax for `parallel_scope`, `spawn`, `select`, and `handle ... with` is centralized in SEP-0001. This SEP uses examples to explain concurrency behavior, but the grammar itself should be read there.
+
 ### 3.1 `parallel_scope` — the concurrency entry point
 
 `parallel_scope` is the **only** way to introduce concurrency in Spore. There is no `GlobalScope`, no `thread::spawn`, no detached background tasks in user code.
@@ -124,7 +126,7 @@ Because `parallel_scope` is an expression, it can return structured results asse
 
 ```spore
 fn load_dashboard(user_id: UserId) -> Dashboard ! [DbError, NetError]
-uses [Spawn, NetRead, DbRead]
+uses [Spawn, NetConnect, DbRead]
 {
     // parallel_scope returns the Dashboard struct directly
     parallel_scope {
@@ -164,8 +166,8 @@ let response: Response = task.await
 Effect narrowing is available at the spawn site:
 
 ```spore
-let task = spawn uses [NetRead] { fetch(url) }
-// The spawned task can only use NetRead; it cannot itself spawn.
+let task = spawn uses [NetConnect] { fetch(url) }
+// The spawned task can only use NetConnect; it cannot itself spawn.
 ```
 
 ### 3.3 `Task[T]` — task handle API
@@ -183,7 +185,7 @@ Usage examples:
 
 ```spore
 fn selective_fetch(urls: List[Url]) -> Response ! [NetError]
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         let primary   = spawn { fetch(urls.head()) }
@@ -248,7 +250,7 @@ handle concurrent_work()
     with cost_analysis_handler()
 ```
 
-A test can replace the `Spawn` handler with `SequentialHandler` and a `NetRead` handler with a mock—**no async test framework needed**:
+A test can replace the `Spawn` handler with `SequentialHandler` and a `NetConnect` handler with a mock—**no async test framework needed**:
 
 ```spore
 test "fetch_and_merge produces correct results" {
@@ -316,8 +318,10 @@ uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
 
 ### 3.7 Complete example: HTTP request handler
 
+Server entrypoints that accept inbound connections declare `NetListen`; the inner request handler below only needs outbound `NetConnect` plus domain-specific effects.
+
 ```spore
-effect HttpHandler = Spawn | NetRead | NetWrite | DbRead | Clock
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! [DbError, Timeout]
 cost ≤ 5000
@@ -327,7 +331,7 @@ uses [HttpHandler]
         parallel_scope(lanes: 3) {
             let auth   = spawn uses [DbRead]  { verify_token(req.token) }
             let user   = spawn uses [DbRead]  { load_user(req.user_id) }
-            let config = spawn uses [NetRead]  { fetch_remote_config() }
+            let config = spawn uses [NetConnect]  { fetch_remote_config() }
 
             let auth_result = auth.await
             if !auth_result.valid {
@@ -351,14 +355,14 @@ fn etl_pipeline(
     batch_size: Int,
 ) -> EtlReport ! [ExtractError, TransformError, LoadError]
 cost ≤ batch_size * 200
-uses [Spawn, NetRead, DbRead, DbWrite]
+uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
     let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
 
     parallel_scope(lanes: 6) {
         // Extract: 1 lane
-        let extractor = spawn uses [NetRead] {
+        let extractor = spawn uses [NetConnect] {
             source.stream().each(|record| raw_tx.send(record))
             raw_tx.close()
         }
@@ -681,7 +685,7 @@ Developers need not manually allocate lanes. The compiler infers from the task t
 ```spore
 fn pipeline(data: Data) -> Result
 cost ≤ 5000
-uses [Spawn, FileRead, NetWrite]
+uses [Spawn, FileRead, NetConnect]
 {
     // Phase 1: 4 lanes
     let prepared = parallel_scope(lanes: 4) {
@@ -711,7 +715,7 @@ When the number of spawned tasks depends on runtime values, the compiler uses **
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
 cost ≤ urls.len * per_fetch
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         urls.map(|url| spawn { fetch(url) })
@@ -735,7 +739,7 @@ To make the cost statically verifiable, use a **refinement type** to limit the i
 ```spore
 fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! [NetError]
 cost ≤ 100 * per_fetch + 500
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 10) {
         // At most 10 parallel tasks; remaining queue
@@ -803,7 +807,7 @@ Holes in concurrent functions participate in cost budget analysis:
 ```spore
 fn concurrent_pipeline(data: Data) -> Result
 cost ≤ 3000
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 2) {
         let a = spawn { fetch(data.url) }  // cost: 800
@@ -913,7 +917,7 @@ uses [Spawn, FileRead, FileWrite]
 
 ```spore
 fn fetch_with_timeout(url: Url, limit: Duration) -> Response ! [NetError, Timeout]
-uses [Spawn, NetRead, Clock]
+uses [Spawn, NetConnect, Clock]
 {
     with_timeout(limit) {
         fetch(url)
@@ -956,7 +960,7 @@ Because the task tree mirrors the lexical scope tree, error messages and stack t
 
 ### Explicit effects as documentation
 
-When a function signature says `uses [Spawn, NetRead]`, a human reader immediately knows the function is concurrent and performs network reads. This serves as machine-checked documentation.
+When a function signature says `uses [Spawn, NetConnect]`, a human reader immediately knows the function is concurrent and performs outbound network access. This serves as machine-checked documentation.
 
 ---
 
@@ -984,7 +988,7 @@ The constrained concurrency model (`parallel_scope` + `spawn` only, no raw threa
 
 ### Effect narrowing for safe delegation
 
-When an agent generates a spawned task, it can narrow the effect set (`spawn uses [NetRead] { ... }`), providing a compile-time guarantee that the generated subtask cannot exceed its intended permissions—a form of least-privilege that is checkable at compile time.
+When an agent generates a spawned task, it can narrow the effect set (`spawn uses [NetConnect] { ... }`), providing a compile-time guarantee that the generated subtask cannot exceed its intended permissions—a form of least-privilege that is checkable at compile time.
 
 ---
 
@@ -1005,7 +1009,7 @@ $ sporec --query-task-tree handle_request
       "children": [
         { "task": "verify_token", "uses": ["DbRead"], "cost": 600 },
         { "task": "load_user",    "uses": ["DbRead"], "cost": 800 },
-        { "task": "fetch_remote_config", "uses": ["NetRead"], "cost": 1200 }
+        { "task": "fetch_remote_config", "uses": ["NetConnect"], "cost": 1200 }
       ]
     }
   ]
@@ -1042,7 +1046,7 @@ The compiler reports the following concurrency-related diagnostics:
 | Lane budget exceeded | Error | `parallel_scope(lanes: 2)` with 5 spawns that cannot queue |
 | Cost budget exceeded due to parallelism | Error | Inferred parallel cost exceeds declared `cost ≤ N` |
 | Long recursion/iteration without cancellation checkpoint | Warning | CPU-bound computation > 100 iterations without `check_cancelled()` |
-| Effect widening in spawn | Error | `spawn uses [NetWrite] { ... }` when parent lacks `NetWrite` |
+| Effect widening in spawn | Error | `spawn uses [NetConnect] { ... }` when parent lacks `NetConnect` |
 | Unused `Task` (never awaited, never cancelled) | Warning | Task result is silently discarded |
 
 ### Runtime diagnostics
@@ -1238,7 +1242,7 @@ let task = spawn { <expr> }
 let result = spawn { <expr> }.await
 
 // With effect narrowing
-let task = spawn uses [NetRead] { <expr> }
+let task = spawn uses [NetConnect] { <expr> }
 ```
 
 ### A.3 `Task[T]`
@@ -1293,28 +1297,7 @@ defer { <cleanup> }
 
 ### A.7 Effect and handler
 
-```spore
-// Declare effect
-effect MyEffect {
-    fn operation(param: T) -> U
-}
-
-// Use effect in function signature
-fn my_func() -> Result
-uses [MyEffect]
-{ operation(value) }
-
-// Provide handler at call site
-handle my_func()
-    with my_handler()
-
-// Define handler
-handler my_handler for MyEffect {
-    fn operation(param: T) -> U {
-        resume(result)
-    }
-}
-```
+Concrete syntax for `effect`, `handler`, and `handle ... with` is defined in SEP-0001. The effect algebra and handler model that concurrency relies on are specified in SEP-0003.
 
 ### A.8 Function signature with concurrency
 
@@ -1331,7 +1314,7 @@ uses [Spawn, Channel, ...]
 ### A.9 Complete example: HTTP handler
 
 ```spore
-effect HttpHandler = Spawn | NetRead | NetWrite | DbRead | Clock
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! [DbError, Timeout]
 cost ≤ 5000
@@ -1341,7 +1324,7 @@ uses [HttpHandler]
         parallel_scope(lanes: 3) {
             let auth   = spawn uses [DbRead]  { verify_token(req.token) }
             let user   = spawn uses [DbRead]  { load_user(req.user_id) }
-            let config = spawn uses [NetRead]  { fetch_remote_config() }
+            let config = spawn uses [NetConnect]  { fetch_remote_config() }
 
             let auth_result = auth.await
             if !auth_result.valid {
@@ -1363,14 +1346,14 @@ fn etl_pipeline(
     batch_size: Int,
 ) -> EtlReport ! [ExtractError, TransformError, LoadError]
 cost ≤ batch_size * 200
-uses [Spawn, NetRead, DbRead, DbWrite]
+uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
     let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
 
     parallel_scope(lanes: 6) {
         // Extract: 1 lane
-        let extractor = spawn uses [NetRead] {
+        let extractor = spawn uses [NetConnect] {
             source.stream().each(|record| raw_tx.send(record))
             raw_tx.close()
         }

@@ -71,7 +71,7 @@ let x = 10;
 let x = x + 5;  // shadows the previous x
 ```
 
-For mutable state, use `Ref[T]` (which requires the `StateWrite` effect):
+For local mutable state, use `Ref[T]`. This is separate from the built-in external effect vocabulary standardized in SEP-0003, so it does not introduce a dedicated built-in `uses` name:
 
 ```spore
 let counter = Ref.new(0);
@@ -347,7 +347,6 @@ fn parse_int(input: String) -> Int ! [InvalidFormat] {
 // 3. With generic constraints
 fn serialize[T](value: T) -> Bytes ! [SerializeError]
 where T: Serialize
-uses [Compute]
 cost ≤ 500
 {
     ...
@@ -356,7 +355,7 @@ cost ≤ 500
 // 4. Side-effectful function
 /// @idempotent
 fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! [NetworkTimeout, AuthExpired]
-uses [NetRead, NetWrite, StateRead]
+uses [NetConnect, FileRead, Clock]
 cost ≤ 8500
 {
     ...
@@ -366,6 +365,8 @@ cost ≤ 8500
 ### Traits, effects, and the `uses` clause
 
 Spore separates type interfaces from effect tracking:
+
+This section is the **normative surface syntax** for these forms. SEP-0002 and SEP-0003 reference the same constructs semantically rather than re-specifying their grammar.
 
 ```spore
 // trait: type interface
@@ -384,7 +385,8 @@ effect Console {
 }
 
 // effect alias (uses | for union)
-effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
+effect HttpClient = NetConnect | Clock
+effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
 ```
 
 The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
@@ -392,22 +394,22 @@ The `uses` clause declares what effects a function requires. The compiler **auto
 | `uses` set | Inferred properties |
 |---|---|
 | `uses []` (or omitted for pure) | `pure`, `deterministic`, `total` |
-| `uses [Compute]` | `deterministic` |
+| `uses [FileRead]` | `deterministic` |
 | Contains `Random` or `Clock` | neither `pure` nor `deterministic` |
 
 The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
 
-The `uses` clause can mix effect names with specific resource instance bindings:
+The `uses` clause can mix atomic effect names with named effect aliases:
 
 ```spore
-fn query_database(sql: String) -> Data ! [DbError]
-uses [Database, db_connection]
+fn query_database(sql: String) -> Data ! [DbError, Timeout]
+uses [NetConnect]
 {
     ...
 }
 
-fn process_request(req: Request) -> Response ! [Error]
-uses [Network, Database, FileRead, db_pool, cache, logger]
+fn run_cli(config_path: String) -> Unit ! [Error]
+uses [CLI]
 {
     ...
 }
@@ -1085,7 +1087,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 4. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
    - `uses []` → `pure`, `deterministic`, `total`
-   - `uses [Compute]` → `deterministic`
+   - `uses [FileRead]` → `deterministic`
    - If `uses` contains `Random` or `Clock` → not deterministic
    - `total` is inferred by the compiler's termination checker
 
@@ -1240,9 +1242,9 @@ When queried (`sporec --query-hole ?name`), the compiler emits a structured repo
     "amount": "Money",
     "method": "PaymentMethod"
   },
-  "available_effects": ["NetRead"],
+  "available_capabilities": ["NetConnect"],
   "candidate_functions": [
-    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds]"
+    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds] uses [NetConnect]"
   ],
   "error_types_to_handle": ["Declined", "InsufficientFunds"]
 }
@@ -1556,13 +1558,13 @@ Spore's explicit syntax enables highly specific error messages:
 **Missing effect:**
 
 ```text
-error[E0301]: function `fetch_data` uses effect `NetRead` but does not declare it
+error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declare it
   --> src/api.spore:12:5
    |
 12 | fn fetch_data(url: Url) -> Data ! [NetworkError] {
    |    ^^^^^^^^^^ missing `uses` clause
    |
-   = help: add `uses [NetRead]` to the function signature
+   = help: add `uses [NetConnect]` to the function signature
    = note: detected effect dependency via call to `http.get`
 ```
 
@@ -1751,7 +1753,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 10. **Pattern matching on strings**: The current spec shows string literal patterns. Should Spore support regex patterns or prefix/suffix matching in `match` arms?
 
-11. **Standard effect taxonomy**: What is the canonical set of built-in effects (`Compute`, `NetRead`, `NetWrite`, `FileRead`, `FileWrite`, `StateRead`, `StateWrite`, `Clock`, `Random`, etc.)? This needs a separate SEP.
+11. **Standard effect taxonomy evolution**: SEP-0003 now defines the initial built-in effect vocabulary (`Console`, `FileRead`, `FileWrite`, `NetConnect`, `NetListen`, `Env`, `Spawn`, `Clock`, `Random`, `Exit`). Future SEPs may extend it, but changes should preserve the intent-oriented classification.
 
 12. **Error type subtyping**: If function `f` declares `! [NetworkError]` and function `g` declares `! [NetworkError, ParseError]`, can `g` call `f` directly? How does error set subtyping work?
 
