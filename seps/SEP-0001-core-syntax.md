@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → spec → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set. The `spec` clause embeds executable behavioral contracts (examples and properties) directly in function signatures, making intent verifiable by the compiler and visible in documentation.
+> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → uses → cost → spec → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set. The `spec` clause embeds typechecked behavioral contracts (examples and properties) directly in function signatures, making intent visible to the compiler, documentation, and hole-reporting tooling.
 
 ## Summary
 
@@ -328,7 +328,7 @@ uses [effects]
 cost ≤ N
 spec {
     example "...": ...
-    property "...": |params| ...
+    property "...": |param: Type| ...
 }
 {
     body
@@ -435,7 +435,7 @@ uses [CLI]
 
 ### Behavioral specification (`spec` clause)
 
-Spore functions can include a `spec` block that expresses behavioral intent as executable contracts. The `spec` clause sits between `cost` and the function body — making intent structurally part of the signature, visible to the compiler, runnable as tests, and surfaced in documentation.
+Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `uses`, and `cost`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
 
 ```spore
 fn add(a: Int, b: Int) -> Int
@@ -465,7 +465,7 @@ example "handles leap year" {
 }
 ```
 
-**`property` items** express universally quantified assertions using lambda syntax. The compiler generates random inputs for property-based testing:
+**`property` items** express universally quantified assertions using explicitly typed lambda syntax. The compiler generates random inputs for property-based testing:
 
 ```spore
 fn parse_date(s: String) -> Result[Date, ParseError] ! [ParseError]
@@ -483,8 +483,8 @@ spec {
 
 Key design properties:
 
-- **Spec is independent of body**: A function with `{ ?hole }` body still has its spec items executable — the spec calls the function by name, not by accessing the body.
-- **Spec in traits**: Trait methods may include `spec` blocks. These define behavioral contracts that all `impl` blocks must satisfy.
+- **Spec metadata survives hole bodies**: A function with `{ ?hole }` still retains its `spec` items for type checking, documentation, and HoleReport output. However, executing those spec items still calls the function body, so a hole remains a runtime error until the body is filled.
+- **Current amendment scope**: This amendment defines `spec` for ordinary function declarations and `impl` methods with bodies. Trait-method `spec` syntax and inheritance semantics are deferred to a later amendment.
 - **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
 
 ### Struct and type definitions
@@ -689,7 +689,7 @@ The complete reserved keyword table:
 | `where` | Generic type constraints |
 | `uses` | Effect requirement declaration |
 | `cost` | Cost bound clause |
-| `spec` | Behavioral specification block in function/trait declarations |
+| `spec` | Behavioral specification block in function declarations and `impl` methods |
 | `example` | Concrete labeled example item inside a `spec` block |
 | `property` | Universally quantified assertion inside a `spec` block |
 | `spawn` | Spawn concurrent task |
@@ -971,7 +971,11 @@ SpecItem        = ExampleItem
 ExampleItem     = "example" StringLiteral ":" Expr
                 | "example" StringLiteral Block ;
 
-PropertyItem    = "property" StringLiteral ":" LambdaExpr ;
+PropertyItem    = "property" StringLiteral ":" PropertyLambdaExpr ;
+
+PropertyLambdaExpr = "|" [ PropertyParamList ] "|" ( Expr | Block ) ;
+PropertyParamList  = PropertyParam { "," PropertyParam } ;
+PropertyParam      = Ident ":" TypeExpr ;
 
 (* ─── Type Expressions ────────────────────────────── *)
 
@@ -1184,12 +1188,14 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 5. **`cost ≤ N`** — An upper bound on the function's resource cost. Can reference parameters (e.g., `cost ≤ n * 10`).
 
-6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as executable contracts. The `spec` block is evaluated independently from the function body — it calls the function by name, not by accessing the body directly. This means a function with `{ ?hole }` body still has its spec items runnable against any future fill.
+6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as typechecked test metadata. When the enclosing function body is executable, `spore test` evaluates the `spec` block by calling the function by name. If the body still contains an unfilled hole, the `spec` block remains available to the compiler and HoleReport output, but executing it still reaches the hole and errors.
 
    - **`example "label": expr`** — A concrete named test case. The body expression must be `Bool`. If using `==`, both sides must have the same type. Multi-line examples use block syntax: `example "label" { ... }`.
-   - **`property "label": |params| expr`** — A universally quantified assertion. The compiler generates random inputs of the declared types and verifies the body evaluates to `true` for all trials. Type annotations on lambda parameters are required.
+   - **`property "label": |x: T, ...| expr`** — A universally quantified assertion. The compiler generates random inputs of the declared types and verifies the body evaluates to `true` for all trials. Type annotations on property parameters are required.
 
    For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `#[allow(missing_spec)]`.
+
+   This amendment does not define trait-method `spec` inheritance or contract merging; that behavior is reserved for a future SEP.
 
 **Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost` → `spec`.
 
@@ -1360,7 +1366,7 @@ When queried (`sporec --query-hole ?name`), the compiler emits a structured repo
 }
 ```
 
-When a function has both a `spec` block and a hole body, the HoleReport includes the spec items as additional constraints. This gives hole-filling agents a self-contained behavioral contract alongside the existing type and capability context.
+When a function has both a `spec` block and a hole body, the HoleReport includes the spec items as additional constraints. This gives hole-filling agents a self-contained behavioral contract alongside the existing type and capability context, even though the examples and properties are not yet runnable without hitting the hole.
 
 ## Complete examples
 
@@ -1742,8 +1748,8 @@ spec failure: `parse_date` — example "ISO 8601"
    |
  5 |     example "ISO 8601": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
    |
-   left:  Err(AmbiguousFormat)
-   right: Ok(Date { year: 2024, month: 1, day: 15 })
+   body evaluated to: false
+   = note: equality-shaped examples may additionally report compared values when available
 ```
 
 **Spec property counterexample (runtime):**
@@ -1938,7 +1944,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 13. **`property` with `uses`**: If a property calls a function that has side effects, what capability scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
 
-14. **Trait spec inheritance**: If a trait defines a `property`, and an `impl` overrides a method with a tighter spec, which properties run — the trait's, the impl's, or both? Current proposal: both, unioned.
+14. **Future trait-level behavioral contracts**: Should a later SEP allow `spec` blocks on trait methods, and if so how should implementations inherit or refine them? This amendment leaves trait-level `spec` syntax and semantics unspecified.
 
 15. **`example` execution order**: Should `example` items run in declaration order (default) or allow parallel execution via `--parallel-spec`?
 
@@ -2256,7 +2262,8 @@ In PoC, this is a no-op since spawn already evaluated.)
 
 (Spec items are evaluated by `spore test`, not during normal program execution.
 Each example/property is compiled as a standalone test case that calls the function
-by name. Spec evaluation is independent of the function body — the body may be a hole.)
+by name. If that function body still contains a hole, the ordinary hole runtime-error
+rule applies, so the `spec` remains useful metadata but not a normal runnable path yet.)
 ```
 
 ### List operations (builtins)
