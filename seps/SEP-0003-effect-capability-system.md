@@ -714,7 +714,7 @@ handler RealFileRead for FileRead {
 
 #### Handler binding
 
-The `handle ... with` expression binds a handler to a computation:
+The `handle ... with` expression binds one or more handler expressions to a computation. SEP-0001 fixes the settled outer grammar as `handle <expr>` followed by one or more `with <handler-expr>` clauses; the richer handler model remains under item-3 discussion.
 
 ```spore
 // Bind a single handler
