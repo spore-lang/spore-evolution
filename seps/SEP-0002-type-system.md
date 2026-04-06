@@ -15,7 +15,7 @@ superseded_by: null
 
 # SEP-0002: Type System
 
-> **Executive Summary**: Defines Spore's nominal-primary type system with bidirectional inference, unifying capabilities as traits on execution context. Features three-tier refinement types (L0 decidable constraints → L1 abstract-interpretation → L2 proof obligations), 13 compiler-known traits, generics with where-clause bounds, and enum/struct/capability as the core type constructors. Includes formal typing judgments for the core language.
+> **Executive Summary**: Defines Spore's nominal-primary type system with bidirectional inference, separating traits (type interfaces) from effects (external operations). Features three-tier refinement types (L0 decidable constraints → L1 abstract-interpretation → L2 proof obligations), 13 compiler-known traits, generics with where-clause bounds, and enum/struct/trait/effect as the core type constructors. Includes formal typing judgments for the core language.
 
 ## Summary
 
@@ -51,7 +51,7 @@ Key design decisions:
 Spore is being co-developed by humans and AI Agents. Both audiences need precise, unambiguous rules for:
 
 1. **What programs are well-typed.** Agents generate code that must type-check. Vague rules produce vague code.
-2. **What information flows through signatures.** Signatures are the primary communication channel between components, between humans and Agents, and between Agents. They must encode types, capabilities, cost bounds, and error sets.
+2. **What information flows through signatures.** Signatures are the primary communication channel between components, between humans and Agents, and between Agents. They must encode types, effects, cost bounds, and error sets.
 3. **What the compiler guarantees.** Typed holes, structured diagnostics, and fill-suggestions all depend on a well-defined type lattice.
 4. **Where inference ends and annotation begins.** Signatures explicit, bodies inferred — but the boundary must be razor-sharp.
 
@@ -69,8 +69,8 @@ Without a specification:
 | Principle | Implication |
 |---|---|
 | **Signatures are gravity centers** | Signatures must be richly typed and explicit; bodies are inferred |
-| **Nominal-primary, structural escape** | Named types are nominal; anonymous records are structural; capabilities are always nominal |
-| **Capabilities = Traits** | Unified abstraction — `capability` is syntactic sugar for a trait on execution context |
+| **Nominal-primary, structural escape** | Named types are nominal; anonymous records are structural; traits and effects are always nominal |
+| **Traits ≠ Effects** | Separate abstractions — `trait` defines type interfaces, `effect` defines external operations; they are not unified |
 | **Decidable checking** | No SMT solver; refinements limited to decidable predicates and abstract interpretation |
 | **Agent-friendly** | Richer types help Agents more than they hurt humans; Agents absorb annotation complexity |
 | **Predictable** | No implicit conversions, no type-level computation, no SFINAE-style surprises |
@@ -112,11 +112,11 @@ type I32 = Int if -2147483648 <= self <= 2147483647
 type F32 = Float if self.precision == 32
 ```
 
-Platform capabilities determine the runtime representation; the type system reasons about logical constraints, and the codegen layer maps to machine types.
+Platform effects determine the runtime representation; the type system reasons about logical constraints, and the codegen layer maps to machine types.
 
 ### 3.2 Type annotations on functions
 
-Function signatures **must** be fully annotated. Parameters, return type, error set, capability set, and cost bound are all declared:
+Function signatures **must** be fully annotated. Parameters, return type, error set, effect set, and cost bound are all declared:
 
 ```spore
 fn add(a: Int, b: Int) -> Int {
@@ -188,7 +188,7 @@ greet(alice)   // OK: alice has name: String and age: Int (extra fields ignored)
 
 1. **Width subtyping**: A record with extra fields satisfies a type expecting fewer fields.
 2. **Exact field matching**: Field names and types must match exactly (no implicit conversion).
-3. **No trait implementation**: Anonymous records cannot implement traits or capabilities — nominal types are required for that.
+3. **No trait implementation**: Anonymous records cannot implement traits or effects — nominal types are required for that.
 4. **Nominal types do NOT satisfy anonymous record types**: `type Stats = { count: Int }` is nominal and is NOT compatible with `{ count: Int }`.
 
 ```spore
@@ -201,9 +201,9 @@ let named = Stats { count: 10, total: 95.5 }
 summarize(data: { count: named.count, total: named.total })   // OK
 ```
 
-### 3.5 Function types with capabilities
+### 3.5 Function types with effects
 
-Function types carry a **CapSet** — the set of capabilities (effects) the function requires:
+Function types carry a **CapSet** — the set of effects the function requires:
 
 ```spore
 type Logger = Fn(msg: String) -> () uses [FileWrite]
@@ -307,22 +307,22 @@ alias UserName = String    // alias: UserName == String (transparent)
 
 #### Trait definition
 
-Traits define named interfaces. Spore uses the `capability` keyword (which is syntactic sugar for trait). Traits are nominal — a type satisfies a trait only through an explicit `impl` declaration.
+Traits define named interfaces. Spore uses the `trait` keyword for type interfaces. Traits are nominal — a type satisfies a trait only through an explicit `impl` declaration.
 
 ```spore
-capability Eq {
+trait Eq {
     fn eq(self, other: Self) -> Bool
 }
 
-capability Ord: Eq {
+trait Ord: Eq {
     fn compare(self, other: Self) -> Ordering
 }
 
-capability Display {
+trait Display {
     fn display(self) -> String
 }
 
-capability Serialize {
+trait Serialize {
     fn serialize(self) -> Bytes ! [SerializeError]
     cost serialize <= 100
 }
@@ -362,7 +362,7 @@ impl Display for Shape {
 Default method implementations are supported:
 
 ```spore
-capability Collection {
+trait Collection {
     type Item
     fn len(self) -> Int
     fn is_empty(self) -> Bool { self.len() == 0 }   // default method
@@ -398,35 +398,57 @@ where T: Eq + Hash + Display
 }
 ```
 
-#### Capability = Trait (unified)
+#### Trait vs. Effect (separated)
 
-This is one of Spore's central design decisions. A **capability** is syntactic sugar for a trait on the execution context. `uses [X]` is equivalent to a trait bound on the implicit execution context.
+This is one of Spore's central design decisions. **Traits** and **effects** are separate constructs:
+
+- **`trait`** defines type interfaces — capabilities that types implement. Used with `where T: Trait` bounds.
+- **`effect`** defines external operations — ways a function interacts with the outside world. Used with `uses [Effect]` declarations.
+
+These two systems are never mixed: `where` is for traits, `uses` is for effects.
+
+##### Effect definitions
 
 ```spore
-// A capability is a trait on the execution context
-capability FileRead {
+// An effect defines operations that interact with the external world
+effect FileRead {
     fn read_file(path: Path) -> Bytes ! [IoError]
-    cost read_file <= 100
 }
 
-capability FileWrite {
+effect FileWrite {
     fn write_file(path: Path, data: Bytes) -> Unit ! [IoError]
-    cost write_file <= 200
 }
 ```
 
-**Composite capabilities**:
+##### Effect aliases
+
+Effect aliases use `|` for union, consistent with type union syntax:
 
 ```spore
-capability DatabaseAccess = [NetRead, NetWrite, StateRead, StateWrite]
-capability Analytics = [Compute, StateRead]
+effect FileIO = FileRead | FileWrite
+effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
 
 fn generate_report(org_id: OrgId, period: DateRange) -> Report ! [ConnectionLost]
-uses [DatabaseAccess, Analytics]
+uses [DatabaseAccess]
 cost <= 12000
 {
-    // can use any function requiring subsets of DatabaseAccess or Analytics
+    // can use any function requiring subsets of DatabaseAccess
 }
+```
+
+##### Effect handlers
+
+Effects can be intercepted and reinterpreted via handlers:
+
+```spore
+handler MockFileRead for FileRead {
+    fn read_file(path: Path) -> Bytes ! [IoError] {
+        self.mock_fs.get(path)
+    }
+}
+
+// Bind handler at call site
+handle load_config("app.toml") with MockFileRead { mock_fs: test_data }
 ```
 
 #### Associated types
@@ -434,7 +456,7 @@ cost <= 12000
 Traits may declare associated types — types determined by the implementing type:
 
 ```spore
-capability Iterator {
+trait Iterator {
     type Item
     fn next(self) -> Option[Self.Item]
     cost next <= 10
@@ -447,7 +469,7 @@ impl Iterator for LineReader {
     }
 }
 
-capability Collection {
+trait Collection {
     type Item
     type Iter: Iterator where Iter.Item == Self.Item
 
@@ -475,12 +497,12 @@ where
 GATs allow associated types to have their own generic parameters, enabling patterns like lending iterators and self-referential collections:
 
 ```spore
-capability LendingIterator {
+trait LendingIterator {
     type Item[lifetime]
     fn next[lifetime](self) -> Option[Self.Item[lifetime]]
 }
 
-capability Container {
+trait Container {
     type Elem[T]
     fn wrap[T](value: T) -> Self.Elem[T]
     fn unwrap[T](wrapped: Self.Elem[T]) -> T
@@ -789,7 +811,7 @@ cost <= 2000
 **Semantics of @allows**:
 
 - `@allows[f1, f2, ...]` annotates the immediately following hole.
-- The Agent, when filling this hole, may only call the listed functions (plus pure helper functions that require no capabilities).
+- The Agent, when filling this hole, may only call the listed functions (plus pure helper functions that require no effects).
 - The compiler verifies that the filling respects the `@allows` constraint.
 - `@allows` is **not** a type — it is a **synthesis constraint** that restricts the search space for hole-filling.
 
@@ -926,8 +948,8 @@ type Tree[T] = {
 |---|---|---|
 | Named types (`type X = ...`) | **Nominal** | `UserId ≠ String` even if same shape |
 | Enums | **Nominal** | Sealed, exhaustiveness-checked |
-| Traits / capabilities | **Nominal** | Explicit `impl` required |
-| Capabilities | **Nominal** (always) | Security boundary — no structural coincidence |
+| Traits / effects | **Nominal** | Explicit `impl` required |
+| Effects | **Nominal** (always) | Security boundary — no structural coincidence |
 | Anonymous records `{ ... }` | **Structural** | Flexibility for intermediate values |
 | Hole-filling search (internal) | **Structural** | Agent searches by shape, compiler enforces nominal at boundaries |
 | Function call boundaries | **Nominal** | Callee specifies named types, caller must provide them |
@@ -939,7 +961,7 @@ type Tree[T] = {
 | Function parameter types | **Yes** | Gravity center — the signature IS the API |
 | Function return type | **Yes** | Agent reads signatures for synthesis; human reads for understanding |
 | Error sets (`! [...]`) | **Yes** | Error contract — must be visible |
-| Effect/capability sets (`uses [...]`) | **Yes** | Security boundary — must be visible |
+| Effect sets (`uses [...]`) | **Yes** | Security boundary — must be visible |
 | Cost bounds (`cost <=`) | **Yes** | Performance contract — must be visible |
 | Struct/type field types | **Yes** | Data definition — must be explicit |
 | Trait method signatures | **Yes** | Interface contract |
@@ -989,7 +1011,7 @@ The internal type representation is the `Ty` enum, defined in `spore-typeck/src/
     | Named(n)                     // named type / type parameter
     | App(n, [τ₁, …, τₖ])         // generic type application
     | Record([(f₁, τ₁), …])       // anonymous record (structural)
-    | Fn([τ₁, …, τₙ], τᵣ, C)     // function type with capability set
+    | Fn([τ₁, …, τₙ], τᵣ, C)     // function type with effect set
     | Var(id)                      // unification variable
     | Hole(name)                   // typed hole placeholder
     | Error                        // error sentinel (recovery)
@@ -999,7 +1021,7 @@ Where:
 
 - `n` ranges over identifiers (strings).
 - `id` ranges over `u32` (unique unification variable IDs).
-- `C` is a **CapSet** = `BTreeSet<String>`, the set of capability names the function requires.
+- `C` is a **CapSet** = `BTreeSet<String>`, the set of effect names the function requires.
 - `f` ranges over field names (strings) in anonymous records.
 
 **Never type.** `Ty::Never` is the bottom type — a subtype of all types. It is produced by diverging expressions (`panic`, non-terminating recursion). During unification, `unify(τ, Never) = ok` for all `τ`.
@@ -1010,13 +1032,13 @@ Where:
 
 **Hole type.** `Ty::Hole(name)` represents an unfilled hole. During unification, holes are compatible with anything — the checker records the expected type for diagnostic purposes without blocking further checking.
 
-### 4.2 Capability sets (CapSet)
+### 4.2 Effect sets (CapSet)
 
 ```rust
 pub type CapSet = BTreeSet<String>;
 ```
 
-A `CapSet` is a sorted set of capability names. It appears as the third component of `Ty::Fn`:
+A `CapSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`:
 
 ```text
 Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
@@ -1029,7 +1051,7 @@ Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 3. CapSets propagate through higher-order calls: passing a `Fn(...) uses [NetRead]` to a higher-order function requires the caller to declare `NetRead`.
 4. `uses [Cap1, Cap2]` in source syntax maps directly to `CapSet = {"Cap1", "Cap2"}`.
 
-**Formal capability checking rule:**
+**Formal effect checking rule:**
 
 ```text
 Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f)
@@ -1041,17 +1063,17 @@ C_caller ⊇ C_f
 If `C_f ⊄ C_caller`, the checker emits:
 
 ```text
-missing capabilities [X, Y]: caller does not declare them
+missing effects [X, Y]: caller does not declare them
 ```
 
 ### Formal typing judgments
 
-The core type system uses bidirectional typing with capability context.
+The core type system uses bidirectional typing with effect context.
 
 **Notation:**
 
 - `Γ` — type environment (variable → type mapping)
-- `S` — capability set (subset of all capabilities)
+- `S` — effect set (subset of all effects)
 - `e` — expression
 - `T` — type
 - `⊢` — "entails" / judgment turnstile
@@ -1146,11 +1168,11 @@ The core type system uses bidirectional typing with capability context.
   ─────────────────────────────
   Γ; S ⊢ await e ⇒ T
 
-[CapabilityCheck]
+[EffectCheck]
   Γ; S ⊢ e ⇒ T uses S_required
   S_required ⊆ S
   ─────────────────────────────
-  (e is valid in capability context S)
+  (e is valid in effect context S)
 
 [Sub]
   Γ; S ⊢ e ⇒ T₁
@@ -1169,7 +1191,7 @@ The core type system uses bidirectional typing with capability context.
   T₁' <: T₁    T₂ <: T₂'    S ⊆ S'
   ─────────────────────────────
   (T₁ → T₂ uses S) <: (T₁' → T₂' uses S')
-  (contravariant params, covariant return, covariant capabilities)
+  (contravariant params, covariant return, covariant effects)
 
 [Sub-Task]
   T <: T'
@@ -1298,7 +1320,7 @@ apply_subst(Record(fields))       = Record([(f, apply_subst(τ)) for (f, τ) in 
 apply_subst(τ)                    = τ                  for all other τ
 ```
 
-Note that `CapSet` is **not** subject to substitution — capabilities are always concrete strings, never type variables.
+Note that `CapSet` is **not** subject to substitution — effects are always concrete strings, never type variables.
 
 #### Unification algorithm
 
@@ -1350,7 +1372,7 @@ pub fn check_module(&mut self, module: &Module) {
 - **Functions:** Parameter types are resolved, return type is resolved (default `Unit`), CapSet is extracted from `uses` clause, and type parameters from `where` clause are recorded.
 - **Structs:** Field names and types are resolved and stored.
 - **Type defs (enums):** Variant names and field types are resolved and stored.
-- **Capabilities and imports:** Deferred (no registration needed).
+- **Effects and imports:** Deferred (no registration needed).
 
 **Pass 2 — `check_fn`:** For each function with a body:
 
@@ -1454,7 +1476,7 @@ Spore primarily uses **equality-based** type compatibility via unification, with
 - `Ty::Hole(name)` unifies with anything (hole placeholder only).
 - `Ty::Never` unifies with anything (`Never <: τ` for all `τ`).
 - Width subtyping for anonymous records: `{ a: Int, b: String, c: Bool } <: { a: Int, b: String }`.
-- Capability set subtyping: `C₁ ⊆ C₂ ⟹ Fn(ps, r, C₁) <: Fn(ps, r, C₂)` (a function needing fewer capabilities is more general).
+- Effect set subtyping: `C₁ ⊆ C₂ ⟹ Fn(ps, r, C₁) <: Fn(ps, r, C₂)` (a function needing fewer effects is more general).
 
 ### 4.10 Binary and unary operator typing
 
@@ -1785,7 +1807,7 @@ Type errors are emitted as structured JSON for Agent consumption:
 | Type mismatch | `type mismatch in function 'add': expected 'Int', got 'String'` |
 | Undefined variable | `undefined variable 'x'` |
 | Arity mismatch | `function 'add' expects 2 arguments, got 3` |
-| Missing capability | `missing capabilities [NetRead]: caller does not declare them` |
+| Missing effect | `missing effects [NetRead]: caller does not declare them` |
 | Non-exhaustive match | `non-exhaustive match: missing variant 'Triangle'` |
 | Cannot negate type | `cannot negate type 'String'` |
 | Cannot apply `!` | `cannot apply '!' to type 'Int'` |
@@ -1815,7 +1837,7 @@ Hole ?h1 in function `example`:
 
 1. **Nominal rigidity.** The nominal-primary design means newtypes require explicit wrap/unwrap. This adds verbosity for simple delegation patterns. Anonymous records provide a structural escape hatch, but they cannot implement traits.
 
-2. **CapSet as BTreeSet\<String\>.** String-based capability names lack static verification at the `Ty` level — a misspelled capability name is only caught when matching against registered capabilities, not during type construction.
+2. **CapSet as BTreeSet\<String\>.** String-based effect names lack static verification at the `Ty` level — a misspelled effect name is only caught when matching against registered effects, not during type construction.
 
 3. **No higher-kinded types.** GATs + associated types cover most use cases, but abstracting over container kinds generically (functor-map over any container) requires either code generation or per-container implementations.
 
@@ -1827,7 +1849,7 @@ Hole ?h1 in function `example`:
 
 ### Alternative 1: Structural typing as default (TypeScript / Go style)
 
-**Rejected.** Structural typing makes capability safety impossible — two structurally identical types could accidentally satisfy each other's capability requirements. It also produces confusing error messages when two semantically different types happen to share the same shape.
+**Rejected.** Structural typing makes effect safety impossible — two structurally identical types could accidentally satisfy each other's effect requirements. It also produces confusing error messages when two semantically different types happen to share the same shape.
 
 **Decision:** Nominal-primary with anonymous structural records as an escape hatch.
 
@@ -1845,7 +1867,7 @@ Hole ?h1 in function `example`:
 
 **Rejected.** HKTs would allow abstracting over `Option`, `List`, `Result`, etc. generically. However:
 
-- Capabilities replace the primary HKT use case (monad-based effect sequencing).
+- Effects replace the primary HKT use case (monad-based effect sequencing).
 - GATs cover 80% of the remaining use cases.
 - HKT error messages are notoriously difficult to understand.
 - Can be added later as an opt-in extension without breaking changes.
@@ -1864,15 +1886,15 @@ Hole ?h1 in function `example`:
 
 ### Alternative 5: Effect system via monads or algebraic effects
 
-**Rejected as primary mechanism.** Spore unifies capabilities and traits instead of using a separate effect system. This provides:
+**Rejected as primary mechanism.** Spore separates traits and effects instead of unifying them via monads or algebraic effects. This provides:
 
-- One mechanism for both "what does this type support" and "what does this context provide."
-- Reuse of the trait resolver and coherence checker.
+- Clear distinction between "what does this type support" (traits) and "what does this context require" (effects).
+- Reuse of the trait resolver and coherence checker for type interfaces.
 - Simpler mental model for users.
 
-**Decision:** Capabilities = Traits. `uses [Cap]` is syntactic sugar for a trait bound on execution context.
+**Decision:** Traits ≠ Effects. `trait` defines type interfaces, `effect` defines external operations, `uses [Effect]` declares effect requirements.
 
-### Alternative 6: Row-polymorphic capability sets
+### Alternative 6: Row-polymorphic effect sets
 
 **Considered for future.** Making CapSets row-polymorphic would allow:
 
@@ -1880,7 +1902,7 @@ Hole ?h1 in function `example`:
 fn apply[C](f: Fn(x: Int) -> Int uses C, x: Int) -> Int uses C
 ```
 
-This is compatible with the current design but not yet implemented. The string-based `BTreeSet` representation would need to be extended with capability variables.
+This is compatible with the current design but not yet implemented. The string-based `BTreeSet` representation would need to be extended with effect variables.
 
 ## Prior art
 
@@ -1893,7 +1915,7 @@ Spore's type system is most directly influenced by Rust:
 - Sealed enums with exhaustive pattern matching.
 - No implicit conversions.
 
-**Differences from Rust:** No lifetime system (Spore uses GC or region-based memory), no borrow checker, capabilities replace `unsafe` blocks, refinement types replace some `debug_assert!` patterns.
+**Differences from Rust:** No lifetime system (Spore uses GC or region-based memory), no borrow checker, effects replace `unsafe` blocks, refinement types replace some `debug_assert!` patterns.
 
 ### Haskell / GHC
 
@@ -1909,7 +1931,7 @@ Spore's type system is most directly influenced by Rust:
 ### TypeScript
 
 - Structural typing for anonymous records (Spore borrows this for the structural escape hatch).
-- Spore rejects structural typing as the default due to capability safety concerns.
+- Spore rejects structural typing as the default due to effect safety concerns.
 
 ### Elm
 
@@ -1933,7 +1955,7 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 
 1. **Ty enum stability.** The variants `Int`, `Float`, `Bool`, `Str`, `Char`, `Unit`, `Never`, `Named`, `App`, `Record`, `Fn`, `Var`, `Hole`, `Error` are stable. New variants may be added but existing variants will not be removed or renamed without a new SEP.
 
-2. **CapSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce capability variables for row-polymorphic effects, but the concrete string-based API will remain supported.
+2. **CapSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce effect variables for row-polymorphic effects, but the concrete string-based API will remain supported.
 
 3. **Two-pass checking.** The `register_item` → `check_fn` architecture is stable. Future passes (e.g., trait resolution, cost checking) will be added after these two, not replace them.
 
@@ -1945,11 +1967,11 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 |---|---|
 | Refinement types (L0) | Add `Ty::Refined(Box<Ty>, Predicate)` variant; extend `resolve_type` |
 | Const generics | Add `Ty::Const(value)` variant; extend `App` to accept const args |
-| Row-polymorphic capabilities | Extend CapSet with capability variables alongside concrete strings |
+| Row-polymorphic effects | Extend CapSet with effect variables alongside concrete strings |
 
 ## Unresolved questions
 
-1. **CapSet in unification.** Currently, function type unification ignores CapSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should CapSets participate in unification, or remain checked separately? Separate checking is simpler but could miss capability mismatches in higher-order function arguments.
+1. **CapSet in unification.** Currently, function type unification ignores CapSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should CapSets participate in unification, or remain checked separately? Separate checking is simpler but could miss effect mismatches in higher-order function arguments.
 
 2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[Int]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
 
@@ -1960,7 +1982,7 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 
 4. **Trait method type checking.** The two-pass architecture registers function signatures but does not yet handle trait method signatures, default methods, or `impl` blocks. How should these be integrated into `register_item` and `check_fn`? (See §4.12 for the specified approach.)
 
-5. **Row-polymorphic capabilities.** Should capability sets support variables (e.g., `uses [C]` where `C` is a capability set variable)? This would enable generic higher-order functions that preserve their argument's capability requirements.
+5. **Row-polymorphic effects.** Should effect sets support variables (e.g., `uses [C]` where `C` is an effect set variable)? This would enable generic higher-order functions that preserve their argument's effect requirements.
 
 6. **Variance.** Generic type parameters need variance annotations (covariant, contravariant, invariant) for soundness when subtyping is introduced. Should variance be inferred or declared?
 

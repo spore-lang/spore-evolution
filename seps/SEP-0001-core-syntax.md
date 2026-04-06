@@ -14,11 +14,11 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations.
+> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set.
 
 ## Summary
 
-This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with capability-based security, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), capability requirements (`uses`), error sets (`!`), and cost bounds (`cost`) as composable clauses. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
+This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and cost bounds (`cost`) as composable clauses. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
 
 ## Motivation
 
@@ -30,7 +30,7 @@ Spore aims to occupy a unique design point:
 
 2. **Agent-friendly structure**: A fixed operator set (no custom operators), regular grammar, and explicit function metadata (`uses`, `cost`, `where`) make Spore code trivially parseable by AI agents and static analysis tools. Every function signature is a structured contract.
 
-3. **Capability safety by default**: Rather than bolting on an effect system after the fact, Spore makes capability requirements a first-class part of function signatures. The compiler infers properties like `pure` and `deterministic` from the declared `uses` set, eliminating manual annotation burden while maintaining full transparency.
+3. **Effect safety by default**: Rather than bolting on an effect system after the fact, Spore makes effect requirements a first-class part of function signatures. The compiler infers properties like `pure` and `deterministic` from the declared `uses` set, eliminating manual annotation burden while maintaining full transparency.
 
 4. **No loops — recursion with TCO guarantee**: By removing `for`, `while`, `loop`, `break`, and `continue`, Spore encourages a purely functional iteration style via recursion and higher-order functions (`map`, `fold`, `filter`). The compiler guarantees tail-call optimization, making recursion safe and efficient.
 
@@ -52,7 +52,7 @@ fn add(a: Int, b: Int) -> Int {
 }
 ```
 
-Note: no `return` keyword is needed. The last expression in a block is its value. The compiler automatically infers that this function is `pure`, `deterministic`, and `total` because it uses no capabilities.
+Note: no `return` keyword is needed. The last expression in a block is its value. The compiler automatically infers that this function is `pure`, `deterministic`, and `total` because it uses no effects.
 
 ### Variables and immutability
 
@@ -71,7 +71,7 @@ let x = 10;
 let x = x + 5;  // shadows the previous x
 ```
 
-For mutable state, use `Ref[T]` (which requires the `StateWrite` capability):
+For mutable state, use `Ref[T]` (which requires the `StateWrite` effect):
 
 ```spore
 let counter = Ref.new(0);
@@ -263,7 +263,7 @@ fn load_config(path: String) -> Config ! [ConfigError] {
 }
 ```
 
-The compiler looks for a `From` capability implementation (e.g., `impl From[FileError] for ConfigError`) to perform the conversion. If no conversion exists, the error type must be listed in the function's error set directly.
+The compiler looks for a `From` trait implementation (e.g., `impl From[FileError] for ConfigError`) to perform the conversion. If no conversion exists, the error type must be listed in the function's error set directly.
 
 #### Error recovery patterns
 
@@ -324,7 +324,7 @@ The full signature order is:
 ```text
 fn name[T](params) -> ReturnType ! [ErrorSet]
 where T: Bound
-uses [capabilities]
+uses [effects]
 cost ≤ N
 {
     body
@@ -363,24 +363,31 @@ cost ≤ 8500
 }
 ```
 
-### Capabilities and the `uses` clause
+### Traits, effects, and the `uses` clause
 
-Capabilities are Spore's unified trait/interface/effect mechanism:
+Spore separates type interfaces from effect tracking:
 
 ```spore
-capability Display {
-    fn to_string(self) -> String;
+// trait: type interface
+trait Display {
+    fn show(self) -> Str
 }
 
-capability Serialize {
-    fn serialize(self) -> String ! [SerializeError];
+trait Serialize {
+    fn serialize(self) -> Bytes ! [SerializeError]
 }
 
-// Custom composite capabilities
-capability DatabaseAccess = [NetRead, NetWrite, StateRead, StateWrite];
+// effect: external world operations
+effect Console {
+    fn println(msg: Str) -> Unit
+    fn read_line() -> Str ! IOError
+}
+
+// effect alias (uses | for union)
+effect DatabaseAccess = NetRead | NetWrite | StateRead | StateWrite
 ```
 
-The `uses` clause declares what capabilities a function requires. The compiler **auto-infers** effect properties from this set:
+The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
 
 | `uses` set | Inferred properties |
 |---|---|
@@ -390,7 +397,7 @@ The `uses` clause declares what capabilities a function requires. The compiler *
 
 The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
 
-The `uses` clause can mix capability names with specific resource instance bindings:
+The `uses` clause can mix effect names with specific resource instance bindings:
 
 ```spore
 fn query_database(sql: String) -> Data ! [DbError]
@@ -597,23 +604,25 @@ The complete reserved keyword table:
 | `match` | Pattern matching expression |
 | `struct` | Struct type definition |
 | `type` | Type alias / sum type definition |
-| `capability` | Capability (trait) definition |
+| `trait` | Type interface definition (trait) |
+| `effect` | Effect definition / effect alias |
+| `handler` | Effect handler implementation |
 | `impl` | Trait implementation block |
 | `pub` / `pub(pkg)` | Visibility modifiers (public / package-visible) |
 | `module` | Module definition |
 | `import` | Module import |
-| `alias` | Type or item alias |
+| `alias` | Type alias |
 | `where` | Generic type constraints |
-| `uses` | Capability requirement declaration |
+| `uses` | Effect requirement declaration |
 | `cost` | Cost bound clause |
-| `effects` | Effect declaration (reserved for future use) |
 | `spawn` | Spawn concurrent task |
 | `select` | Channel multiplex expression |
 | `parallel_scope` | Structured concurrency scope |
 | `const` | Compile-time constant definition |
 | `return` | Early return from function |
 | `throw` | Throw an error value |
-| `trait` | Reserved (use `capability`) |
+| `handle` | Bind effect handler expression |
+| `with` | Handler binding (with handle) |
 | `implements` | Reserved (use `impl ... for ...`) |
 | `as` | Rename in imports |
 | `in` | Reserved |
@@ -622,7 +631,7 @@ The complete reserved keyword table:
 | `async` / `await` | Async task operations |
 | `move` | Reserved |
 | `ref` | Reserved |
-| `self` | Current instance in capability methods (regular identifier) |
+| `self` | Current instance in trait/handler methods (regular identifier) |
 | `super` | Parent module reference |
 | `crate` | Crate root reference |
 | `enum` | Reserved (use `type` with variants) |
@@ -739,7 +748,7 @@ t"Dear {customer}, order {id}"    // template string
 | Convention | Used for | Examples |
 |---|---|---|
 | `snake_case` | Variables, functions, modules | `user_name`, `calculate_total`, `http_client` |
-| `PascalCase` | Types, capabilities, enum variants | `UserAccount`, `Serialize`, `Some` |
+| `PascalCase` | Types, traits, effects, enum variants | `UserAccount`, `Serialize`, `Some` |
 | `SCREAMING_SNAKE_CASE` | Constants | `MAX_BUFFER_SIZE`, `PI` |
 
 ### EBNF Grammar
@@ -758,7 +767,9 @@ TopLevelItem    = ImportDecl
                 | ModuleDecl
                 | StructDecl
                 | TypeDecl
-                | CapabilityDecl
+                | TraitDecl
+                | EffectDecl
+                | HandlerDecl
                 | ImplDecl
                 | ConstDecl
                 | FunctionDecl ;
@@ -799,18 +810,32 @@ VariantList     = [ "|" ] Variant { "|" Variant } ;
 Variant         = Ident [ "(" FieldList ")" ]
                 | Ident [ "(" TypeList ")" ] ;
 
-(* ─── Capability ──────────────────────────────────── *)
+(* ─── Trait ────────────────────────────────────────── *)
 
-CapabilityDecl  = [ Visibility ] "capability" Ident [ TypeParams ]
-                  ( CapabilityBlock | "=" "[" CapabilityList "]" ";" ) ;
+TraitDecl       = [ Visibility ] "trait" Ident [ TypeParams ]
+                  [ ":" BoundList ]
+                  "{" { TraitItem } "}" ;
 
-CapabilityBlock = "{" { CapabilityItem } "}" ;
-CapabilityItem  = AssocType
+TraitItem       = AssocType
                 | FunctionDecl ;              (* may have default body *)
 
 AssocType       = "type" Ident ";" ;
 
-CapabilityList  = Ident { "," Ident } ;
+(* ─── Effect ──────────────────────────────────────── *)
+
+EffectDecl      = [ Visibility ] "effect" Ident [ TypeParams ]
+                  ( EffectBlock | "=" EffectAlias ";" ) ;
+
+EffectBlock     = "{" { FunctionDecl } "}" ;
+
+EffectAlias     = Ident { "|" Ident } ;
+
+(* ─── Handler ─────────────────────────────────────── *)
+
+HandlerDecl     = "handler" Ident [ "(" ParamList ")" ] "for" Ident
+                  "{" { FunctionDecl } "}" ;
+
+HandleExpr      = "handle" Expr "with" Expr ;
 
 (* ─── Impl (Trait Implementation) ─────────────────── *)
 
@@ -848,7 +873,8 @@ ErrorClause     = "!" "[" TypeList "]" ;
 WhereClause     = { "where" Ident ":" BoundList } ;
 BoundList       = Ident { "+" Ident } ;
 
-UsesClause      = "uses" "[" [ CapabilityList ] "]" ;
+UsesClause      = "uses" "[" [ EffectList ] "]" ;
+EffectList      = Ident { "," Ident } ;
 
 CostClause      = "cost" "≤" CostExpr ;
 CostExpr        = IntLiteral
@@ -862,7 +888,7 @@ CostExpr        = IntLiteral
 TypeExpr        = Ident [ "[" TypeList "]" ]           (* named type, optionally generic *)
                 | "fn" "(" [ TypeList ] ")" "->" TypeExpr  (* function type *)
                 | "(" TypeList ")"                      (* tuple type *)
-                | "Self"                                (* self type in capabilities *)
+                | "Self"                                (* self type in traits/handlers *)
                 | "?" ;                                 (* type hole *)
 
 TypeList        = TypeExpr { "," TypeExpr } [ "," ] ;
@@ -880,6 +906,7 @@ Expr            = LetExpr
                 | SpawnExpr
                 | SelectExpr
                 | ParallelScopeExpr
+                | HandleExpr
                 | PipeExpr ;
 
 PipeExpr        = OrExpr { "|>" OrExpr } ;
@@ -1041,7 +1068,7 @@ The function signature system is the heart of Spore's design. The clauses appear
 ```text
 fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 [where <GenericName>: <Constraint>, ...]
-[uses [<Capability>, ...]]
+[uses [<Effect>, ...]]
 [cost ≤ <N>]
 {
     <body>
@@ -1056,7 +1083,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 3. **`where T: Bound`** — Generic constraints. Multiple bounds use `+` syntax: `where T: Eq + Hash`. Each `where` clause is on its own line.
 
-4. **`uses [Capabilities]`** — The capability set required by this function. The compiler auto-infers effect properties:
+4. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
    - `uses []` → `pure`, `deterministic`, `total`
    - `uses [Compute]` → `deterministic`
    - If `uses` contains `Random` or `Clock` → not deterministic
@@ -1068,14 +1095,14 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 **Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost`.
 
-**`self` in capability methods:** The `self` identifier is a regular parameter name used as the first parameter in capability method signatures. It is not a keyword with special scoping rules.
+**`self` in trait and handler methods:** The `self` identifier is a regular parameter name used as the first parameter in trait method signatures. It is not a keyword with special scoping rules.
 
 ```spore
-capability Display {
+trait Display {
     fn to_string(self) -> String;
 }
 
-capability Collection {
+trait Collection {
     type Item;
     fn len(self) -> Int;
     fn is_empty(self) -> Bool {
@@ -1213,7 +1240,7 @@ When queried (`sporec --query-hole ?name`), the compiler emits a structured repo
     "amount": "Money",
     "method": "PaymentMethod"
   },
-  "available_capabilities": ["NetRead"],
+  "available_effects": ["NetRead"],
   "candidate_functions": [
     "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds]"
   ],
@@ -1404,7 +1431,7 @@ Spore's syntax prioritizes scannability. The fixed operator set means readers ne
 
 ### Progressive disclosure
 
-Simple functions require zero ceremony — `fn add(a: Int, b: Int) -> Int { a + b }` has no clauses to learn. Capabilities, error sets, and cost bounds are introduced only when the code actually needs them.
+Simple functions require zero ceremony — `fn add(a: Int, b: Int) -> Int { a + b }` has no clauses to learn. Effects, error sets, and cost bounds are introduced only when the code actually needs them.
 
 ## Agent experience impact
 
@@ -1428,10 +1455,10 @@ Function signatures are machine-readable contracts. An agent can extract:
 
 This enables agents to:
 
-1. Select appropriate functions by matching capability requirements
+1. Select appropriate functions by matching effect requirements
 2. Estimate execution cost before generating call sequences
 3. Verify error handling completeness
-4. Compose pipelines with compatible capability sets
+4. Compose pipelines with compatible effect sets
 
 ### Code generation
 
@@ -1450,7 +1477,7 @@ Any change to the following signature components produces a new snapshot hash an
 | Return type | `Config` → `Settings` |
 | Error type set | add/remove any error type |
 | Cost bound | `≤ 200` → `≤ 300` |
-| Capability set | add/remove any capability |
+| Effect set | add/remove any effect |
 | Generic constraints | `T: Eq` → `T: Eq + Hash` |
 
 ## Structured representation / protocol impact
@@ -1464,9 +1491,11 @@ Program
 ├── ImportDecl { path, alias? }
 ├── ModuleDecl { name, uses, items[] }
 ├── StructDecl { name, type_params[], fields[] }
-├── ImplDecl { capability, type_params[], target_type, methods[] }
+├── ImplDecl { trait, type_params[], target_type, methods[] }
 ├── TypeDecl { name, type_params[], body: TypeAlias | SumType | Refinement }
-├── CapabilityDecl { name, type_params[], items[] }
+├── TraitDecl { name, type_params[], items[] }
+├── EffectDecl { name, type_params[], operations[] }
+├── HandlerDecl { name, effect, methods[] }
 ├── ConstDecl { name, type, value }
 └── FunctionDecl
     ├── name
@@ -1510,8 +1539,8 @@ The regular, keyword-delimited syntax supports straightforward LSP provider impl
 
 - **Go to definition**: Every identifier resolves unambiguously through module paths and lexical scoping.
 - **Hover information**: Function signatures (including `uses`, `cost`, inferred properties) can be displayed in full.
-- **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available capabilities.
-- **Diagnostics**: Missing match arms, undeclared capabilities, cost violations, and incomplete error handling can all be reported as structured diagnostics.
+- **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available effects.
+- **Diagnostics**: Missing match arms, undeclared effects, cost violations, and incomplete error handling can all be reported as structured diagnostics.
 - **Signature help**: The ordered clause structure (`where` → `uses` → `cost`) enables progressive parameter info display.
 
 ### Serialization
@@ -1524,17 +1553,17 @@ The AST serializes naturally to JSON, S-expressions, or any tree-structured form
 
 Spore's explicit syntax enables highly specific error messages:
 
-**Missing capability:**
+**Missing effect:**
 
 ```text
-error[E0301]: function `fetch_data` uses capability `NetRead` but does not declare it
+error[E0301]: function `fetch_data` uses effect `NetRead` but does not declare it
   --> src/api.spore:12:5
    |
 12 | fn fetch_data(url: Url) -> Data ! [NetworkError] {
    |    ^^^^^^^^^^ missing `uses` clause
    |
    = help: add `uses [NetRead]` to the function signature
-   = note: detected capability dependency via call to `http.get`
+   = note: detected effect dependency via call to `http.get`
 ```
 
 **Non-exhaustive match:**
@@ -1635,7 +1664,7 @@ Rejected in favor of the `?` operator and `|>` pipes because:
 
 The original design used Roc-style inline `implements [...]` on struct declarations. This was replaced by Rust-style `impl Trait for Type { ... }` blocks because:
 
-- Separate `impl` blocks allow implementing third-party capabilities for existing types.
+- Separate `impl` blocks allow implementing third-party traits for existing types.
 - Multiple implementations are visually distinct rather than packed into a single line.
 - It aligns with the Rust mental model that most Spore users already know.
 - The `implements` keyword is reserved for potential future use.
@@ -1658,7 +1687,7 @@ Departed from: Spore removes lifetime annotations, borrowing semantics, `mut` ke
 
 ### Roc
 
-Influence on: expression-based design, capabilities as the unified trait mechanism, no-loop philosophy, the idea of making side effects visible in signatures.
+Influence on: expression-based design, the trait/effect split design, no-loop philosophy, the idea of making side effects visible in signatures.
 
 ### Gleam
 
@@ -1674,7 +1703,7 @@ Influence on: algebraic data types with `|` variant syntax, pattern matching wit
 
 ### Haskell
 
-Influence on: type classes (→ capabilities), purity by default, the idea of tracking effects in types, `where` clause syntax for constraints.
+Influence on: type classes (→ traits), purity by default, the idea of tracking effects in types, `where` clause syntax for constraints.
 
 ### TypeScript / Python
 
@@ -1704,7 +1733,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 1. **Exact cost model semantics**: What units does `cost` measure? CPU cycles? Abstract "work units"? How does the compiler verify cost bounds, especially for recursive functions?
 
-2. **Capability composition rules**: When a function calls two sub-functions with different `uses` sets, is the resulting set the union? How are capability aliases expanded for comparison?
+2. **Effect composition rules**: When a function calls two sub-functions with different `uses` sets, is the resulting set the union? How are effect aliases expanded for comparison?
 
 3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = Int if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
 
@@ -1714,7 +1743,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 6. **`self` method dispatch**: How does the compiler resolve method calls on `self` — is it static dispatch (monomorphized) or dynamic dispatch (vtable)? This affects performance characteristics.
 
-7. **Format string security**: What sanitization, if any, applies to `f"..."` expressions to prevent injection attacks? How do `t"..."` template objects interact with the capability system?
+7. **Format string security**: What sanitization, if any, applies to `f"..."` expressions to prevent injection attacks? How do `t"..."` template objects interact with the effect system?
 
 8. **Tail-call optimization scope**: Is TCO guaranteed only for direct self-recursion, or for mutual recursion and continuation-passing style as well?
 
@@ -1722,7 +1751,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 10. **Pattern matching on strings**: The current spec shows string literal patterns. Should Spore support regex patterns or prefix/suffix matching in `match` arms?
 
-11. **Standard capability taxonomy**: What is the canonical set of built-in capabilities (`Compute`, `NetRead`, `NetWrite`, `FileRead`, `FileWrite`, `StateRead`, `StateWrite`, `Clock`, `Random`, etc.)? This needs a separate SEP.
+11. **Standard effect taxonomy**: What is the canonical set of built-in effects (`Compute`, `NetRead`, `NetWrite`, `FileRead`, `FileWrite`, `StateRead`, `StateWrite`, `Clock`, `Random`, etc.)? This needs a separate SEP.
 
 12. **Error type subtyping**: If function `f` declares `! [NetworkError]` and function `g` declares `! [NetworkError, ParseError]`, can `g` call `f` directly? How does error set subtyping work?
 
@@ -1736,7 +1765,7 @@ This appendix formalizes the evaluation rules for core Spore expressions using s
 - `v` — a value (fully evaluated: literal, closure, struct/enum instance, list)
 - `E[·]` — evaluation context (position where the next reduction occurs)
 - `σ` — runtime environment (variable → value mapping)
-- `H` — effect handler table (capability → handler mapping)
+- `H` — effect handler table (effect → handler mapping)
 - `e[x ↦ v]` — substitute `v` for `x` in `e`
 
 ### Values
@@ -1969,7 +1998,7 @@ Pattern matching sub-rules:
 
 ```text
 [E-ForeignCall]
-  H(capability, fn_name) = handler
+  H(effect, fn_name) = handler
   handler(v₁, ..., vₙ) ↝ᵢₒ v
   ──────────────────────────────────
   foreign_fn(v₁, ..., vₙ) ↝ v
@@ -2036,4 +2065,4 @@ In PoC, this is a no-op since spawn already evaluated.)
 
 3. **Progress**: If `Γ; S ⊢ e : T` and `e` is not a value, then either `e ↝ e'` for some `e'`, or `e` is a `foreign fn` call awaiting I/O. (Holes are ruled out at type-check time in complete programs.)
 
-4. **Capability soundness**: If a function has `uses []` (no capabilities), its evaluation never reaches an `[E-ForeignCall]` rule. (By the capability subset check in SEP-0003.)
+4. **Effect soundness**: If a function has `uses []` (no effects), its evaluation never reaches an `[E-ForeignCall]` rule. (By the effect subset check in SEP-0003.)
