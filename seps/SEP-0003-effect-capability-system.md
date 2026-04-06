@@ -15,11 +15,13 @@ superseded_by: null
 
 # SEP-0003: Effect & Capability System
 
-> **Executive Summary**: Defines Spore's effect system as a capability-based model with 11 atomic capabilities (Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit). Capabilities compose algebraically (commutative, idempotent, associative) and are checked via subset inclusion — a function requiring capabilities S can only be called from a context providing S′ ⊇ S. Module-level `uses` declarations set the ambient capability ceiling.
+> **Executive Summary**: Defines Spore's effect system as a capability-based model with 10 intent-oriented atomic capabilities (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit). Each capability answers "What does this code intend to do with the outside world?" — pure computation is the default and needs no declaration. Capabilities compose algebraically (commutative, idempotent, associative) and are checked via subset inclusion — a function requiring capabilities S can only be called from a context providing S′ ⊇ S. Module-level `uses` declarations set the ambient capability ceiling.
 
 ## Summary
 
 This SEP introduces Spore's **capability-based effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic capabilities* it requires. The compiler verifies that a function body never exercises a capability absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and capability narrowing.
+
+The capabilities are **intent-oriented**: each one answers "What does this code intend to do with the outside world?" Pure computation is the default state — no capability declaration is needed for it. Mutable state is tracked by the effect system, not capabilities. Capabilities describe interactions with the *external world* only.
 
 The design is intentionally **flat and monomorphic**: capabilities are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`capability X = [A, B]`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
 
@@ -69,6 +71,14 @@ uses [FileRead]
 }
 ```
 
+A function that interacts with the terminal declares `Console`:
+
+```spore
+fn greet(name: String) uses [Console] {
+    println("Hello, " + name)
+}
+```
+
 If a function needs no capabilities it is *pure* and the `uses` clause may be omitted entirely:
 
 ```spore
@@ -80,21 +90,47 @@ fn add(a: Int, b: Int) -> Int {
 
 ### Built-in atomic capabilities
 
-Spore ships with the following atomic capabilities:
+Spore ships with the following intent-oriented atomic capabilities. Each one answers: "What does this code intend to do with the outside world?"
 
-| Capability | Semantics | Typical operations |
+| Capability | Intent | Typical operations |
 |---|---|---|
-| `FileRead` | Read from the filesystem | `read_file`, `list_dir` |
-| `FileWrite` | Write to the filesystem | `write_file`, `create_dir`, `delete` |
-| `NetRead` | Read from the network | `http.get`, `tcp.recv` |
-| `NetWrite` | Write to the network | `http.post`, `tcp.send` |
-| `StateRead` | Read mutable state | `state.get`, `cache.lookup` |
-| `StateWrite` | Write mutable state | `state.set`, `cache.insert` |
-| `Spawn` | Create concurrent tasks | `spawn { ... }` |
-| `Clock` | Read system clock | `now()`, `elapsed()` |
-| `Random` | Generate random values | `random()`, `uuid()` |
-| `Compute` | Non-trivial pure computation | Compiler-implicit |
-| `Exit` | Terminate the process | `exit()`, `abort()` |
+| `Console` | User interaction (terminal I/O) | `println`, `eprintln`, `read_line` |
+| `FileRead` | Persistent data access | `File.read`, `Dir.list` |
+| `FileWrite` | Persistent data modification | `File.write`, `Dir.create`, `File.delete` |
+| `NetConnect` | External communication (outbound) | `http.get`, `http.post`, `tcp.connect` |
+| `NetListen` | Service provision (inbound) | `tcp.listen`, `http.serve` |
+| `Env` | Configuration access | `Env.get`, `Env.vars` |
+| `Spawn` | Subprocess management | `Cmd.exec`, `spawn { ... }` |
+| `Clock` | Time-dependent computation | `now()`, `elapsed()` |
+| `Random` | Non-deterministic computation | `random()`, `uuid()` |
+| `Exit` | Process lifecycle control | `exit()`, `abort()` |
+
+### Design rationale: intent-oriented capabilities
+
+The guiding principle is: **each capability answers "What does this code intend to do with the outside world?"** This leads to several deliberate design choices:
+
+1. **No `Compute` capability.** Pure computation is the default state — no capability declaration is needed. Every function can compute; capabilities describe what *additional* powers a function needs beyond pure computation. A function with `uses []` (or no `uses` clause) is pure and can compute freely.
+
+2. **No `StateRead`/`StateWrite`.** Mutable state is tracked by the effect system, not capabilities. Capabilities describe interactions with the *external world* — the filesystem, the network, the terminal, the clock. Internal mutable state (e.g., a local `mut` variable or a cache) is an implementation detail, not an intent to interact with the outside world.
+
+3. **`NetConnect`/`NetListen` instead of `NetRead`/`NetWrite`.** The old names described data direction (read/write), but the real intent distinction is *client vs server*. An HTTP client both reads and writes the network, but its intent is "connect to an external service." Similarly, a server both reads and writes, but its intent is "listen for incoming connections." The intent-oriented names make this clear.
+
+4. **`Console` for terminal I/O.** `println("hello")` is user interaction, not file writing, even though stdout is technically a file descriptor. Distinguishing terminal I/O from filesystem I/O reflects a real difference in intent: a program that prints to the terminal has different security and sandboxing implications than one that writes to arbitrary files.
+
+5. **`Env` for environment variables.** Reading environment variables is configuration access, distinct from reading files. A program that reads `$HOME` has different intent than one that reads `/etc/config`. Separating `Env` from `FileRead` enables finer-grained capability control.
+
+### Platform mapping: basic-cli
+
+The `basic-cli` platform maps standard library operations to capabilities as follows:
+
+| Operation | Required capability |
+|---|---|
+| `Stdout.println`, `Stderr.println` | `Console` |
+| `Stdin.read_line` | `Console` |
+| `File.read`, `Dir.list` | `FileRead` |
+| `File.write`, `Dir.create` | `FileWrite` |
+| `Env.get`, `Env.vars` | `Env` |
+| `Cmd.exec` | `Spawn` |
 
 ### Defining capability aliases
 
@@ -102,15 +138,15 @@ The `capability` keyword creates a **named alias** that expands into a flat set 
 
 ```spore
 capability FileIO = [FileRead, FileWrite]
-capability DatabaseAccess = [NetRead, NetWrite, StateRead, StateWrite]
-capability FullIO = [FileIO, NetRead, NetWrite]
+capability CLI = [Console, FileRead, FileWrite, Env, Spawn, Exit]
+capability Server = [NetListen, FileRead, FileWrite, Clock, Random]
+capability HttpClient = [NetConnect, Clock]
 ```
 
 Aliases expand recursively and flatten:
 
 ```text
-FullIO → {FileIO, NetRead, NetWrite}
-       → {FileRead, FileWrite, NetRead, NetWrite}
+CLI → {Console, FileRead, FileWrite, Env, Spawn, Exit}
 ```
 
 Aliases are purely syntactic sugar. After expansion, only atomic capabilities remain.
@@ -118,17 +154,17 @@ Aliases are purely syntactic sugar. After expansion, only atomic capabilities re
 ### Using capabilities in practice
 
 ```spore
-capability DatabaseAccess = [NetRead, NetWrite, StateRead, StateWrite]
+capability HttpClient = [NetConnect, Clock]
 
-fn query_user(id: UserId) -> User ! [DbError, NotFound]
-uses [DatabaseAccess]
+fn query_api(url: Url) -> Data ! [NetworkError]
+uses [HttpClient]
 {
-    let conn = pool.get_connection()
-    conn.query("SELECT * FROM users WHERE id = ?", id)
+    let response = http.get(url)
+    parse_json(response.body)
 }
 ```
 
-After alias expansion this is equivalent to `uses [NetRead, NetWrite, StateRead, StateWrite]`.
+After alias expansion this is equivalent to `uses [NetConnect, Clock]`.
 
 ### Pure closures in higher-order functions
 
@@ -159,12 +195,12 @@ When you need side effects during iteration, use the structured concurrency patt
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetworkError]
-uses [NetRead, Spawn]
+uses [NetConnect, Spawn]
 {
     parallel_scope {
         let tasks = urls.map(|url| {
             spawn {
-                // spawn body uses [NetRead], ⊆ parent {NetRead, Spawn}  ✓
+                // spawn body uses [NetConnect], ⊆ parent {NetConnect, Spawn}  ✓
                 http.get(url)
             }
         })
@@ -175,9 +211,9 @@ uses [NetRead, Spawn]
 
 Why does this type-check?
 
-1. `fetch_all` declares `uses [NetRead, Spawn]`.
-2. `spawn { ... }` requires `Spawn ∈ {NetRead, Spawn}` — satisfied.
-3. Inside the spawn body, `http.get` requires `NetRead`; `{NetRead} ⊆ {NetRead, Spawn}` — satisfied.
+1. `fetch_all` declares `uses [NetConnect, Spawn]`.
+2. `spawn { ... }` requires `Spawn ∈ {NetConnect, Spawn}` — satisfied.
+3. Inside the spawn body, `http.get` requires `NetConnect`; `{NetConnect} ⊆ {NetConnect, Spawn}` — satisfied.
 4. The closure passed to `map` returns `Task[Response]`. The `spawn` expression itself is pure (it merely creates a task handle), so the closure satisfies `uses []`.
 
 ### Auto-inferred properties
@@ -187,10 +223,10 @@ The compiler automatically derives semantic properties from the declared capabil
 | Declared `uses` | Inferred properties |
 |---|---|
 | `uses []` (or omitted) | pure, deterministic, total* |
-| `uses [Compute]` | deterministic |
+| `uses [Console]` | ¬pure |
 | `uses [FileRead]` | ¬pure, deterministic |
 | `uses [Random]` | ¬pure, ¬deterministic |
-| `uses [NetRead, Spawn]` | ¬pure, deterministic |
+| `uses [NetConnect, Spawn]` | ¬pure, deterministic |
 
 (*total requires a separate termination analysis; see Reference-level explanation §5.4.)
 
@@ -230,7 +266,7 @@ Running `sporec --fixes` auto-inserts the missing `uses` clause.
 A module may declare its capability ceiling with `module X uses [...]`:
 
 ```spore
-module billing uses [NetRead, NetWrite, StateRead, StateWrite]
+module billing uses [NetConnect, FileRead, Clock]
 ```
 
 All functions within the module are constrained: their `uses` sets must be subsets of the module-level set. If a function exceeds the module ceiling the compiler emits a `cap-narrowing-violation` error.
@@ -309,7 +345,7 @@ Capability sets obey standard finite-set algebra:
 |---|---|---|
 | Commutativity | {A, B} = {B, A} | Declaration order is irrelevant |
 | Idempotence | {A, A} = {A} | Duplicate declarations collapse |
-| Associativity | Nested aliases flatten | `[FileIO, NetRead]` = `[FileRead, FileWrite, NetRead]` |
+| Associativity | Nested aliases flatten | `[FileIO, NetConnect]` = `[FileRead, FileWrite, NetConnect]` |
 | Identity element | {} (empty set) | The identity for union: S ∪ {} = S |
 
 #### Set operations
@@ -370,7 +406,7 @@ $$(T_1, T_2) \to R \equiv (T_1, T_2) \to R \ \textbf{uses}\ \{\}$$
 
 The compiler derives semantic properties from the `uses` set via the property-inference function **𝒫**:
 
-$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{false} & \text{if } S \cap \{\text{FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite}\} \neq \emptyset \end{cases}$$
+$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{true} & \text{if } S \subseteq \{\text{Spawn}\} \\ \text{false} & \text{otherwise} \end{cases}$$
 
 $$\mathcal{P}(\text{deterministic}, S) = \begin{cases} \text{true} & \text{if } S \cap \{\text{Clock, Random}\} = \emptyset \\ \text{false} & \text{otherwise} \end{cases}$$
 
@@ -378,19 +414,18 @@ $$\mathcal{P}(\text{total}, S) = \text{determined by a separate termination anal
 
 #### 5.0 Edge cases in the `pure` formula
 
-The `𝒫(pure, S)` function has a gap: when `S` is non-empty but contains only capabilities outside the I/O set `{FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite}`, neither the `true` nor the `false` case applies directly. The following clarifications apply:
+The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Spawn}`. Pure computation requires no capability — it is the default. `Spawn` is pure-compatible because `spawn` merely creates a task descriptor; the effect is deferred. All other capabilities represent interactions with the external world and therefore make a function impure.
 
 | Capability set S | pure? | Rationale |
 |---|---|---|
 | `{}` | true | No capabilities at all |
-| `{Compute}` | true | `Compute` is not an I/O capability; it marks non-trivial pure computation |
+| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
+| `{Console}` | false | Console interacts with the terminal — an external I/O channel |
 | `{Clock}` | false | Clock reads the external world (system time) |
 | `{Random}` | false | Random reads external entropy |
-| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
+| `{Env}` | false | Env reads the process environment — an external configuration source |
 | `{Exit}` | false | `exit` terminates the process — an observable external effect |
-| `{Compute, Spawn}` | true | Neither is an I/O capability |
-
-The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Compute, Spawn}`. All other non-empty capability sets that intersect with any capability outside this "pure-compatible" subset yield `𝒫(pure, S) = false`.
+| `{NetConnect}` | false | Network connection is external I/O |
 
 #### 5.1 Implication chain
 
@@ -405,7 +440,7 @@ A pure function (`uses {}`) trivially satisfies the deterministic condition beca
 ```spore
 /// @idempotent
 fn sync_user(user_id: UserId) -> SyncResult ! [NetworkError]
-uses [NetRead, NetWrite, StateRead, StateWrite]
+uses [NetConnect, FileRead]
 { ... }
 ```
 
@@ -414,7 +449,7 @@ uses [NetRead, NetWrite, StateRead, StateWrite]
 ```spore
 /// @unbounded
 fn event_loop() -> Never
-uses [NetRead, NetWrite]
+uses [NetListen, Console]
 {
     loop { handle_next_event() }
 }
@@ -538,9 +573,9 @@ A closure defined within a context with capability set *S* has an inferred capab
 
 ```spore
 fn example() -> Unit
-uses [FileRead, NetRead]
+uses [FileRead, NetConnect]
 {
-    // Inferred type: (String) -> Data uses [NetRead]
+    // Inferred type: (String) -> Data uses [NetConnect]
     let fetch_fn = |url| http.get(url)
 
     // Inferred type: (Int) -> Int uses []  (pure)
@@ -560,10 +595,10 @@ When the compiler encounters a Hole (`?name`), the generated `HoleReport` includ
     "url": "Url",
     "timeout": "Duration"
   },
-  "available_capabilities": ["NetRead"],
+  "available_capabilities": ["NetConnect"],
   "cost_budget": 5000,
   "candidate_functions": [
-    "http.get(url: Url) -> Data ! [NetworkError] uses [NetRead]"
+    "http.get(url: Url) -> Data ! [NetworkError] uses [NetConnect]"
   ]
 }
 ```
@@ -585,11 +620,11 @@ ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised capabiliti
 15 |     ?fetch_logic    // filled with: fetch_and_save(url)
    |     ^^^^^^^^^^^^ hole fill exceeds available capabilities
    |
-   = available capabilities: [NetRead]
-   = fill code requires:     [NetRead, FileWrite]
+   = available capabilities: [NetConnect]
+   = fill code requires:     [NetConnect, FileWrite]
    = excess capabilities:    [FileWrite]
    = help: either add FileWrite to the enclosing function's `uses` clause,
-     or choose a candidate that only requires [NetRead]
+     or choose a candidate that only requires [NetConnect]
 ```
 
 ### 12. Interaction with the cost model
@@ -608,19 +643,24 @@ Capability sets provide hard upper-bound constraints on these cost dimensions:
 | Condition | Cost dimension constraint |
 |---|---|
 | `uses {}` | `io = 0` (guaranteed no I/O overhead) |
-| S ∩ {NetRead, NetWrite, FileRead, FileWrite} ≠ ∅ | `io > 0` possible |
+| S ∩ {NetConnect, NetListen, FileRead, FileWrite, Console} ≠ ∅ | `io > 0` possible |
 | `Spawn ∈ S` | `parallel > 0` possible |
-| `uses [Compute]` | Only `compute` and `alloc` dimensions may be non-zero |
 
 The relationship is a **necessary condition**: if the capability set excludes all I/O capabilities, the cost model's I/O dimension is provably zero.
 
-$$S \cap \{\text{NetRead, NetWrite, FileRead, FileWrite}\} = \emptyset \implies \text{cost}_{\text{io}} = 0$$
+$$S \cap \{\text{NetConnect, NetListen, FileRead, FileWrite, Console}\} = \emptyset \implies \text{cost}_{\text{io}} = 0$$
 
 ### 13. Capability as a trait-like construct
 
 Capabilities are *not* merely string tags — each capability is a **trait-like construct** whose methods carry a `self` parameter representing the runtime token that grants the capability:
 
 ```spore
+capability Console {
+    fn println(self, msg: String) -> Unit
+    fn eprintln(self, msg: String) -> Unit
+    fn read_line(self) -> String ! [IoError]
+}
+
 capability FileRead {
     fn read_file(self, path: String) -> Bytes ! [IoError]
     fn list_dir(self, path: String) -> List[String] ! [IoError]
@@ -630,6 +670,11 @@ capability FileWrite {
     fn write_file(self, path: String, data: Bytes) -> Unit ! [IoError]
     fn create_dir(self, path: String) -> Unit ! [IoError]
     fn delete(self, path: String) -> Unit ! [IoError]
+}
+
+capability Env {
+    fn get(self, name: String) -> Option[String]
+    fn vars(self) -> List[(String, String)]
 }
 ```
 
@@ -659,7 +704,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Ergonomics
 
-- Capability aliases (`capability DatabaseAccess = [...]`) reduce boilerplate for common groups.
+- Capability aliases (`capability CLI = [...]`, `capability Server = [...]`) reduce boilerplate for common groups.
 - Auto-inferred properties eliminate the need for manual `pure` / `deterministic` annotations.
 - The compiler provides actionable diagnostics when a function body exceeds its declared capabilities.
 
@@ -711,7 +756,7 @@ The canonical serialised form of a function type includes the CapSet:
   "kind": "Fn",
   "params": ["Url"],
   "return": "Response",
-  "capabilities": ["NetRead"],
+  "capabilities": ["NetConnect"],
   "errors": ["NetworkError"]
 }
 ```
@@ -724,7 +769,9 @@ All capability alias definitions are collected into a structured registry availa
 {
   "aliases": {
     "FileIO": ["FileRead", "FileWrite"],
-    "DatabaseAccess": ["NetRead", "NetWrite", "StateRead", "StateWrite"]
+    "CLI": ["Console", "FileRead", "FileWrite", "Env", "Spawn", "Exit"],
+    "Server": ["NetListen", "FileRead", "FileWrite", "Clock", "Random"],
+    "HttpClient": ["NetConnect", "Clock"]
   }
 }
 ```
@@ -904,9 +951,9 @@ Can third-party libraries define new atomic capabilities? If so, how are they sc
 
 Is `FileRead` / `FileWrite` the right granularity, or should capabilities be path-scoped (e.g., `FileRead("/etc/config")`)? Path-scoping adds expressiveness but complicates the set algebra.
 
-### 5. Relationship between `Compute` and `uses []`
+### 5. Granularity of `Console` capability
 
-Currently `uses []` implies pure, and `uses [Compute]` allows non-trivial computation. Should `Compute` be implicit in all functions (since all functions compute), or should it be reserved for functions that perform expensive computation? The distinction matters for the cost model.
+Should `Console` be split further (e.g., `ConsoleRead` for stdin vs `ConsoleWrite` for stdout/stderr)? A single `Console` is simpler and covers the common case where terminal I/O is bidirectional, but finer granularity may be useful for sandboxing scenarios where a program should print output but not read input.
 
 ### 6. Capability evolution and deprecation
 
