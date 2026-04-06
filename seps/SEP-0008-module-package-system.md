@@ -16,13 +16,13 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
-> **Executive Summary**: Defines a content-addressed package system (SHA-256 over normalized source) with platform-as-package architecture, where platforms provide effect handlers via `foreign fn` declarations. Enforces visibility rules (pub/internal) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through capability isolation — downloaded packages declaring `uses [Compute]` provably cannot access IO.
+> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where platforms provide effect handlers via `foreign fn` declarations. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`), `spore.toml` for project configuration, and a two-layer capability ceiling (project + file level). Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through capability isolation — downloaded packages declaring `uses [Compute]` provably cannot access IO.
 
 ## Summary
 
-This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a capability-based trust model secures the supply chain.
+This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `spore.lock` for reproducible builds, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a two-layer capability ceiling (project-wide in `spore.toml` + file-level `#![uses(...)]` pragma) secures the supply chain.
 
-The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as module-level capability ceilings, the import/alias separation, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
+The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the two-layer capability ceiling, the import/alias separation, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
 
 ## Motivation
 
@@ -76,11 +76,11 @@ Every `.spore` file is exactly one module. The module name is derived from the f
 | `src/utils.spore` | `utils` |
 | `src/main.spore` | `main` |
 
-There is no separate module declaration syntax—the filesystem **is** the declaration. An optional module header may declare the module's capability ceiling:
+There is no `module` keyword — the filesystem **is** the declaration. A file-level pragma may narrow the module's capability ceiling (see [Two-layer capability ceiling](#two-layer-capability-ceiling)):
 
 ```spore
 // src/billing/invoice.spore
-module billing.invoice uses [PaymentGateway, AuditLog]
+#![uses(PaymentGateway, AuditLog)]
 
 import billing.types
 import billing.tax
@@ -89,7 +89,7 @@ pub fn generate_invoice(order: Order) -> Invoice ! [TaxError, ValidationError]
     cost ≤ 3000
     uses [PaymentGateway, AuditLog]
 {
-    let tax = billing.tax.calculate(order.items, order.region)
+    let tax = tax.calculate(order.items, order.region)
     let line_items = build_line_items(order.items, tax)
     finalize(order.customer, line_items)
 }
@@ -101,11 +101,11 @@ fn build_line_items(items: Vec<Item>, tax: TaxResult) -> Vec<LineItem>
 }
 ```
 
-If the `module` header is present, its declared name **must** match the file path (otherwise: compiler error). If omitted, the module name is inferred from the path.
+Module names use **dot-separated** paths derived from the filesystem. There is no explicit `module` declaration; the file path is the single source of truth.
 
 ### Imports
 
-Spore provides exactly two import mechanisms with no overlap:
+Spore uses **dot-separated** paths for module imports and for item selection:
 
 ```spore
 // Module import: makes all pub items accessible via qualified name
@@ -114,6 +114,9 @@ import billing.invoice
 // Module import with rename
 import billing.invoice as inv
 
+// Selective import: bring specific items into scope
+import billing.invoice.{calculate, Invoice}
+
 // Item alias: binds a specific function or type to a local name
 alias gen = billing.invoice.generate_invoice
 alias Inv = billing.types.Invoice
@@ -121,8 +124,9 @@ alias Inv = billing.types.Invoice
 
 Key rules:
 
-- `import` operates on **modules** only. You cannot import a function directly.
-- `alias` operates on **items** only. You cannot alias a module.
+- `import` operates on **modules** only. Dot (`.`) separates path segments.
+- Selective imports use dot (`.`) then braces (`{...}`) to bring specific items into scope.
+- `alias` operates on **items** only. You cannot alias a module (use `import ... as` instead).
 - No wildcard imports (`import billing.*` is not supported).
 - No implicit nested imports (`import billing` does not import `billing.invoice`).
 
@@ -165,13 +169,40 @@ my-billing-lib/
         └── invoice_test.spore
 ```
 
-Three package types exist:
+Four package types exist:
 
 | Type | Has Platform? | Can do IO? | Use Case |
 |---|---|---|---|
 | `package` | No | No (declares capability requirements) | Libraries, reusable components |
 | `application` | Yes | Yes (via Platform) | Executables, services |
 | `platform` | Is the Platform | Yes (raw syscalls) | Runtime providers |
+| `script` | Implicit | Yes (via `--platform` flag) | Single-file programs, prototypes |
+
+### Script Mode
+
+Spore supports a lightweight **script mode** for single-file programs that require no `spore.toml` manifest:
+
+```bash
+# Run a single file directly with an implicit platform
+spore run hello.sp --platform cli
+
+# Equivalent to an implicit application with:
+#   [package]
+#   type = "application"
+#   platform = { git = "https://github.com/spore-lang/basic-cli" }
+```
+
+Script mode is ideal for quick prototypes, teaching, and small utilities. The compiler infers:
+
+- **Platform**: From `--platform` flag (required for scripts using IO effects). `cli` is shorthand for `spore-lang/basic-cli`.
+- **Capabilities**: Inherited from the specified platform's defaults.
+- **Dependencies**: Scripts cannot declare external dependencies. For multi-file or dependency-heavy projects, use `spore.toml`.
+
+Constraints:
+
+- A script is a single `.sp` file with a `main` function.
+- No `spore.toml` or `spore.lock` is generated.
+- The file's module name is derived from its filename (e.g., `hello.sp` → module `hello`).
 
 ### Platforms
 
@@ -204,7 +235,7 @@ The compiler maps `.spore` files to modules using the path relative to `src/`:
 ```text
 module_name = path.relative_to("src/")
                   .strip_extension(".spore")
-                  .replace("/", ".")
+                  // path separators become '.' in the module name
 ```
 
 Module name segments must be lowercase `snake_case`. Reserved names (`main`, `platform`, `test`) carry special semantics.
@@ -258,6 +289,7 @@ Within a single module, functions may reference each other regardless of declara
 
 ```text
 import_decl    ::= 'import' module_path ('as' IDENT)?
+                  | 'import' module_path '.' '{' IDENT (',' IDENT)* '}'
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT
@@ -354,11 +386,11 @@ The `.spore-lock` file records both hashes for all functions a module depends on
 ```toml
 # .spore-lock (auto-generated, do not edit)
 
-[deps.api.handler.generate_invoice]
+[deps."api.handler".generate_invoice]
 sig  = "a3f7c2"    # interface contract
 impl = "d8e1b4"    # exact implementation (None if partial)
 
-[deps.billing.invoice.calculate]
+[deps."billing.invoice".calculate]
 sig  = "d91e4b"
 impl = "b2c4a7"
 ```
@@ -437,6 +469,8 @@ Attempting to access a `pub(pkg)` item from an external package:
   ─── it is only visible within the 'my-billing-lib' package
   ─── your module 'handler' is in the 'my-api' package
 ```
+
+In a workspace, `pub(pkg)` restricts visibility to the **current package** (member) only — not to the entire workspace. For workspace member `core` exporting `pub(pkg) fn internal_helper()`, member `web` in the same workspace **cannot** access it. Use `pub` for cross-member visibility.
 
 #### Visibility and the Hole System
 
@@ -625,19 +659,61 @@ Package: billing-lib
 
 ### Module capabilities
 
-#### Capability ceiling
+#### Two-layer capability ceiling
 
-A module may declare the maximum set of capabilities its functions can use:
+Capabilities are constrained through a two-layer ceiling system:
+
+**Layer 1 — Project-wide ceiling (`spore.toml`):**
+
+```toml
+[capabilities]
+allowed = ["IO", "FileRead", "FileWrite", "Net", "PaymentGateway", "AuditLog"]
+```
+
+This defines the maximum set of capabilities available to **any** file in the project. No module can exceed this ceiling.
+
+**Layer 2 — File-level narrowing (`#![uses(...)]` pragma):**
+
+Individual files can narrow the project ceiling to declare the maximum capabilities their functions may use:
 
 ```spore
-module billing.invoice uses [PaymentGateway, AuditLog]
+// src/billing/invoice.spore
+#![uses(PaymentGateway, AuditLog)]
 ```
 
 - Any function in the module can use a subset of these capabilities.
 - No function can use capabilities **not** in this set.
+- The file-level pragma must be a **subset** of `spore.toml`'s `[capabilities] allowed`.
 - Private functions are also bound by the ceiling.
 
-If the `uses` declaration is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration. The `sporec --fixes` flag auto-applies the inferred declaration.
+**Example — two layers in action:**
+
+`spore.toml` allows `IO`, `FileRead`, `FileWrite`, `Net`, `PaymentGateway`, `AuditLog`. But `src/billing/invoice.spore` only needs payment and audit:
+
+```spore
+// src/billing/invoice.spore
+#![uses(PaymentGateway, AuditLog)]
+
+import billing.types
+import billing.tax
+
+pub fn generate_invoice(order: Order) -> Invoice ! [TaxError]
+    uses [PaymentGateway, AuditLog]
+{ ... }
+```
+
+Meanwhile, `src/net/client.spore` needs only network capabilities:
+
+```spore
+// src/net/client.spore
+#![uses(Net)]
+
+pub fn fetch(url: Url) -> Result[Bytes, NetError]
+    uses [Net]
+{ ... }
+```
+
+If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration. The `sporec --fixes` flag auto-applies the inferred pragma.
 
 #### Capability propagation
 
@@ -648,7 +724,8 @@ Importing a module does **not** grant its capabilities. If you call a function t
 Private functions are **also** bound by the module's capability ceiling (if declared). However, they do **not** contribute to the inferred capability set:
 
 ```spore
-module billing.invoice uses [PaymentGateway, AuditLog]
+// src/billing/invoice.spore
+#![uses(PaymentGateway, AuditLog)]
 
 pub fn generate_invoice(order: Order) -> Invoice ! [TaxError]
     uses [PaymentGateway, AuditLog]
@@ -671,8 +748,8 @@ fn send_email(to: Email, body: String) -> Unit ! [SmtpError]
   module billing.invoice allows [PaymentGateway, AuditLog]
   ─── EmailService is not in the module's capability set
 
-  help: either add EmailService to the module declaration:
-          module billing.invoice uses [PaymentGateway, AuditLog, EmailService]
+  help: either add EmailService to the file-level pragma:
+          #![uses(PaymentGateway, AuditLog, EmailService)]
         or move this function to a module that allows EmailService
 ```
 
@@ -680,7 +757,7 @@ fn send_email(to: Email, body: String) -> Unit ! [SmtpError]
 
 **Ceiling violation**: The error shown above.
 
-**Auto-fix with `sporec --fixes`**: When a module omits its capability declaration, the compiler infers it:
+**Auto-fix with `sporec --fixes`**: When a module omits its capability pragma, the compiler infers it:
 
 ```text
 $ sporec check src/billing/invoice.spore
@@ -690,7 +767,7 @@ $ sporec check src/billing/invoice.spore
 
   [info] inferred module capabilities: [PaymentGateway, AuditLog]
     ─── derived from union of pub function capabilities
-    ─── consider adding: module billing.invoice uses [PaymentGateway, AuditLog]
+    ─── consider adding: #![uses(PaymentGateway, AuditLog)]
 ```
 
 **Full workflow**:
@@ -701,7 +778,7 @@ sporec --fixes src/            # auto-apply all capability declarations
 sporec check src/              # clean: no more [info] suggestions
 ```
 
-The `--fixes` flag writes the inferred capability declaration as the first line of the module file.
+The `--fixes` flag writes the inferred capability pragma as the first line of the module file.
 
 ### Package management
 
@@ -718,7 +795,8 @@ authors = ["Alice <alice@example.com>"]
 spore-version = ">=0.5.0"
 
 [capabilities]
-requires = ["PaymentGateway", "AuditLog"]
+# Project-level capability ceiling — no file may exceed this set
+allowed = ["PaymentGateway", "AuditLog"]
 
 [dependencies]
 json-parser = {
@@ -736,7 +814,34 @@ test-framework = {
 }
 ```
 
+Dependencies are declared **per-project** in `spore.toml`, not per-file. The `[capabilities] allowed` list defines the project-wide ceiling; individual files narrow it with `#![uses(...)]`.
+
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
+
+### Application Entry Points
+
+An application's default entry point is `src/main.sp`, and the resulting binary name defaults to the package name from `spore.toml`:
+
+```toml
+[package]
+name = "my-tool"
+type = "application"
+# Binary name: "my-tool", entry: src/main.sp
+```
+
+To override the default or define additional binaries, use `[[bin]]`:
+
+```toml
+[[bin]]
+name = "my-tool"
+path = "src/main.sp"      # default, can be omitted
+
+[[bin]]
+name = "my-tool-migrate"
+path = "src/migrate.sp"   # additional binary
+```
+
+Each `[[bin]]` entry must point to a `.sp` file containing a `main` function with the platform-required signature.
 
 #### Content-addressed dependencies (BLAKE3, no semver)
 
@@ -779,12 +884,14 @@ Content hashes ensure integrity regardless of source. Community registries provi
 
 #### Capability-based trust model
 
-Packages declare required capabilities in `spore.toml`. Capabilities do **not** propagate automatically—the consuming package must explicitly grant them:
+Packages declare required capabilities in `spore.toml`. The `[capabilities] allowed` list defines the project-wide ceiling. Capabilities do **not** propagate automatically—the consuming package must explicitly grant them:
 
 ```toml
 [capabilities]
-require = ["network:listen:8080", "filesystem:read:/data"]
+# Project-level ceiling
+allowed = ["IO", "FileRead", "FileWrite", "Net"]
 
+# Fine-grained grants for dependencies (future direction)
 grant = [
     "http:network:listen:*",
     "logger:filesystem:write:/var/log"
@@ -813,6 +920,12 @@ members = [
 ```
 
 Alternatively, `path` dependencies provide lightweight monorepo support without requiring a workspace manifest.
+
+A workspace uses a **single `spore.lock`** at the workspace root. Individual members do NOT have their own lock files. This ensures:
+
+- All members share the same dependency versions (no diamond dependency conflicts).
+- CI builds are reproducible from a single lock file.
+- `spore update` in any member updates the shared lock.
 
 ### Dependency type classification
 
@@ -1138,11 +1251,11 @@ Error types follow the same visibility rules as all other types. A function's er
 import billing.invoice
 import billing.errors
 
-pub fn handle_create(req: Request) -> Response ! [billing.errors.BillingError, ParseError]
+pub fn handle_create(req: Request) -> Response ! [errors.BillingError, ParseError]
     uses [PaymentGateway, AuditLog]
 {
     let order = parse_request(req)
-    let invoice = billing.invoice.generate_invoice(order)
+    let invoice = invoice.generate_invoice(order)
     Response.ok(invoice)
 }
 ```
@@ -1186,11 +1299,11 @@ Diamond dependencies use consistent hashes:
 The `.spore-lock` records the same `sig` and `impl` for `billing.types.Invoice` regardless of which path reached it:
 
 ```toml
-[deps.billing.invoice.Invoice]
+[deps."billing.invoice".Invoice]
 sig  = "8c3f01"
 impl = "e9f3d2"
 
-[deps.billing.tax.Invoice]
+[deps."billing.tax".Invoice]
 sig  = "8c3f01"
 impl = "e9f3d2"
 ```
@@ -1210,7 +1323,7 @@ import billing.invoice
 
 // Compiles fine — handler is transitively partial
 pub fn handle(req: Request) -> Response ! [ApiError] {
-    let inv = billing.invoice.generate_invoice(parse_order(req))
+    let inv = invoice.generate_invoice(parse_order(req))
     Response.ok(inv)
 }
 ```
@@ -1674,7 +1787,8 @@ git push origin main --tags
 
 ### Readability and navigation
 
-- **File = module** eliminates the confusion of Rust's `mod`/`use` distinction or OCaml's separate `.mli` files. Opening a `.spore` file immediately tells you the module name.
+- **File = module** eliminates the confusion of Rust's `mod`/`use` distinction or OCaml's separate `.mli` files. Opening a `.spore` file immediately tells you the module name — no `module` keyword needed.
+- **Dot-separated imports** (`import billing.invoice`) use a uniform separator for both path segments and item access, avoiding the confusion of mixing `/` and `.`. The import path mirrors the module name directly.
 - **Import/alias separation** removes ambiguity: `import` always means module, `alias` always means item.
 - **Three visibility levels** are intuitive. The default is private; opt-in to exposure via `pub` or `pub(pkg)`.
 
@@ -1898,7 +2012,7 @@ New fields added to `.spore-lock` are ignored by older tools (forward-compatible
 
 The module system does not require wholesale adoption:
 
-- Packages can start with inferred capabilities (no `module` header) and add explicit declarations later via `sporec --fixes`.
+- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later via `sporec --fixes`.
 - Dependencies can mix Git, local path, and registry sources.
 - The `version` field in `spore.toml` remains available for human communication during the transition from semver.
 
@@ -1906,7 +2020,7 @@ The module system does not require wholesale adoption:
 
 1. **Hash truncation for display**: How many hex characters should be shown in human-facing output? 8? 16? Full 64? Should there be a configurable default?
 
-2. **Cross-package `pub(pkg)` boundaries in workspaces**: If two packages in a workspace share a `pub(pkg)` item, should the workspace boundary relax `pub(pkg)` semantics, or must items be promoted to `pub`?
+2. **~~Cross-package `pub(pkg)` boundaries in workspaces~~**: Resolved — `pub(pkg)` restricts visibility to the current package (member) only. Items must be promoted to `pub` for cross-member access.
 
 3. **Capability granularity**: The current design uses coarse-grained capability names (e.g., `FileRead`, `NetWrite`). Should fine-grained capabilities (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
 
@@ -1929,13 +2043,14 @@ The module system does not require wholesale adoption:
 ## Appendix A: Grammar summary
 
 ```text
-// Module header
-module_header  ::= 'module' module_path ('uses' cap_list)?
+// File-level capability pragma (replaces module header)
+file_pragma    ::= '#![uses(' capability (',' capability)* ')]'
 cap_list       ::= '[' capability (',' capability)* ']'
 capability     ::= UPPER_IDENT
 
 // Imports and aliases
 import_decl    ::= 'import' module_path ('as' IDENT)?
+                  | 'import' module_path '.' '{' IDENT (',' IDENT)* '}'
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT
@@ -1977,7 +2092,7 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 // spore.toml (TOML subset)
 // [package]       name, version, type, description, license, authors, spore-version
-// [capabilities]  require, grant, descriptions
+// [capabilities]  allowed
 // [dependencies]  <name> = { git|path|alias, sig, impl?, optional?, branch?, tag?, rev? }
 // [dev-dependencies]
 // [features]      <name> = [deps/features]
