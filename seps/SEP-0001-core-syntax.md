@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set.
+> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → uses → cost → spec → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set. The `spec` clause embeds typechecked behavioral contracts (examples and properties) directly in function signatures, making intent visible to the compiler, documentation, and hole-reporting tooling.
 
 ## Summary
 
@@ -326,6 +326,10 @@ fn name[T](params) -> ReturnType ! [ErrorSet]
 where T: Bound
 uses [effects]
 cost ≤ N
+spec {
+    example "...": ...
+    property "...": |param: Type| ...
+}
 {
     body
 }
@@ -344,19 +348,33 @@ fn parse_int(input: String) -> Int ! [InvalidFormat] {
     ...
 }
 
-// 3. With generic constraints
+// 3. With generic constraints and behavioral spec
 fn serialize[T](value: T) -> Bytes ! [SerializeError]
 where T: Serialize
 cost ≤ 500
+spec {
+    example "empty struct": serialize(Empty {}) == Ok(b"")
+}
 {
     ...
 }
 
-// 4. Side-effectful function
+// 4. Side-effectful function with intent examples
 /// @idempotent
 fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! [NetworkTimeout, AuthExpired]
 uses [NetConnect, FileRead, Clock]
 cost ≤ 8500
+spec {
+    example "returns report on success" {
+        let report = sync_user_data(UserId(1), MockSource.success());
+        report.is_ok() && report.unwrap().records_synced > 0
+    }
+    property "idempotent": |id: UserId| {
+        let r1 = sync_user_data(id, MockSource.success());
+        let r2 = sync_user_data(id, MockSource.success());
+        r1 == r2
+    }
+}
 {
     ...
 }
@@ -414,6 +432,60 @@ uses [CLI]
     ...
 }
 ```
+
+### Behavioral specification (`spec` clause)
+
+Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `uses`, and `cost`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
+
+```spore
+fn add(a: Int, b: Int) -> Int
+spec {
+    example "positive inputs": add(2, 3) == 5
+    example "identity":        add(0, 42) == 42
+    example "commutativity":   add(1, 2) == add(2, 1)
+}
+{
+    a + b
+}
+```
+
+**`example` items** are concrete labeled test cases. The body must evaluate to `Bool`:
+
+```spore
+// Equality form (most common)
+example "parses ISO date": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
+
+// Boolean form
+example "rejects empty string": parse_date("").is_err()
+
+// Multi-line form — last expression (without semicolon) is the result
+example "handles leap year" {
+    let d = parse_date("2024-02-29");
+    d == Ok(Date(2024, 2, 29))
+}
+```
+
+**`property` items** express universally quantified assertions using explicitly typed lambda syntax. The compiler generates random inputs for property-based testing:
+
+```spore
+fn parse_date(s: String) -> Result[Date, ParseError] ! [ParseError]
+spec {
+    example "ISO 8601":          parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
+    example "rejects ambiguous": parse_date("01/15/24")   == Err(AmbiguousFormat)
+
+    property "total":      |s: String| parse_date(s).is_ok() || parse_date(s).is_err()
+    property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
+}
+{
+    ?parse_logic
+}
+```
+
+Key design properties:
+
+- **Spec metadata survives hole bodies**: A function with `{ ?hole }` still retains its `spec` items for type checking, documentation, and HoleReport output. However, executing those spec items still calls the function body, so a hole remains a runtime error until the body is filled.
+- **Current amendment scope**: This amendment defines `spec` for ordinary function declarations and `impl` methods with bodies. Trait-method `spec` syntax and inheritance semantics are deferred to a later amendment.
+- **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
 
 ### Struct and type definitions
 
@@ -617,6 +689,9 @@ The complete reserved keyword table:
 | `where` | Generic type constraints |
 | `uses` | Effect requirement declaration |
 | `cost` | Cost bound clause |
+| `spec` | Behavioral specification block in function declarations and `impl` methods |
+| `example` | Concrete labeled example item inside a `spec` block |
+| `property` | Universally quantified assertion inside a `spec` block |
 | `spawn` | Spawn concurrent task |
 | `select` | Channel multiplex expression |
 | `parallel_scope` | Structured concurrency scope |
@@ -857,6 +932,7 @@ FunctionDecl    = [ DocComment ]
                   [ WhereClause ]
                   [ UsesClause ]
                   [ CostClause ]
+                  [ SpecClause ]
                   Block ;
 
 DocComment      = { "///" CommentText } ;
@@ -884,6 +960,22 @@ CostExpr        = IntLiteral
                 | CostExpr "*" CostExpr
                 | CostExpr "+" CostExpr
                 | FunctionCall ;               (* e.g., log2(n) *)
+
+(* ─── Spec Clause ─────────────────────────────────── *)
+
+SpecClause      = "spec" "{" { SpecItem } "}" ;
+
+SpecItem        = ExampleItem
+                | PropertyItem ;
+
+ExampleItem     = "example" StringLiteral ":" Expr
+                | "example" StringLiteral Block ;
+
+PropertyItem    = "property" StringLiteral ":" PropertyLambdaExpr ;
+
+PropertyLambdaExpr = "|" [ PropertyParamList ] "|" ( Expr | Block ) ;
+PropertyParamList  = PropertyParam { "," PropertyParam } ;
+PropertyParam      = Ident ":" TypeExpr ;
 
 (* ─── Type Expressions ────────────────────────────── *)
 
@@ -1072,6 +1164,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 [where <GenericName>: <Constraint>, ...]
 [uses [<Effect>, ...]]
 [cost ≤ <N>]
+[spec { <examples and properties> }]
 {
     <body>
 }
@@ -1095,7 +1188,16 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 5. **`cost ≤ N`** — An upper bound on the function's resource cost. Can reference parameters (e.g., `cost ≤ n * 10`).
 
-**Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost`.
+6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as typechecked test metadata. When the enclosing function body is executable, `spore test` evaluates the `spec` block by calling the function by name. If the body still contains an unfilled hole, the `spec` block remains available to the compiler and HoleReport output, but executing it still reaches the hole and errors.
+
+   - **`example "label": expr`** — A concrete named test case. The body expression must be `Bool`. If using `==`, both sides must have the same type. Multi-line examples use block syntax: `example "label" { ... }`.
+   - **`property "label": |x: T, ...| expr`** — A universally quantified assertion. The compiler generates random inputs of the declared types and verifies the body evaluates to `true` for all trials. Type annotations on property parameters are required.
+
+   For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `#[allow(missing_spec)]`.
+
+   This amendment does not define trait-method `spec` inheritance or contract merging; that behavior is reserved for a future SEP.
+
+**Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost` → `spec`.
 
 **`self` in trait and handler methods:** The `self` identifier is a regular parameter name used as the first parameter in trait method signatures. It is not a keyword with special scoping rules.
 
@@ -1246,9 +1348,25 @@ When queried (`sporec --query-hole ?name`), the compiler emits a structured repo
   "candidate_functions": [
     "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds] uses [NetConnect]"
   ],
-  "error_types_to_handle": ["Declined", "InsufficientFunds"]
+  "error_types_to_handle": ["Declined", "InsufficientFunds"],
+  "spec": {
+    "examples": [
+      {
+        "label": "successful charge",
+        "expr": "validate(Money(100), CreditCard(\"4242...\")).is_ok()"
+      }
+    ],
+    "properties": [
+      {
+        "label": "idempotent",
+        "predicate": "|a: Money, m: PaymentMethod| validate(a, m) == validate(a, m)"
+      }
+    ]
+  }
 }
 ```
+
+When a function has both a `spec` block and a hole body, the HoleReport includes the spec items as additional constraints. This gives hole-filling agents a self-contained behavioral contract alongside the existing type and capability context, even though the examples and properties are not yet runnable without hitting the hole.
 
 ## Complete examples
 
@@ -1482,6 +1600,16 @@ Any change to the following signature components produces a new snapshot hash an
 | Effect set | add/remove any effect |
 | Generic constraints | `T: Eq` → `T: Eq + Hash` |
 
+The `spec` block is tracked via a separate **spec hash**, independent of the snapshot hash:
+
+| Change | Snapshot hash | Spec hash | Required approval |
+|--------|--------------|-----------|------------------|
+| Add a `spec` block where none existed | unchanged | new | `--permit-spec` |
+| Add/modify/remove an `example` or `property` | unchanged | changed | `--permit-spec` |
+| Any signature clause change (types, effects, cost, etc.) | changed | unchanged | `--permit` |
+
+The lighter `--permit-spec` approval reflects that spec changes clarify behavioral contracts without altering calling conventions. Downstream callers need only re-run their own tests, not update call sites.
+
 ## Structured representation / protocol impact
 
 ### AST structure
@@ -1508,6 +1636,13 @@ Program
     ├── where_clauses[]
     ├── uses[]
     ├── cost?
+    ├── spec?
+    │   ├── examples[]
+    │   │   ├── label: String
+    │   │   └── body: Expr
+    │   └── properties[]
+    │       ├── label: String
+    │       └── predicate: LambdaExpr
     └── body: Block
 
 Expr
@@ -1540,10 +1675,10 @@ Expr
 The regular, keyword-delimited syntax supports straightforward LSP provider implementations:
 
 - **Go to definition**: Every identifier resolves unambiguously through module paths and lexical scoping.
-- **Hover information**: Function signatures (including `uses`, `cost`, inferred properties) can be displayed in full.
-- **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available effects.
-- **Diagnostics**: Missing match arms, undeclared effects, cost violations, and incomplete error handling can all be reported as structured diagnostics.
-- **Signature help**: The ordered clause structure (`where` → `uses` → `cost`) enables progressive parameter info display.
+- **Hover information**: Function signatures (including `uses`, `cost`, `spec` summary, inferred properties) can be displayed in full. The `spec` block is surfaced as a "behavioral contract" section showing example count and property count.
+- **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available effects. Inside `spec { }`, suggest `example` and `property` as the only valid item keywords.
+- **Diagnostics**: Missing match arms, undeclared effects, cost violations, incomplete error handling, missing spec on public functions, and spec failures can all be reported as structured diagnostics.
+- **Signature help**: The ordered clause structure (`where` → `uses` → `cost` → `spec`) enables progressive parameter info display.
 
 ### Serialization
 
@@ -1591,6 +1726,56 @@ error[E0101]: `for` loops are not supported in Spore
    |
    = help: try `list.map(|x| ...)` or `list.fold(init, |acc, x| ...)`
    = help: for recursive iteration, use tail recursion (TCO is guaranteed)
+```
+
+**Spec clause in wrong position:**
+
+```text
+error[E0501]: `spec` must appear after all other signature clauses
+  --> src/lib.spore:5:1
+   |
+ 5 | spec { ... }
+ 6 | cost ≤ 500
+   |
+   = help: move `cost` before `spec`
+```
+
+**Spec example failure (runtime):**
+
+```text
+spec failure: `parse_date` — example "ISO 8601"
+  --> src/dates.spore:5:5
+   |
+ 5 |     example "ISO 8601": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
+   |
+   body evaluated to: false
+   = note: equality-shaped examples may additionally report compared values when available
+```
+
+**Spec property counterexample (runtime):**
+
+```text
+spec counterexample: `parse_date` — property "round-trip"
+  --> src/dates.spore:9:5
+   |
+ 9 |     property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
+   |
+   counterexample: d = Date { year: 2024, month: 2, day: 30 }
+   body evaluated to: false
+   = note: found after 47 trials
+```
+
+**Missing spec warning:**
+
+```text
+warning[W0501]: public function `parse_date` has no `spec` block
+  --> src/dates.spore:3:1
+   |
+ 3 | pub fn parse_date(s: String) -> Result[Date, ParseError] ! [ParseError] {
+   |        ^^^^^^^^^^ no behavioral contract declared
+   |
+   = help: add a `spec { example "...": ... }` block before the function body
+   = note: suppress with `#[allow(missing_spec)]` if intentional
 ```
 
 ### Recovery strategies
@@ -1756,6 +1941,14 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 11. **Standard effect taxonomy evolution**: SEP-0003 now defines the initial built-in effect vocabulary (`Console`, `FileRead`, `FileWrite`, `NetConnect`, `NetListen`, `Env`, `Spawn`, `Clock`, `Random`, `Exit`). Future SEPs may extend it, but changes should preserve the intent-oriented classification.
 
 12. **Error type subtyping**: If function `f` declares `! [NetworkError]` and function `g` declares `! [NetworkError, ParseError]`, can `g` call `f` directly? How does error set subtyping work?
+
+13. **`property` with `uses`**: If a property calls a function that has side effects, what capability scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
+
+14. **Future trait-level behavioral contracts**: Should a later SEP allow `spec` blocks on trait methods, and if so how should implementations inherit or refine them? This amendment leaves trait-level `spec` syntax and semantics unspecified.
+
+15. **`example` execution order**: Should `example` items run in declaration order (default) or allow parallel execution via `--parallel-spec`?
+
+16. **Negative examples**: Should `spec` support expressing that a call should fail at compile time (type error)? This would enable testing the type system itself but requires a different mechanism.
 
 ## Appendix A: Small-step operational semantics
 
@@ -2038,6 +2231,39 @@ In PoC, this is a no-op since spawn already evaluated.)
   ?name ↝ RuntimeError("hit unfilled hole `?name`")
 
 (Holes are compile-time constructs. Reaching one at runtime is always an error.)
+```
+
+### Spec evaluation
+
+```text
+[E-SpecExample]
+  spec_example("label", body_expr)
+  body_expr ↝* true
+  ──────────────────────────────────
+  SpecResult("label", Pass)
+
+[E-SpecExampleFail]
+  spec_example("label", body_expr)
+  body_expr ↝* false
+  ──────────────────────────────────
+  SpecResult("label", Fail(left_value, right_value))
+
+[E-SpecProperty]
+  spec_property("label", |x₁: T₁, ..., xₙ: Tₙ| body)
+  ∀ generated (v₁, ..., vₙ): body[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ↝* true
+  ──────────────────────────────────
+  SpecResult("label", Pass)
+
+[E-SpecPropertyCounterexample]
+  spec_property("label", |x₁: T₁, ..., xₙ: Tₙ| body)
+  ∃ (v₁, ..., vₙ): body[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ↝* false
+  ──────────────────────────────────
+  SpecResult("label", Counterexample(v₁, ..., vₙ))
+
+(Spec items are evaluated by `spore test`, not during normal program execution.
+Each example/property is compiled as a standalone test case that calls the function
+by name. If that function body still contains a hole, the ordinary hole runtime-error
+rule applies, so the `spec` remains useful metadata but not a normal runnable path yet.)
 ```
 
 ### List operations (builtins)
