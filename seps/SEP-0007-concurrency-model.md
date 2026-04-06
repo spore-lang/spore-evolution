@@ -25,7 +25,7 @@ This proposal defines the concurrency model for the Spore programming language. 
 
 1. **Structured concurrency** — all concurrent tasks form a tree rooted in `parallel_scope`; no raw thread spawning, no `GlobalScope` escape hatches.
 2. **Effect handlers** — `Spawn` is a standard effect, not a keyword. Different handlers provide real parallelism, sequential testing execution, or compile-time cost simulation—without changing user code.
-3. **Capability narrowing** — a child task's capability set must be a subset of its parent's (`child.uses ⊆ parent.uses`), enforced at compile time.
+3. **Effect narrowing** — a child task's effect set must be a subset of its parent's (`child.uses ⊆ parent.uses`), enforced at compile time.
 4. **Cost budgets with a parallel dimension** — the cost model gains a fourth dimension `parallel(lane)` that the compiler statically tracks and verifies.
 
 The core formula is:
@@ -69,7 +69,7 @@ Structured concurrency, as articulated by Nathaniel J. Smith (*"Go statement con
 
 Raw threads are excluded for fundamental reasons:
 
-- They bypass the capability system: any thread can perform any operation.
+- They bypass the effect system: any thread can perform any operation.
 - They make cost analysis intractable: the compiler cannot statically enumerate an unbounded thread graph.
 - They conflict with Spore's philosophy of *"the compiler sees everything"*.
 
@@ -81,7 +81,7 @@ Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` spl
 // No async annotation needed—concurrency declared via the Spawn effect
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
 cost ≤ urls.len * per_fetch
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         urls.map(|url| spawn { fetch(url) })
@@ -105,6 +105,8 @@ Both functions use identical call syntax—no red/blue distinction. The concurre
 
 This section introduces the concurrency primitives through progressive examples.
 
+Concrete surface syntax for `parallel_scope`, `spawn`, `select`, and `handle ... with` is centralized in SEP-0001. This SEP uses examples to explain concurrency behavior, but the grammar itself should be read there.
+
 ### 3.1 `parallel_scope` — the concurrency entry point
 
 `parallel_scope` is the **only** way to introduce concurrency in Spore. There is no `GlobalScope`, no `thread::spawn`, no detached background tasks in user code.
@@ -124,7 +126,7 @@ Because `parallel_scope` is an expression, it can return structured results asse
 
 ```spore
 fn load_dashboard(user_id: UserId) -> Dashboard ! [DbError, NetError]
-uses [Spawn, NetRead, DbRead]
+uses [Spawn, NetConnect, DbRead]
 {
     // parallel_scope returns the Dashboard struct directly
     parallel_scope {
@@ -161,11 +163,11 @@ let response: Response = task.await
 
 `spawn` is **not** a standalone statement—it is always bound to an enclosing `parallel_scope`. Any `Task` not awaited when the scope exits is automatically cancelled.
 
-Capability narrowing is available at the spawn site:
+Effect narrowing is available at the spawn site:
 
 ```spore
-let task = spawn uses [NetRead] { fetch(url) }
-// The spawned task can only use NetRead; it cannot itself spawn.
+let task = spawn uses [NetConnect] { fetch(url) }
+// The spawned task can only use NetConnect; it cannot itself spawn.
 ```
 
 ### 3.3 `Task[T]` — task handle API
@@ -183,7 +185,7 @@ Usage examples:
 
 ```spore
 fn selective_fetch(urls: List[Url]) -> Response ! [NetError]
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         let primary   = spawn { fetch(urls.head()) }
@@ -248,7 +250,7 @@ handle concurrent_work()
     with cost_analysis_handler()
 ```
 
-A test can replace the `Spawn` handler with `SequentialHandler` and a `NetRead` handler with a mock—**no async test framework needed**:
+A test can replace the `Spawn` handler with `SequentialHandler` and a `NetConnect` handler with a mock—**no async test framework needed**:
 
 ```spore
 test "fetch_and_merge produces correct results" {
@@ -316,8 +318,10 @@ uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
 
 ### 3.7 Complete example: HTTP request handler
 
+Server entrypoints that accept inbound connections declare `NetListen`; the inner request handler below only needs outbound `NetConnect` plus domain-specific effects.
+
 ```spore
-capability HttpHandler = [Spawn, NetRead, NetWrite, DbRead, Clock]
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! [DbError, Timeout]
 cost ≤ 5000
@@ -327,7 +331,7 @@ uses [HttpHandler]
         parallel_scope(lanes: 3) {
             let auth   = spawn uses [DbRead]  { verify_token(req.token) }
             let user   = spawn uses [DbRead]  { load_user(req.user_id) }
-            let config = spawn uses [NetRead]  { fetch_remote_config() }
+            let config = spawn uses [NetConnect]  { fetch_remote_config() }
 
             let auth_result = auth.await
             if !auth_result.valid {
@@ -351,14 +355,14 @@ fn etl_pipeline(
     batch_size: Int,
 ) -> EtlReport ! [ExtractError, TransformError, LoadError]
 cost ≤ batch_size * 200
-uses [Spawn, NetRead, DbRead, DbWrite]
+uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
     let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
 
     parallel_scope(lanes: 6) {
         // Extract: 1 lane
-        let extractor = spawn uses [NetRead] {
+        let extractor = spawn uses [NetConnect] {
             source.stream().each(|record| raw_tx.send(record))
             raw_tx.close()
         }
@@ -417,7 +421,7 @@ main()
 The compiler builds this static task tree at compile time and uses it for:
 
 - Cost budget allocation verification
-- Capability set inheritance checking
+- Effect set inheritance checking
 - Lane consumption calculation
 
 #### `parallel_scope` formal semantics
@@ -455,7 +459,7 @@ Constraints:
 
 - `spawn` may only appear lexically inside a `parallel_scope`.
 - The enclosing function must declare `uses [Spawn]`.
-- Capability narrowing: `spawn uses [C₁, C₂] { e }` requires `{C₁, C₂} ⊆ parent.uses`.
+- Effect narrowing: `spawn uses [C₁, C₂] { e }` requires `{C₁, C₂} ⊆ parent.uses`.
 
 #### Error propagation
 
@@ -543,16 +547,16 @@ handler token_bucket_handler(rate: Int, per: Duration) for RateLimit {
 }
 ```
 
-#### Relationship between effects and capabilities
+#### Relationship between effects and the `uses` clause
 
-| Dimension | Capability (`uses [...]`) | Effect (`effect Foo`) |
+| Dimension | `uses [...]` clause | `effect` definition |
 |-----------|--------------------------|----------------------|
-| Definition layer | Signature metadata, compiler-verified | An operation interceptable by a handler |
-| Semantics | "What this function may do" | "How this operation is executed" |
-| Verification | Compile-time capability set check | Compile-time + handler binding time |
+| Definition layer | Signature metadata, compiler-verified | Declares operations interceptable by a handler |
+| Semantics | "What effects this function may perform" | "What operations this effect provides" |
+| Verification | Compile-time effect set check | Compile-time + handler binding time |
 | Example | `uses [Spawn]` permits calling `spawn` | `effect Spawn { fn spawn... }` defines the operation |
 
-Every effect automatically becomes a capability. Declaring `uses [Spawn]` is equivalent to "this function may perform the `Spawn` effect".
+Declaring `uses [Spawn]` means "this function may perform the `Spawn` effect". The `effect` keyword defines both the operations and makes the effect available for use in `uses` clauses.
 
 ### 4.3 Channel types
 
@@ -681,7 +685,7 @@ Developers need not manually allocate lanes. The compiler infers from the task t
 ```spore
 fn pipeline(data: Data) -> Result
 cost ≤ 5000
-uses [Spawn, FileRead, NetWrite]
+uses [Spawn, FileRead, NetConnect]
 {
     // Phase 1: 4 lanes
     let prepared = parallel_scope(lanes: 4) {
@@ -711,7 +715,7 @@ When the number of spawned tasks depends on runtime values, the compiler uses **
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
 cost ≤ urls.len * per_fetch
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope {
         urls.map(|url| spawn { fetch(url) })
@@ -735,7 +739,7 @@ To make the cost statically verifiable, use a **refinement type** to limit the i
 ```spore
 fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! [NetError]
 cost ≤ 100 * per_fetch + 500
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 10) {
         // At most 10 parallel tasks; remaining queue
@@ -803,7 +807,7 @@ Holes in concurrent functions participate in cost budget analysis:
 ```spore
 fn concurrent_pipeline(data: Data) -> Result
 cost ≤ 3000
-uses [Spawn, NetRead]
+uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 2) {
         let a = spawn { fetch(data.url) }  // cost: 800
@@ -913,7 +917,7 @@ uses [Spawn, FileRead, FileWrite]
 
 ```spore
 fn fetch_with_timeout(url: Url, limit: Duration) -> Response ! [NetError, Timeout]
-uses [Spawn, NetRead, Clock]
+uses [Spawn, NetConnect, Clock]
 {
     with_timeout(limit) {
         fetch(url)
@@ -954,9 +958,9 @@ The replaceable handler model means concurrent code can be tested with `Sequenti
 
 Because the task tree mirrors the lexical scope tree, error messages and stack traces preserve the full causal chain from the spawning point to the failure point. This eliminates the "lost context" problem common in fire-and-forget concurrency.
 
-### Explicit capabilities as documentation
+### Explicit effects as documentation
 
-When a function signature says `uses [Spawn, NetRead]`, a human reader immediately knows the function is concurrent and performs network reads. This serves as machine-checked documentation.
+When a function signature says `uses [Spawn, NetConnect]`, a human reader immediately knows the function is concurrent and performs outbound network access. This serves as machine-checked documentation.
 
 ---
 
@@ -982,9 +986,9 @@ Agents can use `sporec --query-cost` to obtain the parallel lane usage and total
 
 The constrained concurrency model (`parallel_scope` + `spawn` only, no raw threads) makes it significantly easier for agents to generate correct concurrent code. The structured scoping rules eliminate entire classes of concurrency bugs (leaked tasks, use-after-free in concurrent contexts) that agents are otherwise prone to producing.
 
-### Capability narrowing for safe delegation
+### Effect narrowing for safe delegation
 
-When an agent generates a spawned task, it can narrow the capability set (`spawn uses [NetRead] { ... }`), providing a compile-time guarantee that the generated subtask cannot exceed its intended permissions—a form of least-privilege that is checkable at compile time.
+When an agent generates a spawned task, it can narrow the effect set (`spawn uses [NetConnect] { ... }`), providing a compile-time guarantee that the generated subtask cannot exceed its intended permissions—a form of least-privilege that is checkable at compile time.
 
 ---
 
@@ -1005,7 +1009,7 @@ $ sporec --query-task-tree handle_request
       "children": [
         { "task": "verify_token", "uses": ["DbRead"], "cost": 600 },
         { "task": "load_user",    "uses": ["DbRead"], "cost": 800 },
-        { "task": "fetch_remote_config", "uses": ["NetRead"], "cost": 1200 }
+        { "task": "fetch_remote_config", "uses": ["NetConnect"], "cost": 1200 }
       ]
     }
   ]
@@ -1020,9 +1024,9 @@ At the application boundary (the `main` function or service entry point), handle
 
 | Spore subsystem | Interaction with the concurrency model |
 |-----------------|---------------------------------------|
-| Signature syntax | `uses [Spawn, ...]` declares concurrency capability; `cost ≤ N` bounds total cost |
+| Signature syntax | `uses [Spawn, ...]` declares concurrency effect; `cost ≤ N` bounds total cost |
 | Cost model | Fourth dimension `parallel(lane)` defined by this SEP |
-| Capability system | `Spawn` is a built-in capability; child task capabilities ⊆ parent |
+| Effect system | `Spawn` is a built-in effect; child task effects ⊆ parent |
 | Effect annotations | `pure` excludes `Spawn`; `deterministic` + `Spawn` requires schedule-independent results |
 | Hole system | Concurrent holes participate in cost budget analysis |
 | Platform | Platform provides production `Spawn` handler implementations |
@@ -1038,11 +1042,11 @@ The compiler reports the following concurrency-related diagnostics:
 | Diagnostic | Severity | Example |
 |------------|----------|---------|
 | `spawn` outside `parallel_scope` | Error | `spawn { ... }` at top level |
-| Missing `Spawn` capability | Error | Function calls `spawn` but does not declare `uses [Spawn]` |
+| Missing `Spawn` effect | Error | Function calls `spawn` but does not declare `uses [Spawn]` |
 | Lane budget exceeded | Error | `parallel_scope(lanes: 2)` with 5 spawns that cannot queue |
 | Cost budget exceeded due to parallelism | Error | Inferred parallel cost exceeds declared `cost ≤ N` |
 | Long recursion/iteration without cancellation checkpoint | Warning | CPU-bound computation > 100 iterations without `check_cancelled()` |
-| Capability widening in spawn | Error | `spawn uses [NetWrite] { ... }` when parent lacks `NetWrite` |
+| Effect widening in spawn | Error | `spawn uses [NetConnect] { ... }` when parent lacks `NetConnect` |
 | Unused `Task` (never awaited, never cancelled) | Warning | Task result is silently discarded |
 
 ### Runtime diagnostics
@@ -1090,7 +1094,7 @@ This timeline can be rendered as a Gantt chart, flame graph, or task dependency 
 
 ### Alternative 2: Green threads (Go, Java Loom)
 
-**Rejected.** Green threads are colorless (good) but lack effect tracking (bad). Any goroutine can perform any operation, violating Spore's capability constraint model. Additionally, goroutine leaks (Go's well-known problem) directly violate the resource safety guarantee.
+**Rejected.** Green threads are colorless (good) but lack effect tracking (bad). Any goroutine can perform any operation, violating Spore's effect constraint model. Additionally, goroutine leaks (Go's well-known problem) directly violate the resource safety guarantee.
 
 **Consequences of rejection:** Spore cannot easily adopt existing Go-style runtime implementations. The effect handler approach requires a custom runtime that understands continuations.
 
@@ -1172,7 +1176,7 @@ The concurrency model is introduced as a new language feature. There is no exist
 
 ### Interaction with existing SEPs
 
-- **SEP-0001 (Core Syntax, extended by SEP-0003 for capabilities):** The `uses [Spawn, ...]` clause and `cost ≤ N` declarations are extensions to the signature syntax defined in SEP-0001, with capability annotations from SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
+- **SEP-0001 (Core Syntax, extended by SEP-0003 for effects):** The `uses [Spawn, ...]` clause and `cost ≤ N` declarations are extensions to the signature syntax defined in SEP-0001, with effect annotations from SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
 - **SEP-0004 (Cost Model):** This SEP adds the fourth dimension `parallel(lane)` to the cost model. Existing cost annotations (which only use `C`, `A`, `W`) remain valid; the `P` dimension defaults to `0` for functions without `Spawn`.
 
 ### Migration path for developers from other languages
@@ -1237,8 +1241,8 @@ let task = spawn { <expr> }
 // Direct await
 let result = spawn { <expr> }.await
 
-// With capability narrowing
-let task = spawn uses [NetRead] { <expr> }
+// With effect narrowing
+let task = spawn uses [NetConnect] { <expr> }
 ```
 
 ### A.3 `Task[T]`
@@ -1293,28 +1297,7 @@ defer { <cleanup> }
 
 ### A.7 Effect and handler
 
-```spore
-// Declare effect
-effect MyEffect {
-    fn operation(param: T) -> U
-}
-
-// Use effect in function signature
-fn my_func() -> Result
-uses [MyEffect]
-{ operation(value) }
-
-// Provide handler at call site
-handle my_func()
-    with my_handler()
-
-// Define handler
-handler my_handler for MyEffect {
-    fn operation(param: T) -> U {
-        resume(result)
-    }
-}
-```
+Concrete syntax for `effect`, `handler`, and `handle ... with` is defined in SEP-0001. The effect algebra and handler model that concurrency relies on are specified in SEP-0003.
 
 ### A.8 Function signature with concurrency
 
@@ -1331,7 +1314,7 @@ uses [Spawn, Channel, ...]
 ### A.9 Complete example: HTTP handler
 
 ```spore
-capability HttpHandler = [Spawn, NetRead, NetWrite, DbRead, Clock]
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! [DbError, Timeout]
 cost ≤ 5000
@@ -1341,7 +1324,7 @@ uses [HttpHandler]
         parallel_scope(lanes: 3) {
             let auth   = spawn uses [DbRead]  { verify_token(req.token) }
             let user   = spawn uses [DbRead]  { load_user(req.user_id) }
-            let config = spawn uses [NetRead]  { fetch_remote_config() }
+            let config = spawn uses [NetConnect]  { fetch_remote_config() }
 
             let auth_result = auth.await
             if !auth_result.valid {
@@ -1363,14 +1346,14 @@ fn etl_pipeline(
     batch_size: Int,
 ) -> EtlReport ! [ExtractError, TransformError, LoadError]
 cost ≤ batch_size * 200
-uses [Spawn, NetRead, DbRead, DbWrite]
+uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
     let (clean_tx, clean_rx) = Channel.new[CleanRecord](buffer: batch_size)
 
     parallel_scope(lanes: 6) {
         // Extract: 1 lane
-        let extractor = spawn uses [NetRead] {
+        let extractor = spawn uses [NetConnect] {
             source.stream().each(|record| raw_tx.send(record))
             raw_tx.close()
         }
