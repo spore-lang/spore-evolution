@@ -51,7 +51,7 @@
     {
       "path": "seps/SEP-0003-effect-capability-system.md",
       "sep": 3,
-      "title": "SEP-0003: Effect & Capability System",
+      "title": "SEP-0003: Effect System",
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
