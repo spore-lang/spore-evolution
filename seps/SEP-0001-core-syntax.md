@@ -487,6 +487,8 @@ Key design properties:
 - **Current amendment scope**: This amendment defines `spec` for ordinary function declarations and `impl` methods with bodies. Trait-method `spec` syntax and inheritance semantics are deferred to a later amendment.
 - **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
 
+Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. `handle` accepts one or more `with` clauses. SEP-0003 defines the effect algebra and handler semantics; this SEP only fixes the settled outer syntax. The grammar intentionally leaves each handler operand as an expression because the richer handler/`handle` model is still pending the item-3 decision.
+
 ### Struct and type definitions
 
 ```spore
@@ -681,6 +683,7 @@ The complete reserved keyword table:
 | `trait` | Type interface definition (trait) |
 | `effect` | Effect definition / effect alias |
 | `handler` | Effect handler implementation |
+| `perform` | Invoke an effect operation |
 | `impl` | Trait implementation block |
 | `pub` / `pub(pkg)` | Visibility modifiers (public / package-visible) |
 | `module` | Module definition |
@@ -830,6 +833,8 @@ t"Dear {customer}, order {id}"    // template string
 
 ### EBNF Grammar
 
+For effect handling, the settled outer grammar is `perform <expr>` and `handle <expr>` followed by one or more `with <handler-expr>` clauses. The handler side remains expression-shaped here until the richer handler model is finalized.
+
 ```ebnf
 (* ═══════════════════════════════════════════════════ *)
 (*  Spore v0.1 — Complete EBNF Grammar                *)
@@ -912,7 +917,10 @@ EffectAlias     = Ident { "|" Ident } ;
 HandlerDecl     = "handler" Ident [ "(" ParamList ")" ] "for" Ident
                   "{" { FunctionDecl } "}" ;
 
-HandleExpr      = "handle" Expr "with" Expr ;
+PerformExpr     = "perform" Expr ;
+
+HandleExpr      = "handle" Expr HandlerClause { HandlerClause } ;
+HandlerClause   = "with" Expr ;
 
 (* ─── Impl (Trait Implementation) ─────────────────── *)
 
@@ -997,6 +1005,7 @@ Expr            = LetExpr
                 | LambdaExpr
                 | ReturnExpr
                 | ThrowExpr
+                | PerformExpr
                 | SpawnExpr
                 | SelectExpr
                 | ParallelScopeExpr
