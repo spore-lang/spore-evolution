@@ -1,0 +1,58 @@
+name: "CI - PR Checks"
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check PR title
+        uses: zrr1999/zendev-actions/validate-title@9013ad848b32d287d0258fdbc9f51e350b8eca33
+        with:
+          text: ${{ github.event.pull_request.title }}
+
+  pr-template:
+    name: PR template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR template checklist
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          REQUIRED_CHECKBOXES = [
+              "- [x] I linked the canonical discussion thread.",
+              "- [x] I used the correct SEP template for this proposal type.",
+              "- [x] I updated front matter metadata and required sections.",
+          ]
+
+          payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          body = (payload.get("pull_request") or {}).get("body") or ""
+          missing = [item for item in REQUIRED_CHECKBOXES if item not in body]
+
+          if missing:
+              print("Pull request body is missing required checked items:\n", file=sys.stderr)
+              for item in missing:
+                  print(f"- {item}", file=sys.stderr)
+              raise SystemExit(1)
+
+          print("Pull request template checklist looks good.")
+          PY
