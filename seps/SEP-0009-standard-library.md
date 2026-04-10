@@ -135,7 +135,7 @@ type Ordering { Less, Equal, Greater }
 
 ```spore
 fn unwrap[T](opt: Option[T]) -> T
-    ! [PanicError]
+    ! PanicError
     cost O(1)
 
 fn unwrap_or[T](opt: Option[T], default: T) -> T
@@ -158,7 +158,7 @@ fn is_none[T](opt: Option[T]) -> Bool
 
 ```spore
 fn unwrap[T, E](res: Result[T, E]) -> T
-    ! [PanicError]
+    ! PanicError
     cost O(1)
 
 fn unwrap_or[T, E](res: Result[T, E], default: T) -> T
@@ -597,10 +597,10 @@ fn sample[A](list: List[A]) -> Option[A]
 
 ### 4.4 Error type hierarchy
 
-All stdlib errors conform to a base capability trait:
+All stdlib errors conform to a base trait:
 
 ```spore
-capability Error[T] {
+trait Error[T] {
     fn message(self: T) -> String
 }
 ```

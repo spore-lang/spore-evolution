@@ -193,7 +193,7 @@ Source Text (.spore files)
 │  ─ Associated types + GAT instantiation                                 │
 │  ─ Const generics evaluation                                            │
 │  ─ Exhaustiveness checking (match expressions)                          │
-│  ─ Error set propagation and consistency (! [Errors])                   │
+│  ─ Error set propagation and consistency (! Errors)                   │
 │  ─ Refinement types: L0 decidable predicates + L1 abstract propagation  │
 │  ─ Capability check: body uses ⊆ declared uses, module ceiling check    │
 │  ─ Cost check: abstract interpretation of 4D cost vector                 │
@@ -294,7 +294,7 @@ The unified TypeCheck pass performs:
 | **Trait resolution** | Trait/Capability resolution, associated types, GAT instantiation |
 | **Const generics** | Evaluation of compile-time constant generic parameters |
 | **Exhaustiveness** | Verify match expressions cover all variants |
-| **Error sets** | Propagation and consistency of `! [ErrorType]` declarations |
+| **Error sets** | Propagation and consistency of `! ErrorType` declarations |
 | **Refinement types** | L0 decidable predicates + L1 abstract interpretation propagation |
 | **CapCheck** | Function body capability usage ⊆ declared `uses` set; module ceiling check |
 | **CostCheck** | Abstract interpretation of 4D cost vector: `compute(op) + alloc(cell) + io(call) + parallel(lane)`; verify ≤ declared bound |

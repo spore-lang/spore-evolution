@@ -85,7 +85,7 @@ There is no `module` keyword — the filesystem **is** the declaration. A file-l
 import billing.types
 import billing.tax
 
-pub fn generate_invoice(order: Order) -> Invoice ! [TaxError, ValidationError]
+pub fn generate_invoice(order: Order) -> Invoice ! TaxError | ValidationError
     cost ≤ 3000
     uses [PaymentGateway, AuditLog]
 {
@@ -114,18 +114,16 @@ import billing.invoice
 // Module import with rename
 import billing.invoice as inv
 
-// Selective import: bring specific items into scope
-import billing.invoice.{calculate, Invoice}
-
 // Item alias: binds a specific function or type to a local name
 alias gen = billing.invoice.generate_invoice
 alias Inv = billing.types.Invoice
 ```
 
+> **Note (D12):** Selective imports (`import billing.invoice.{calculate, Invoice}`) are not supported in v0.1. Use `import billing.invoice` and qualify names, or use `alias` for specific items.
+
 Key rules:
 
 - `import` operates on **modules** only. Dot (`.`) separates path segments.
-- Selective imports use dot (`.`) then braces (`{...}`) to bring specific items into scope.
 - `alias` operates on **items** only. You cannot alias a module (use `import ... as` instead).
 - No wildcard imports (`import billing.*` is not supported).
 - No implicit nested imports (`import billing` does not import `billing.invoice`).
@@ -140,10 +138,10 @@ Key rules:
 
 ```spore
 // Public: any importer can call this
-pub fn generate_invoice(order: Order) -> Invoice ! [TaxError] { ... }
+pub fn generate_invoice(order: Order) -> Invoice ! TaxError { ... }
 
 // Package-internal: accessible within this package only
-pub(pkg) fn validate(order: Order) -> ValidatedOrder ! [ValidationError] { ... }
+pub(pkg) fn validate(order: Order) -> ValidatedOrder ! ValidationError { ... }
 
 // Private (default): only this module can call this
 fn compute_totals(order: ValidatedOrder) -> Invoice { ... }
@@ -210,7 +208,7 @@ A Platform is the **only** code in a Spore application that can perform real IO.
 
 ```spore
 // Application code: pure function, emits effects
-fn read_config() -> Config ! [FileRead] {
+fn read_config() -> Config ! FileRead {
     let content = File.read("config.toml")  // emits FileRead effect
     parse_toml(content)
 }
@@ -289,7 +287,8 @@ Within a single module, functions may reference each other regardless of declara
 
 ```text
 import_decl    ::= 'import' module_path ('as' IDENT)?
-                  | 'import' module_path '.' '{' IDENT (',' IDENT)* '}'
+                   // NOTE (D12): selective imports ('import' module_path '.' '{' IDENT (',' IDENT)* '}')
+                   // are not supported in v0.1
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT
@@ -536,7 +535,7 @@ Application code is pure—it declares capability requirements but never perform
 
 ```spore
 // Application code: pure
-fn fetch_and_save(url: Url, dest: Path) -> Unit ! [NetRead, FileWrite] {
+fn fetch_and_save(url: Url, dest: Path) -> Unit ! NetRead | FileWrite {
     let data = Http.get(url)
     File.write(dest, data)
 }
@@ -556,7 +555,7 @@ A Platform declares three things:
 platform CliPlatform {
     version: "1.0.0"
     handles [FileRead, FileWrite, StdOut, StdErr, NetRead, NetWrite, Clock, Spawn, Exit]
-    entry: fn(args: List[Str]) -> I32 ! [Exit]
+    entry: fn(args: List[Str]) -> I32 ! Exit
 
     handler FileReadHandler {
         File.read(path: Path) -> Result[Bytes, IoError] {
@@ -697,7 +696,7 @@ Individual files can narrow the project ceiling to declare the maximum capabilit
 import billing.types
 import billing.tax
 
-pub fn generate_invoice(order: Order) -> Invoice ! [TaxError]
+pub fn generate_invoice(order: Order) -> Invoice ! TaxError
     uses [PaymentGateway, AuditLog]
 { ... }
 ```
@@ -727,7 +726,7 @@ Private functions are **also** bound by the module's capability ceiling (if decl
 // src/billing/invoice.spore
 #![uses(PaymentGateway, AuditLog)]
 
-pub fn generate_invoice(order: Order) -> Invoice ! [TaxError]
+pub fn generate_invoice(order: Order) -> Invoice ! TaxError
     uses [PaymentGateway, AuditLog]
 { ... }
 
@@ -737,7 +736,7 @@ fn log_audit(action: String, id: InvoiceId) -> Unit
 { ... }
 
 // Private function: ERROR — exceeds module ceiling
-fn send_email(to: Email, body: String) -> Unit ! [SmtpError]
+fn send_email(to: Email, body: String) -> Unit ! SmtpError
     uses [EmailService]    // not in module ceiling
 { ... }
 ```
@@ -1128,7 +1127,7 @@ GC algorithm: (1) scan all `.spore-lock` files in known project directories, (2)
 For v0.1, Spore uses **coarse-grained** capability names in the language-level type system:
 
 ```spore
-fn read_config() -> Config ! [IoError]
+fn read_config() -> Config ! IoError
     uses [FileRead]
 { ... }
 ```
@@ -1205,7 +1204,7 @@ Holes by module:
 
   billing.invoice (partial)
     ?invoice_logic at line 12
-      type: Invoice ! [TaxError]
+      type: Invoice ! TaxError
       capabilities: [PaymentGateway, AuditLog]
       budget remaining: 2400 ops
 
@@ -1244,14 +1243,14 @@ Snapshots use `sig` hashes only at the module and package level (impl changes do
 
 #### Interaction with the Error System
 
-Error types follow the same visibility rules as all other types. A function's error list (`! [TaxError]`) must reference only error types visible from the function's module:
+Error types follow the same visibility rules as all other types. A function's error list (`! TaxError`) must reference only error types visible from the function's module:
 
 ```spore
 // src/api/handler.spore
 import billing.invoice
 import billing.errors
 
-pub fn handle_create(req: Request) -> Response ! [errors.BillingError, ParseError]
+pub fn handle_create(req: Request) -> Response ! errors.BillingError | ParseError
     uses [PaymentGateway, AuditLog]
 {
     let order = parse_request(req)
@@ -1314,7 +1313,7 @@ Partial modules can be imported and their types used. Only function calls at run
 
 ```spore
 // src/billing/invoice.spore (has holes)
-pub fn generate_invoice(order: Order) -> Invoice ! [TaxError] {
+pub fn generate_invoice(order: Order) -> Invoice ! TaxError {
     ?invoice_logic
 }
 
@@ -1322,7 +1321,7 @@ pub fn generate_invoice(order: Order) -> Invoice ! [TaxError] {
 import billing.invoice
 
 // Compiles fine — handler is transitively partial
-pub fn handle(req: Request) -> Response ! [ApiError] {
+pub fn handle(req: Request) -> Response ! ApiError {
     let inv = invoice.generate_invoice(parse_order(req))
     Response.ok(inv)
 }
@@ -1369,7 +1368,7 @@ Spore and Roc share the same design philosophy: no built-in Platform; all Platfo
 platform WebPlatform {
     version: "1.0.0"
     handles [HttpServer, NetRead, NetWrite, Clock, Spawn, DbQuery]
-    entry: fn(req: Request) -> Response ! [HttpServer, DbQuery]
+    entry: fn(req: Request) -> Response ! HttpServer | DbQuery
 
     handler HttpServerHandler {
         Server.listen(port: U16, handler: fn(Request) -> Response) {
@@ -1385,7 +1384,7 @@ platform WebPlatform {
 platform LambdaPlatform {
     version: "1.0.0"
     handles [NetRead, NetWrite, S3Read, S3Write, DynamoRead, DynamoWrite]
-    entry: fn(event: JsonValue) -> JsonValue ! [S3Read, DynamoWrite]
+    entry: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
 
     handler S3Handler {
         S3.get(bucket: Str, key: Str) -> Result[Bytes, S3Error] {
@@ -1515,7 +1514,7 @@ spore init my-platform --type platform
 platform EmbeddedPlatform {
     version: "0.1.0"
     handles [GpioRead, GpioWrite, Timer, SerialRead, SerialWrite]
-    entry: fn() -> Never ! [GpioRead, GpioWrite, Timer]
+    entry: fn() -> Never ! GpioRead | GpioWrite | Timer
 
     config: {
         cpu_freq: U32,
@@ -2050,7 +2049,7 @@ capability     ::= UPPER_IDENT
 
 // Imports and aliases
 import_decl    ::= 'import' module_path ('as' IDENT)?
-                  | 'import' module_path '.' '{' IDENT (',' IDENT)* '}'
+                   // NOTE (D12): selective imports not supported in v0.1
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT

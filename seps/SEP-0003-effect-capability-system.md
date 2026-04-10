@@ -65,7 +65,7 @@ Modern programs interleave pure computation with diverse side effects — file I
 Every Spore function may carry a `uses` clause listing the atomic effects it requires:
 
 ```spore
-fn read_config(path: String) -> Config ! [IoError, ParseError]
+fn read_config(path: String) -> Config ! IoError | ParseError
 uses [FileRead]
 {
     let content = read_file(path)
@@ -158,7 +158,7 @@ Aliases are purely syntactic sugar. After expansion, only atomic effects remain.
 ```spore
 effect HttpClient = NetConnect | Clock
 
-fn query_api(url: Url) -> Data ! [NetworkError]
+fn query_api(url: Url) -> Data ! NetworkError
 uses [HttpClient]
 {
     let response = http.get(url)
@@ -196,7 +196,7 @@ uses [FileWrite]
 When you need side effects during iteration, use the structured concurrency pattern:
 
 ```spore
-fn fetch_all(urls: List[Url]) -> List[Response] ! [NetworkError]
+fn fetch_all(urls: List[Url]) -> List[Response] ! NetworkError
 uses [NetConnect, Spawn]
 {
     parallel_scope {
@@ -280,7 +280,7 @@ The module-level `uses` clause is **optional**. When omitted the compiler auto-i
 The `@allows` annotation constrains which functions an AI agent (or developer) may use to fill a Hole. It acts as a filter on `candidate_functions` in the `HoleReport`:
 
 ```spore
-fn process_input(raw: String) -> SafeInput ! [ValidationError] {
+fn process_input(raw: String) -> SafeInput ! ValidationError {
     @allows[validate, sanitize]
     ?clean_input
 }
@@ -294,8 +294,8 @@ The generated `HoleReport` includes the restriction:
   "expected_type": "SafeInput",
   "allows": ["validate", "sanitize"],
   "candidate_functions": [
-    "validate(raw: String) -> SafeInput ! [ValidationError]",
-    "sanitize(raw: String) -> SafeInput ! [ValidationError]"
+    "validate(raw: String) -> SafeInput ! ValidationError",
+    "sanitize(raw: String) -> SafeInput ! ValidationError"
   ]
 }
 ```
@@ -378,7 +378,7 @@ Expansion is **recursive**: if any $A_i$ is itself an alias, it is expanded unti
 #### 4.1 Complete function type
 
 ```text
-(T₁, T₂, …, Tₙ) -> R  uses S  ! [E₁, E₂, …]
+(T₁, T₂, …, Tₙ) -> R  uses S  ! E₁ | E₂ | …
 ```
 
 where:
@@ -441,7 +441,7 @@ A pure function (`uses {}`) trivially satisfies the deterministic condition beca
 
 ```spore
 /// @idempotent
-fn sync_user(user_id: UserId) -> SyncResult ! [NetworkError]
+fn sync_user(user_id: UserId) -> SyncResult ! NetworkError
 uses [NetConnect, FileRead]
 { ... }
 ```
@@ -600,7 +600,7 @@ When the compiler encounters a Hole (`?name`), the generated `HoleReport` includ
   "available_capabilities": ["NetConnect"],
   "cost_budget": 5000,
   "candidate_functions": [
-    "http.get(url: Url) -> Data ! [NetworkError] uses [NetConnect]"
+    "http.get(url: Url) -> Data ! NetworkError uses [NetConnect]"
   ]
 }
 ```
@@ -660,18 +660,18 @@ Effects are not merely string tags — each effect is a **typed construct** whos
 effect Console {
     fn println(msg: String) -> Unit
     fn eprintln(msg: String) -> Unit
-    fn read_line() -> String ! [IoError]
+    fn read_line() -> String ! IoError
 }
 
 effect FileRead {
-    fn read_file(path: String) -> Bytes ! [IoError]
-    fn list_dir(path: String) -> List[String] ! [IoError]
+    fn read_file(path: String) -> Bytes ! IoError
+    fn list_dir(path: String) -> List[String] ! IoError
 }
 
 effect FileWrite {
-    fn write_file(path: String, data: Bytes) -> Unit ! [IoError]
-    fn create_dir(path: String) -> Unit ! [IoError]
-    fn delete(path: String) -> Unit ! [IoError]
+    fn write_file(path: String, data: Bytes) -> Unit ! IoError
+    fn create_dir(path: String) -> Unit ! IoError
+    fn delete(path: String) -> Unit ! IoError
 }
 
 effect Env {
@@ -703,10 +703,10 @@ handler MockConsole for Console {
 }
 
 handler RealFileRead for FileRead {
-    fn read_file(path: String) -> Bytes ! [IoError] {
+    fn read_file(path: String) -> Bytes ! IoError {
         platform.fs.read(path)
     }
-    fn list_dir(path: String) -> List[String] ! [IoError] {
+    fn list_dir(path: String) -> List[String] ! IoError {
         platform.fs.list(path)
     }
 }

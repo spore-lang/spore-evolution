@@ -78,7 +78,7 @@ Without a formal protocol, every Agent tool would invent its own ad-hoc interact
 A hole is written with a `?` prefix followed by an identifier. Holes can appear anywhere an expression is expected:
 
 ```spore
-fn calculate_tax(income: Money, region: Region) -> Money ! [InvalidRegion]
+fn calculate_tax(income: Money, region: Region) -> Money ! InvalidRegion
     uses [TaxTable]
     cost ≤ 500
 {
@@ -101,7 +101,7 @@ If the annotation conflicts with the inferred type, the compiler emits a `hole-t
 A function may contain any number of independently named holes:
 
 ```spore
-fn reconcile(ledger: Ledger, txns: Vec<Tx>) -> Ledger ! [Mismatch]
+fn reconcile(ledger: Ledger, txns: Vec[Tx]) -> Ledger ! Mismatch
     cost ≤ 5000
 {
     let grouped     = group_by_account(txns)
@@ -114,7 +114,7 @@ fn reconcile(ledger: Ledger, txns: Vec<Tx>) -> Ledger ! [Mismatch]
 Holes can also appear nested inside expressions, function arguments, and match arms:
 
 ```spore
-fn render(page: Page) -> Html ! [TemplateError]
+fn render(page: Page) -> Html ! TemplateError
     uses [Templates]
     cost ≤ 800
 {
@@ -153,9 +153,9 @@ A complete Human → Agent → Compiler interaction:
 ```spore
 fn generate_invoice(
     customer: Customer,
-    items: Vec<LineItem>,
+    items: Vec[LineItem],
     tax_region: TaxRegion,
-) -> Invoice ! [TaxCalculationError, InvalidLineItem]
+) -> Invoice ! TaxCalculationError | InvalidLineItem
     uses [TaxTable]
     cost ≤ 5000
 {
@@ -173,7 +173,7 @@ fn generate_invoice(
 $ sporec --query-hole ?validate_items --json
 ```
 
-The compiler returns a HoleReport (see §4 for the full structure) containing: expected type `Vec<LineItem>`, available bindings, candidate function `validate_line_items` with an exact type match, cost 300 within budget 5000.
+The compiler returns a HoleReport (see §4 for the full structure) containing: expected type `Vec[LineItem]`, available bindings, candidate function `validate_line_items` with an exact type match, cost 300 within budget 5000.
 
 **Step 3 — Agent proposes a fill:**
 
@@ -195,7 +195,7 @@ $ sporec check src/billing/invoice.spore
 **Step 5 — Agent fills the next hole, compiler confirms completion:**
 
 ```text
-[ok] generate_invoice : (...) -> Invoice ! [TaxCalculationError, InvalidLineItem]
+[ok] generate_invoice : (...) -> Invoice ! TaxCalculationError | InvalidLineItem
   cost: 520 (within budget of 5000)
   all holes filled ✓
 ```
@@ -231,7 +231,7 @@ pub struct HoleInfo {
     pub expected_type: Ty,         // inferred/expected type
     pub function: String,          // enclosing function
     pub bindings: BTreeMap<String, Ty>,  // local bindings at hole site
-    pub suggestions: Vec<String>,  // candidate functions
+    pub suggestions: Vec[String],  // candidate functions
 }
 ```
 
@@ -281,7 +281,7 @@ When context provides **no constraints**, the hole is *unconstrained* — report
 When the scrutinee of a `match` is a hole, the compiler infers the hole's type from the **pattern types** in the match arms:
 
 ```spore
-fn classify(data: RawData) -> Category ! [ParseError]
+fn classify(data: RawData) -> Category ! ParseError
 {
     match ?parsed_data {         // hole as scrutinee
         Valid(v)   => categorize(v),
@@ -290,7 +290,7 @@ fn classify(data: RawData) -> Category ! [ParseError]
 }
 ```
 
-The compiler infers: `?parsed_data` must have a type with at least variants `Valid(_)` and `Invalid(_)`. If a type in scope matches (e.g., `Result<ValidData, ErrorInfo>`), it is reported as the inferred type. All branches are reported as **blocked** (since the scrutinee is unknown, no branch can execute during simulation).
+The compiler infers: `?parsed_data` must have a type with at least variants `Valid(_)` and `Invalid(_)`. If a type in scope matches (e.g., `Result[ValidData, ErrorInfo]`), it is reported as the inferred type. All branches are reported as **blocked** (since the scrutinee is unknown, no branch can execute during simulation).
 
 #### Extension A: Candidate Scoring Vector
 
@@ -331,7 +331,7 @@ overall = 0.40 × type_match + 0.20 × cost_fit + 0.25 × capability_fit + 0.15 
 
 Weights are hard-coded in the compiler. Candidates are sorted by `overall` descending, with `type_match` as tiebreaker, then `cost_fit`, then lexicographic name for stability.
 
-Each candidate also includes an `adjustments` array of human-readable notes (e.g., `"needs type conversion: Option<Card> → Card"`, `"cost near budget limit"`).
+Each candidate also includes an `adjustments` array of human-readable notes (e.g., `"needs type conversion: Option[Card] → Card"`, `"cost near budget limit"`).
 
 #### Extension B: Binding Dependency Graph
 
@@ -395,7 +395,7 @@ Suggestion generation rules:
 
 #### Error System Integration (Three-Field Model)
 
-The enclosing function's declared error list (`! [Err1, Err2, Err3]`) is partitioned into three categories at each hole site:
+The enclosing function's declared error list (`! Err1 | Err2 | Err3`) is partitioned into three categories at each hole site:
 
 | Field | Meaning |
 |---|---|
@@ -406,7 +406,7 @@ The enclosing function's declared error list (`! [Err1, Err2, Err3]`) is partiti
 Example:
 
 ```spore
-fn fetch_and_parse(url: Url) -> Document ! [NetworkError, ParseError, Timeout]
+fn fetch_and_parse(url: Url) -> Document ! NetworkError | ParseError | Timeout
     uses [Http]
     cost ≤ 3000
 {
@@ -543,7 +543,7 @@ When a circular dependency is detected, the compiler suggests three strategies:
 #### Layered Topological Sort
 
 ```pseudocode
-function compute_fill_order(G: Graph) -> Result<List<Set<Hole>>, CycleError>:
+function compute_fill_order(G: Graph) -> Result[List[Set[Hole]], CycleError]:
     if has_cycle(G): return Err(CycleError(find_cycle(G)))
 
     layers = []
@@ -634,7 +634,7 @@ When a hole is filled, the graph updates incrementally in O(|neighbors|):
 #### Agent Allocation Strategy
 
 ```pseudocode
-function assign_agents(ready: Set<Hole>, agents: List<Agent>) -> Assignment:
+function assign_agents(ready: Set[Hole], agents: List[Agent]) -> Assignment:
     ranked = rank_within_layer(ready, G)  // sort by transitive dependents
     assignment = {}
     ranked.iter().enumerate().for_each(|(i, hole)|
@@ -747,14 +747,14 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
     "errors": [
       {
         "code": "E0301",
-        "message": "type mismatch: expected Vec<ValidItem>, found Vec<RawItem>",
+        "message": "type mismatch: expected Vec[ValidItem], found Vec[RawItem]",
         "location": { "file": "src/orders.spore", "line": 18, "column": 5 },
         "suggestion": "consider using validate_items(raw_input).map(|i| i.into())"
       }
     ],
     "root_cause": "type_mismatch",
     "fix_hints": [
-      "candidate validate_items returns Vec<RawItem>, not Vec<ValidItem>",
+      "candidate validate_items returns Vec[RawItem], not Vec[ValidItem]",
       "try: validate_items(raw_input).map(|i| i.into())"
     ]
   }
@@ -777,7 +777,7 @@ The Agent reads diagnostics, understands the failure, and autonomously decides t
 A hole in a recursive function is valid — `?name` is just an expression of some type. It does not call itself. The compiler detects recursive calls to partial functions and terminates simulation at depth 1:
 
 ```spore
-fn factorial(n: Int) -> Int ! []
+fn factorial(n: Int) -> Int
     cost ≤ 1000
 {
     if n <= 1 { 1 }
@@ -788,7 +788,7 @@ fn factorial(n: Int) -> Int ! []
 Here `?factorial_step` has type `Int`. The function is partial. If a recursive call to `factorial` occurs:
 
 ```spore
-fn bad(n: Int) -> Int ! []
+fn bad(n: Int) -> Int
 {
     ?self_ref + bad(n - 1)   // bad is partial; recursive call also partial
 }
@@ -797,7 +797,7 @@ fn bad(n: Int) -> Int ! []
 The compiler reports:
 
 ```text
-[partial] bad: (Int) -> Int ! []
+[partial] bad: (Int) -> Int
   holes: ?self_ref
   note: recursive call to partial function bad — simulation terminates at depth 1
 ```
@@ -809,7 +809,7 @@ Simulation does not recurse into partial functions; it stops and emits a HoleRep
 Type holes are syntactically distinct from value holes. They use `?T_name` (uppercase convention) in **type positions** and represent unknown types:
 
 ```spore
-fn convert(input: ?InputType) -> ?OutputType ! []
+fn convert(input: ?InputType) -> ?OutputType
 {
     ?conversion_logic
 }
@@ -844,7 +844,7 @@ Value holes:
 When a hole has contradictory type constraints from its context, the compiler reports the conflict without failing:
 
 ```spore
-fn conflicted(flag: Bool) -> Int ! []
+fn conflicted(flag: Bool) -> Int
 {
     let x: String = ?ambiguous   // constraint 1: String (from let binding)
     let y: Int = x               // constraint 2: Int (from assignment)
@@ -870,9 +870,9 @@ The hole still appears in `--holes` output and still receives a HoleReport. The 
 Closures can contain holes. The hole's context captures both the closure's own parameters and any outer bindings captured by the closure:
 
 ```spore
-fn make_processor(config: Config) -> Fn(Data) -> Result ! [ProcessError]
+fn make_processor(config: Config) -> Fn(Data) -> Result ! ProcessError
 {
-    |data: Data| -> Result ! [ProcessError] {
+    |data: Data| -> Result ! ProcessError {
         ?process_with_config
     }
 }
@@ -898,7 +898,7 @@ A hole in a function inferred as `pure` (i.e., `uses []`) is itself pure by defi
 **Formal rule:** If function `f` has `uses []` (and is therefore inferred as `pure`), any expression that replaces a hole `?h` in `f`'s body must also be pure — it may not call functions requiring IO or State capabilities.
 
 ```spore
-fn pure_fn(x: Int) -> Int ! []
+fn pure_fn(x: Int) -> Int
 {
     ?must_be_pure   // ok: hole is inert
 }
@@ -1122,7 +1122,7 @@ All hole-related commands support `--json` for machine consumption.
       "name": "charge_payment",
       "location": { "file": "src/orders.spore", "line": 18, "column": 5 },
       "enclosing_function": "process_order",
-      "expected_type": "Response ! [PaymentFailed]",
+      "expected_type": "Response ! PaymentFailed",
       "capabilities": ["Inventory", "PaymentGateway"],
       "dependencies": []
     }
@@ -1196,7 +1196,7 @@ The hole system integrates with Language Server Protocol:
 ### Cost diagnostics for partial functions
 
 ```text
-[partial] pipeline: (Vec<Int>) -> Vec<Int> ! []
+[partial] pipeline: (Vec[Int]) -> Vec[Int]
   known cost: 200 (before hole) + ≤150 (after hole) = ≤350
   budget for ?middle_step: ≤650 (1000 - 350)
   note: ?middle_step filling must have cost ≤ 650
