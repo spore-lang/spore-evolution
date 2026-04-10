@@ -79,7 +79,7 @@ Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` spl
 
 ```spore
 // No async annotation needed—concurrency declared via the Spawn effect
-fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
+fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
 cost ≤ urls.len * per_fetch
 uses [Spawn, NetConnect]
 {
@@ -125,7 +125,7 @@ The block is an expression; its value is the last expression in the body. When t
 Because `parallel_scope` is an expression, it can return structured results assembled from spawned tasks:
 
 ```spore
-fn load_dashboard(user_id: UserId) -> Dashboard ! [DbError, NetError]
+fn load_dashboard(user_id: UserId) -> Dashboard ! DbError | NetError
 uses [Spawn, NetConnect, DbRead]
 {
     // parallel_scope returns the Dashboard struct directly
@@ -176,7 +176,7 @@ let task = spawn uses [NetConnect] { fetch(url) }
 
 | Method/Property | Type | Description |
 |-----------------|------|-------------|
-| `task.await` | `T ! [child errors]` | Block until the task completes and return its result |
+| `task.await` | `T ! child errors` | Block until the task completes and return its result |
 | `task.cancel()` | `Unit` | Request cooperative cancellation of the task |
 | `task.is_done` | `Bool` | `true` if the task has completed (successfully or with error) |
 | `task.is_cancelled` | `Bool` | `true` if the task was cancelled |
@@ -184,7 +184,7 @@ let task = spawn uses [NetConnect] { fetch(url) }
 Usage examples:
 
 ```spore
-fn selective_fetch(urls: List[Url]) -> Response ! [NetError]
+fn selective_fetch(urls: List[Url]) -> Response ! NetError
 uses [Spawn, NetConnect]
 {
     parallel_scope {
@@ -293,7 +293,7 @@ fn event_loop(
     commands: Receiver[Command],
     events: Receiver[Event],
     shutdown: Receiver[Unit],
-) -> Unit ! [ChannelClosed]
+) -> Unit ! ChannelClosed
 uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
 {
     select {
@@ -323,7 +323,7 @@ Server entrypoints that accept inbound connections declare `NetListen`; the inne
 ```spore
 effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
-fn handle_request(req: Request) -> Response ! [DbError, Timeout]
+fn handle_request(req: Request) -> Response ! DbError | Timeout
 cost ≤ 5000
 uses [HttpHandler]
 {
@@ -353,7 +353,7 @@ fn etl_pipeline(
     source: DataSource,
     sink: DataSink,
     batch_size: Int,
-) -> EtlReport ! [ExtractError, TransformError, LoadError]
+) -> EtlReport ! ExtractError | TransformError | LoadError
 cost ≤ batch_size * 200
 uses [Spawn, NetConnect, DbRead, DbWrite]
 {
@@ -467,7 +467,7 @@ Two modes are supported:
 
 | Mode | On child failure | Return type | Use case |
 |------|-----------------|-------------|----------|
-| `fail_fast` (default) | Cancel siblings, propagate error | `T ! [E]` | All child results are required |
+| `fail_fast` (default) | Cancel siblings, propagate error | `T ! E` | All child results are required |
 | `collect` | Do not cancel siblings; collect results | `Result[T, E]` per task | Partial results are meaningful |
 
 ```spore
@@ -531,12 +531,12 @@ Users may define their own concurrency-related effects:
 
 ```spore
 effect RateLimit {
-    fn acquire_permit() -> Unit ! [RateLimitExceeded]
+    fn acquire_permit() -> Unit ! RateLimitExceeded
     fn release_permit() -> Unit
 }
 
 handler token_bucket_handler(rate: Int, per: Duration) for RateLimit {
-    fn acquire_permit() -> Unit ! [RateLimitExceeded] {
+    fn acquire_permit() -> Unit ! RateLimitExceeded {
         if tokens > 0 { tokens -= 1; resume(()) }
         else { raise(RateLimitExceeded) }
     }
@@ -574,24 +574,24 @@ let (tx, rx) = Channel.new[Message](buffer: 0)
 
 ```spore
 effect ChanSend[T] {
-    fn send(value: T) -> Unit ! [ChannelClosed]
+    fn send(value: T) -> Unit ! ChannelClosed
 }
 
 effect ChanRecv[T] {
-    fn recv() -> T ! [ChannelClosed]
+    fn recv() -> T ! ChannelClosed
 }
 ```
 
 Functions using channels must declare the corresponding capabilities:
 
 ```spore
-fn producer(tx: Sender[Int]) -> Unit ! [ChannelClosed]
+fn producer(tx: Sender[Int]) -> Unit ! ChannelClosed
 uses [ChanSend[Int]]
 {
     (0..100).each(|i| tx.send(i))
 }
 
-fn consumer(rx: Receiver[Int]) -> List[Int] ! [ChannelClosed]
+fn consumer(rx: Receiver[Int]) -> List[Int] ! ChannelClosed
 uses [ChanRecv[Int]]
 {
     rx.collect()
@@ -713,7 +713,7 @@ uses [Spawn, FileRead, NetConnect]
 When the number of spawned tasks depends on runtime values, the compiler uses **symbolic cost expressions**:
 
 ```spore
-fn fetch_all(urls: List[Url]) -> List[Response] ! [NetError]
+fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
 cost ≤ urls.len * per_fetch
 uses [Spawn, NetConnect]
 {
@@ -737,7 +737,7 @@ $ sporec --query-cost fetch_all
 To make the cost statically verifiable, use a **refinement type** to limit the input size:
 
 ```spore
-fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! [NetError]
+fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! NetError
 cost ≤ 100 * per_fetch + 500
 uses [Spawn, NetConnect]
 {
@@ -900,7 +900,7 @@ The compiler may emit a warning when it detects a long iterative computation wit
 `defer` blocks execute even during cancellation, guaranteeing resource cleanup:
 
 ```spore
-fn with_temp_file() -> Data ! [IoError, Cancelled]
+fn with_temp_file() -> Data ! IoError | Cancelled
 uses [Spawn, FileRead, FileWrite]
 {
     let file = create_temp_file()
@@ -916,7 +916,7 @@ uses [Spawn, FileRead, FileWrite]
 `with_timeout` is syntactic sugar over cancellation:
 
 ```spore
-fn fetch_with_timeout(url: Url, limit: Duration) -> Response ! [NetError, Timeout]
+fn fetch_with_timeout(url: Url, limit: Duration) -> Response ! NetError | Timeout
 uses [Spawn, NetConnect, Clock]
 {
     with_timeout(limit) {
@@ -1261,8 +1261,8 @@ task.is_cancelled                // Bool: was the task cancelled?
 let (tx, rx) = Channel.new[T](buffer: N)
 
 // Send / receive
-tx.send(value)          // ! [ChannelClosed]
-let value = rx.recv()   // ! [ChannelClosed]
+tx.send(value)          // ! ChannelClosed
+let value = rx.recv()   // ! ChannelClosed
 
 // Close and clone
 tx.close()
@@ -1302,7 +1302,7 @@ Concrete syntax for `effect`, `handler`, and `handle ... with` is defined in SEP
 ### A.8 Function signature with concurrency
 
 ```spore
-fn name(params) -> ReturnType ! [Errors]
+fn name(params) -> ReturnType ! Errors
 where T: Constraints
 cost ≤ <N>
 uses [Spawn, Channel, ...]
@@ -1316,7 +1316,7 @@ uses [Spawn, Channel, ...]
 ```spore
 effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
-fn handle_request(req: Request) -> Response ! [DbError, Timeout]
+fn handle_request(req: Request) -> Response ! DbError | Timeout
 cost ≤ 5000
 uses [HttpHandler]
 {
@@ -1344,7 +1344,7 @@ fn etl_pipeline(
     source: DataSource,
     sink: DataSink,
     batch_size: Int,
-) -> EtlReport ! [ExtractError, TransformError, LoadError]
+) -> EtlReport ! ExtractError | TransformError | LoadError
 cost ≤ batch_size * 200
 uses [Spawn, NetConnect, DbRead, DbWrite]
 {

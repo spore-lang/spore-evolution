@@ -107,9 +107,9 @@ All primitives are nominal — `Int` ≠ `Float` even when their bit patterns co
 **Numeric sub-types via refinement.** Rather than proliferating primitive numeric types (i8, u16, f32, …), Spore uses refinement types on `Int` and `Float`:
 
 ```spore
-type U8  = Int if 0 <= self <= 255
-type I32 = Int if -2147483648 <= self <= 2147483647
-type F32 = Float if self.precision == 32
+type U8  = Int when 0 <= self <= 255
+type I32 = Int when -2147483648 <= self <= 2147483647
+type F32 = Float when self.precision == 32
 ```
 
 Platform effects determine the runtime representation; the type system reasons about logical constraints, and the codegen layer maps to machine types.
@@ -123,7 +123,7 @@ fn add(a: Int, b: Int) -> Int {
     a + b
 }
 
-fn fetch_page(url: String) -> String ! [NetworkError]
+fn fetch_page(url: String) -> String ! NetworkError
 uses [NetConnect]
 cost <= 5000
 {
@@ -142,6 +142,8 @@ fn process(x: Int) -> Int {
 ```
 
 ### 3.3 Struct and enum types
+
+> **Note (N7):** Product types use the `struct` keyword: `struct Point { x: Float, y: Float }`. The `type` keyword is reserved for sum types/ADTs. The examples below use `type` with record syntax for historical reasons; canonical Spore uses `struct` for product types.
 
 Structs are nominal product types:
 
@@ -287,9 +289,9 @@ format_temp(temp: 98.6) // ERROR: expected Celsius, got Float
 Newtypes may have refinements:
 
 ```spore
-type Port = Int if 1 <= self <= 65535
-type NonEmptyString = String if self.len() > 0
-type Latitude = Float if -90.0 <= self <= 90.0
+type Port = Int when 1 <= self <= 65535
+type NonEmptyString = String when self.len() > 0
+type Latitude = Float when -90.0 <= self <= 90.0
 ```
 
 **Type aliases** are transparent — interchangeable with their definition:
@@ -297,7 +299,7 @@ type Latitude = Float if -90.0 <= self <= 90.0
 ```spore
 alias StringList = List[String]
 alias Callback[T] = Fn(event: T) -> Unit
-alias Result[T] = T ! [GenericError]
+alias Result[T] = T ! GenericError
 
 type UserId = String       // newtype: UserId ≠ String (nominal)
 alias UserName = String    // alias: UserName == String (transparent)
@@ -323,7 +325,7 @@ trait Display {
 }
 
 trait Serialize {
-    fn serialize(self) -> Bytes ! [SerializeError]
+    fn serialize(self) -> Bytes ! SerializeError
     cost serialize <= 100
 }
 ```
@@ -381,7 +383,7 @@ cost <= 500
     // implementation
 }
 
-fn serialize_all[T](items: List[T]) -> List[Bytes] ! [SerializeError]
+fn serialize_all[T](items: List[T]) -> List[Bytes] ! SerializeError
 where T: Serialize + Display
 {
     items |> map(|item| item.serialize())
@@ -412,12 +414,12 @@ Concrete surface syntax for `trait`, `effect`, `handler`, and `handle ... with` 
 
 ```spore
 trait Serialize {
-    fn serialize(self) -> Bytes ! [SerializeError]
+    fn serialize(self) -> Bytes ! SerializeError
 }
 
 effect HttpClient = NetConnect | Clock
 
-fn fetch_page(url: Url) -> Response ! [NetworkError]
+fn fetch_page(url: Url) -> Response ! NetworkError
 uses [HttpClient]
 {
     ...
@@ -759,7 +761,7 @@ fn get_name(person: Person) -> String {
 Pattern matching integrates with Spore's row-typed error sets for exhaustive error handling:
 
 ```spore
-fn handle_result(result: Invoice ! [TaxError, ValidationError]) -> String {
+fn handle_result(result: Invoice ! TaxError | ValidationError) -> String {
     match result {
         Ok(invoice) => "Invoice #" ++ show(invoice.id),
         Err(TaxError { region, reason }) => "Tax error in " ++ show(region) ++ ": " ++ reason,
@@ -773,7 +775,7 @@ fn handle_result(result: Invoice ! [TaxError, ValidationError]) -> String {
 `@allows` is a hole-level constraint that limits which functions an Agent may use to fill a specific hole. It provides fine-grained control over Agent behavior without affecting the type system's soundness.
 
 ```spore
-fn process_payment(amount: Money, card: Card) -> Receipt ! [PaymentFailed]
+fn process_payment(amount: Money, card: Card) -> Receipt ! PaymentFailed
 uses [PaymentGateway, AuditLog]
 cost <= 2000
 {
@@ -793,7 +795,7 @@ cost <= 2000
 **Use case — architectural intent**:
 
 ```spore
-fn build_dashboard(org: Org) -> Dashboard ! [DataError]
+fn build_dashboard(org: Org) -> Dashboard ! DataError
 uses [Database, Cache, Analytics]
 cost <= 20000
 {
@@ -854,14 +856,14 @@ fn safe_unwrap[T](opt: Option[T]) -> T {
 
 ### 3.14 Row-type error sets
 
-Spore's `! [Err1, Err2]` is a **closed, row-typed error union**. Error types are themselves enum variants (ADTs), and the `!` syntax computes unions automatically across call chains:
+Spore's `! Err1 | Err2` is a **closed, row-typed error union**. Error types are themselves enum variants (ADTs), and the `!` syntax computes unions automatically across call chains:
 
 ```spore
-fn parse(input: String) -> Ast ! [SyntaxError, EncodingError]
-fn validate(ast: Ast) -> ValidAst ! [TypeError, RangeError]
+fn parse(input: String) -> Ast ! SyntaxError | EncodingError
+fn validate(ast: Ast) -> ValidAst ! TypeError | RangeError
 
 // Error sets union automatically via `?` propagation:
-fn compile(input: String) -> ValidAst ! [SyntaxError, EncodingError, TypeError, RangeError] {
+fn compile(input: String) -> ValidAst ! SyntaxError | EncodingError | TypeError | RangeError {
     let ast = parse(input)?
     validate(ast)?
 }
@@ -878,9 +880,9 @@ type SyntaxError = {
 }
 ```
 
-**Error set subtyping**: A function with error set `! [A]` can be called where `! [A, B]` is expected — the caller's error set is a superset.
+**Error set subtyping**: A function with error set `! A` can be called where `! A | B` is expected — the caller's error set is a superset.
 
-**`?` operator**: Propagates errors, automatically widening the error set. If `f()` returns `T ! [E1]` and `g()` returns `T ! [E2]`, calling both with `?` in the same function requires the enclosing function to declare `! [E1, E2]` (or a superset).
+**`?` operator**: Propagates errors, automatically widening the error set. If `f()` returns `T ! E1` and `g()` returns `T ! E2`, calling both with `?` in the same function requires the enclosing function to declare `! E1 | E2` (or a superset).
 
 ### 3.15 Recursive types
 
@@ -935,7 +937,7 @@ type Tree[T] = {
 |---|---|---|
 | Function parameter types | **Yes** | Gravity center — the signature IS the API |
 | Function return type | **Yes** | Agent reads signatures for synthesis; human reads for understanding |
-| Error sets (`! [...]`) | **Yes** | Error contract — must be visible |
+| Error sets (`! ...`) | **Yes** | Error contract — must be visible |
 | Effect sets (`uses [...]`) | **Yes** | Security boundary — must be visible |
 | Cost bounds (`cost <=`) | **Yes** | Performance contract — must be visible |
 | Struct/type field types | **Yes** | Data definition — must be explicit |
@@ -1505,9 +1507,9 @@ Refinement types are not yet implemented but are a planned extension organized i
 L0 refinements are predicates the compiler can fully evaluate at compile time:
 
 ```spore
-type Port = Int if 1 <= self <= 65535
-type Percentage = Float if 0.0 <= self <= 100.0
-type NonEmptyString = String if self.len() > 0
+type Port = Int when 1 <= self <= 65535
+type Percentage = Float when 0.0 <= self <= 100.0
+type NonEmptyString = String when self.len() > 0
 ```
 
 The decidable predicate language includes:
@@ -1524,7 +1526,7 @@ The decidable predicate language includes:
 Γ ⊢ e ⇒ base_type
 eval(predicate[self ↦ e]) = true
 ────────────────────────────────
-Γ ⊢ e ⇐ base_type if predicate
+Γ ⊢ e ⇐ base_type when predicate
 ```
 
 When the compiler cannot statically evaluate the predicate (e.g., value comes from runtime input), it requires an explicit runtime check via control flow.
@@ -1534,7 +1536,7 @@ When the compiler cannot statically evaluate the predicate (e.g., value comes fr
 L1 uses flow-sensitive abstract interpretation to propagate refinement information:
 
 ```spore
-fn process_port(raw: Int) -> Port ! [InvalidPort] {
+fn process_port(raw: Int) -> Port ! InvalidPort {
     if raw < 1 || raw > 65535 {
         raise InvalidPort { value: raw }
     }
@@ -1901,7 +1903,7 @@ Spore's type system is most directly influenced by Rust:
 ### Liquid Haskell
 
 - Refinement types attached to base types.
-- Spore adopts the refinement syntax (`type Port = Int if ...`) but replaces the SMT backend with decidable predicates (L0) and abstract interpretation (L1).
+- Spore adopts the refinement syntax (`type Port = Int when ...`) but replaces the SMT backend with decidable predicates (L0) and abstract interpretation (L1).
 
 ### TypeScript
 

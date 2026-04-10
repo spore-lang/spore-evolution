@@ -114,7 +114,7 @@ fn tree_sum(tree: Tree<Int>) -> Int {
 When the compiler cannot automatically detect structural recursion but you know the cost is bounded, declare it:
 
 ```spore
-fn merge_sort<T>(list: List<T>) -> List<T>
+fn merge_sort[T](list: List[T]) -> List[T]
     where T: Ord
     decreases len(list)
     cost ≤ len(list) * log(len(list)) * 5 + len(list)
@@ -150,7 +150,7 @@ fn collatz_steps(n: Int) -> Int {
 `@unbounded` functions cannot be called directly from `cost ≤ K` functions. To bridge the boundary, use a runtime cost limiter:
 
 ```spore
-fn safe_collatz(n: Int) -> Int ! [CostExceeded]
+fn safe_collatz(n: Int) -> Int ! CostExceeded
     cost ≤ 10000
 {
     with_cost_limit(10000) {
@@ -759,7 +759,7 @@ These fallback steps only convert FAIL → PASS, never the reverse.
 Four-dimensional cost declarations are verified **independently per dimension**:
 
 ```spore
-fn sort<T>(items: List<T, max: n>) -> List<T, max: n>
+fn sort[T](items: List[T, max: n]) -> List[T, max: n]
     where T: Ord
     cost ≤ {compute: n * log(n) * 3, alloc: n, io: 0, parallel: 1}
 ```
@@ -773,7 +773,7 @@ When using scalar `cost ≤ K`, the compiler first computes symbolic cost per di
 Partially-defined functions participate in cost analysis:
 
 ```spore
-fn process(data: Data) -> Result ! [ProcessError]
+fn process(data: Data) -> Result ! ProcessError
     cost ≤ 1000
 {
     parsed = parser.parse(data)     // cost: 600
@@ -826,7 +826,7 @@ Source Code
 Bounded types provide compile-time size information for cost verification:
 
 ```spore
-fn process_batch(items: List[Order, max: 500]) -> BatchResult ! [TooLarge]
+fn process_batch(items: List[Order, max: 500]) -> BatchResult ! TooLarge
     cost ≤ 25000
     uses [Compute]
 {
@@ -838,7 +838,7 @@ fn process_batch(items: List[Order, max: 500]) -> BatchResult ! [TooLarge]
 
 1. **Compile-time**: the compiler uses 500 as the upper bound for `len(items)` in cost verification. It substitutes `n = 500` into the symbolic cost expression to verify `cost ≤ 25000`.
 2. **Runtime**: if a list exceeding 500 elements is passed, the call produces a `TooLarge` error at the call site. The function body itself never sees more than 500 elements.
-3. **Error propagation**: the `TooLarge` error must appear in the function's error set (`! [TooLarge]`) or in the caller's error handling.
+3. **Error propagation**: the `TooLarge` error must appear in the function's error set (`! TooLarge`) or in the caller's error handling.
 
 When no `max` constraint is present, the cost remains a symbolic expression in terms of `len(items)`.
 
@@ -853,7 +853,7 @@ extern fn c_sort[T](data: List[T]) -> List[T]
 ```
 
 ```spore
-extern fn openssl_encrypt(data: Bytes, key: Key) -> Bytes ! [CryptoError]
+extern fn openssl_encrypt(data: Bytes, key: Key) -> Bytes ! CryptoError
     uses [Compute]
     cost ≤ len(data) * 3 + 500
 ```
@@ -930,7 +930,7 @@ When an AI agent fills a Hole (see SEP-0003), it receives not just the type sign
 ```json
 {
   "hole": "combine_results",
-  "expected_type": "Result<T>",
+  "expected_type": "Result[T]",
   "cost_budget_remaining": 34,
   "recursion_context": {
     "pattern": "structural_binary_tree",
@@ -1159,7 +1159,7 @@ Spore's cost inference uses abstract interpretation — executing the program on
 
 ### Sized types: Hughes, Pareto, Sabry
 
-Sized types annotate data types with size information (e.g., `List<T, max: n>`) to enable termination checking and complexity analysis. Spore's bounded types are directly inspired by this line of work.
+Sized types annotate data types with size information (e.g., `List[T, max: n]`) to enable termination checking and complexity analysis. Spore's bounded types are directly inspired by this line of work.
 
 ---
 
@@ -1188,7 +1188,7 @@ Cost analysis is introduced as a new compiler capability. No existing Spore code
 
 ### Interaction with existing SEPs
 
-- **SEP-0002 (Type System):** CostExpr types integrate with the type checker. Bounded types (`List<T, max: n>`) provide size information for cost analysis.
+- **SEP-0002 (Type System):** CostExpr types integrate with the type checker. Bounded types (`List[T, max: n]`) provide size information for cost analysis.
 - **SEP-0003 (Hole System):** Cost budgets are propagated to HoleReports, enriching the constraint environment for hole-filling.
 
 ---
