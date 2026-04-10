@@ -62,6 +62,10 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## E
 
+**Entry** (SEP-0008): A manifest-selected executable target within a project. An entry resolves to an entry module.
+
+**Entry module** (SEP-0008): The source file and derived module selected by an entry, such as `src/main.sp` → `main`.
+
 **`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
 
 **Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the capability system.
@@ -122,7 +126,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## P
 
-**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded), granting capabilities and defining the program entry point.
+**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded), granting capabilities and defining the startup contract that the selected entry module must satisfy.
 
 **Prelude** (SEP-0009): The set of types and functions available in every Spore module without explicit import.
 
@@ -149,6 +153,10 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 **Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
 
 **Structured concurrency** (SEP-0007): Concurrency model where all spawned tasks are scoped to their parent block, ensuring no task outlives its creator.
+
+**Startup contract** (SEP-0008): The Platform-defined requirement on the startup function's parameters, return type, and effect boundary.
+
+**Startup function** (SEP-0008): The callable inside the selected entry module that satisfies the Platform's startup contract. Today this is usually `main`.
 
 ## T
 

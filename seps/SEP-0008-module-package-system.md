@@ -167,40 +167,20 @@ my-billing-lib/
         └── invoice_test.spore
 ```
 
-Four package types exist:
+Three package types exist:
 
 | Type | Has Platform? | Can do IO? | Use Case |
 |---|---|---|---|
 | `package` | No | No (declares capability requirements) | Libraries, reusable components |
 | `application` | Yes | Yes (via Platform) | Executables, services |
 | `platform` | Is the Platform | Yes (raw syscalls) | Runtime providers |
-| `script` | Implicit | Yes (via `--platform` flag) | Single-file programs, prototypes |
 
 ### Script Mode
 
-Spore supports a lightweight **script mode** for single-file programs that require no `spore.toml` manifest:
-
-```bash
-# Run a single file directly with an implicit platform
-spore run hello.sp --platform cli
-
-# Equivalent to an implicit application with:
-#   [package]
-#   type = "application"
-#   platform = { git = "https://github.com/spore-lang/basic-cli" }
-```
-
-Script mode is ideal for quick prototypes, teaching, and small utilities. The compiler infers:
-
-- **Platform**: From `--platform` flag (required for scripts using IO effects). `cli` is shorthand for `spore-lang/basic-cli`.
-- **Capabilities**: Inherited from the specified platform's defaults.
-- **Dependencies**: Scripts cannot declare external dependencies. For multi-file or dependency-heavy projects, use `spore.toml`.
-
-Constraints:
-
-- A script is a single `.sp` file with a `main` function.
-- No `spore.toml` or `spore.lock` is generated.
-- The file's module name is derived from its filename (e.g., `hello.sp` → module `hello`).
+Script mode is intentionally **out of scope** for SEP-0008. Manifest-free
+single-file execution, file-header metadata, and script-vs-project precedence
+rules are specified by a separate script-mode SEP. SEP-0008 covers
+manifest-backed packages and applications only.
 
 ### Platforms
 
@@ -236,7 +216,10 @@ module_name = path.relative_to("src/")
                   // path separators become '.' in the module name
 ```
 
-Module name segments must be lowercase `snake_case`. Reserved names (`main`, `platform`, `test`) carry special semantics.
+Module name segments must be lowercase `snake_case`. Reserved names (`platform`,
+`test`) may carry tooling conventions, but executable selection is
+manifest-level: a module named `main` is only the default entry module by
+convention, not by special module semantics.
 
 #### Empty modules
 
@@ -549,13 +532,14 @@ A Platform declares three things:
 
 1. **Capability set**: Which IO capabilities it handles.
 2. **Effect handler implementations**: Runtime logic for each capability.
-3. **Entry point type**: The type signature the application's `main` must satisfy.
+3. **Startup contract**: The function contract that the selected module's
+   startup function must satisfy.
 
 ```spore
 platform CliPlatform {
     version: "1.0.0"
     handles [FileRead, FileWrite, StdOut, StdErr, NetRead, NetWrite, Clock, Spawn, Exit]
-    entry: fn(args: List[Str]) -> I32 ! Exit
+    startup: fn(args: List[Str]) -> I32 ! Exit
 
     handler FileReadHandler {
         File.read(path: Path) -> Result[Bytes, IoError] {
@@ -566,31 +550,27 @@ platform CliPlatform {
 }
 ```
 
-Platform declaration in `spore.toml`:
+Platform selection in `spore.toml`:
 
 ```toml
-[platforms]
-main = { git = "https://github.com/spore-platform/cli", version = "1.0.0" }
+[platform]
+git = "https://github.com/spore-platform/cli"
+version = "1.0.0"
 ```
 
 The compiler verifies:
 
-- Every capability used by application code is handled by some Platform.
-- The entry point type matches the Platform's requirement.
-- No two Platforms handle the same capability (unless priorities are explicit).
+- Every capability used by application code is handled by the selected Platform.
+- The startup function in the selected entry module matches the Platform's startup contract.
+- Test and mock Platforms may be substituted during testing, but a project binds to one Platform at a time.
 
-#### Multi-Platform support
+#### One Platform per project
 
-Applications may use multiple Platforms for different capability domains (e.g., CLI + GPU + S3):
-
-```toml
-[platforms]
-cli = { git = "https://github.com/spore-platform/cli", priority = 1 }
-gpu = { git = "https://github.com/spore-platform/cuda", priority = 2 }
-s3  = { git = "https://github.com/spore-platform/aws", priority = 3 }
-```
-
-Each effect is routed to the highest-priority Platform that handles it. The compiler ensures every effect has exactly one handler.
+A manifest-backed project selects exactly one Platform. Different deployment
+targets use different manifests, overrides, or future higher-level workspace
+flows; they are not modeled as multiple concurrent Platform bindings within one
+project. Multiple executable targets are modeled as project entries, not as
+multiple Platforms.
 
 #### Test Platforms for deterministic testing
 
@@ -599,7 +579,7 @@ Since application code is decoupled from IO implementations, a Test Platform can
 ```spore
 platform TestPlatform {
     handles [FileRead, FileWrite, NetRead, Clock]
-    entry: fn() -> TestResult
+    startup: fn() -> TestResult
 }
 
 handler MockFileSystem {
@@ -817,30 +797,37 @@ Dependencies are declared **per-project** in `spore.toml`, not per-file. The `[c
 
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
 
-### Application Entry Points
+### Application Entries
 
-An application's default entry point is `src/main.sp`, and the resulting binary name defaults to the package name from `spore.toml`:
+An application declares one or more named **entries** in `spore.toml`. Each
+entry selects an **entry module**, and the selected Platform then validates the
+module's **startup function** against its **startup contract**.
+
+The default emitted executable or run target name is the selected entry name:
 
 ```toml
 [package]
 name = "my-tool"
 type = "application"
-# Binary name: "my-tool", entry: src/main.sp
+default-entry = "my-tool"
+
+[entries.my-tool]
+path = "src/main.sp"
 ```
 
-To override the default or define additional binaries, use `[[bin]]`:
+Additional entries use the same table form:
 
 ```toml
-[[bin]]
-name = "my-tool"
-path = "src/main.sp"      # default, can be omitted
+[entries.my-tool]
+path = "src/main.sp"
 
-[[bin]]
-name = "my-tool-migrate"
-path = "src/migrate.sp"   # additional binary
+[entries.my-tool-migrate]
+path = "src/migrate.sp"
 ```
 
-Each `[[bin]]` entry must point to a `.sp` file containing a `main` function with the platform-required signature.
+Each entry path must point to a `.sp` file containing a startup function that
+satisfies the selected Platform's startup contract. Today that function is
+usually `main`.
 
 #### Content-addressed dependencies (BLAKE3, no semver)
 
@@ -1368,7 +1355,7 @@ Spore and Roc share the same design philosophy: no built-in Platform; all Platfo
 platform WebPlatform {
     version: "1.0.0"
     handles [HttpServer, NetRead, NetWrite, Clock, Spawn, DbQuery]
-    entry: fn(req: Request) -> Response ! HttpServer | DbQuery
+    startup: fn(req: Request) -> Response ! HttpServer | DbQuery
 
     handler HttpServerHandler {
         Server.listen(port: U16, handler: fn(Request) -> Response) {
@@ -1384,7 +1371,7 @@ platform WebPlatform {
 platform LambdaPlatform {
     version: "1.0.0"
     handles [NetRead, NetWrite, S3Read, S3Write, DynamoRead, DynamoWrite]
-    entry: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
+    startup: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
 
     handler S3Handler {
         S3.get(bucket: Str, key: Str) -> Result[Bytes, S3Error] {
@@ -1514,7 +1501,7 @@ spore init my-platform --type platform
 platform EmbeddedPlatform {
     version: "0.1.0"
     handles [GpioRead, GpioWrite, Timer, SerialRead, SerialWrite]
-    entry: fn() -> Never ! GpioRead | GpioWrite | Timer
+    startup: fn() -> Never ! GpioRead | GpioWrite | Timer
 
     config: {
         cpu_freq: U32,
@@ -1598,9 +1585,9 @@ effect Exit   { fn exit(code: I32) -> Never }
 |---|---|---|---|---|
 | Platform concept | ✓ | Partial (runtime) | ✗ | ✓ |
 | Effect system | ✗ (tag unions) | ✗ (Cmd/Sub) | ✓ | ✓ |
-| Multi-Platform | ✗ | ✗ | N/A | ✓ |
+| One Platform / project | ✗ | ✗ | N/A | ✓ |
 | Test Platform | Mock Platform | Mock Cmd | Manual mock | Test Platform |
-| Entry point | Platform-defined | Fixed (main) | Fixed (main) | Platform-defined |
+| Startup contract | Platform-defined | Fixed (main) | Fixed (main) | Platform-defined |
 | Concurrency | Platform-provided | Built-in runtime | Effect handler | Effect handler |
 
 ### CLI command reference
@@ -1877,7 +1864,7 @@ The compiler generates a capability routing table mapping each effect to its han
 | `E3006` | Shadowing conflict | Import alias conflicts with module name |
 | `E4201` | Effect handler conflict | Multiple Platforms handle the same effect |
 | `E4202` | Missing effect handler | No Platform handles a required effect |
-| `E4203` | Entry point type mismatch | `main` signature doesn't match Platform requirement |
+| `E4203` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
 
 ### Diagnostic structure
 
@@ -2078,7 +2065,7 @@ field          ::= IDENT ':' type
 platform_decl  ::= 'platform' IDENT '{' platform_body '}'
 platform_body  ::= ('version:' STRING)?
                    ('handles' cap_list)
-                   ('entry:' type)
+                   ('startup:' type)
                    handler_decl*
 
 // Handler declarations
@@ -2090,12 +2077,13 @@ effect_decl    ::= 'effect' IDENT '{' effect_fn* '}'
 effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 // spore.toml (TOML subset)
-// [package]       name, version, type, description, license, authors, spore-version
+// [package]       name, version, type, description, license, authors, spore-version, default-entry
 // [capabilities]  allowed
 // [dependencies]  <name> = { git|path|alias, sig, impl?, optional?, branch?, tag?, rev? }
 // [dev-dependencies]
 // [features]      <name> = [deps/features]
-// [platforms]     <name> = { git, version?, priority?, handles? }
+// [entries.<name>] path = STRING
+// [platform]      git|path, version?, handles?
 // [overrides]     <name> = { sig, impl }
 // [build]         script
 // [metadata]      arbitrary key-value

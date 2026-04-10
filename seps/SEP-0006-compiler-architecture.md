@@ -74,14 +74,14 @@ models, holes, and content-addressed modules.
 
 ### Compiling a Spore program
 
-A developer interacts with the compiler through the `sporec` CLI:
+A developer interacts with the toolchain through both `spore` and `sporec`:
 
 ```bash
-# One-shot compilation
-sporec build src/main.spore
+# Project-aware build
+spore build src/main.spore
 
 # Check without codegen
-sporec check src/main.spore
+spore check src/main.spore
 
 # Watch mode — recompile on save, show diagnostics in real time
 spore watch
@@ -89,11 +89,14 @@ spore watch
 # Watch mode with JSON output for agents / IDEs
 spore watch --json
 
+# Explicit-input compiler invocation
+sporec compile src/main.spore
+
 # Explain an error code
-sporec --explain E0301
+sporec explain E0301
 
 # Query a specific hole
-sporec --query-hole tax_logic --json
+sporec query-hole tax_logic --json
 ```
 
 ### What the developer sees
@@ -101,7 +104,7 @@ sporec --query-hole tax_logic --json
 **On success:**
 
 ```text
-$ sporec build src/main.spore
+$ spore build src/main.spore
   Compiling main (src/main.spore)
   Compiling http (src/net/http.spore)
   Compiling auth (src/auth/login.spore)
@@ -928,13 +931,13 @@ All diagnostics carry categorized codes:
 | `H0xxx` | Hole diagnostics | hole report, partial function, type conflict |
 | `M0xxx` | Module errors | circular dependency, visibility violation |
 
-Every code is queryable: `sporec --explain E0301` prints a detailed explanation
+Every code is queryable: `sporec explain E0301` prints a detailed explanation
 with common causes, examples, and fix strategies.
 
-#### `sporec --explain` output format
+#### `sporec explain` output format
 
 ```text
-$ sporec --explain E0301
+$ sporec explain E0301
 
   E0301: type mismatch
 
@@ -982,10 +985,10 @@ Target latencies (aspirational, not hard guarantees):
 #### `spore check`
 
 `spore check` performs all static analyses without code generation. It is the
-primary command for verifying correctness during development.
+primary project-aware command for verifying correctness during development.
 
 ```bash
-spore check src/main.spore          # check a single entry point
+spore check src/main.spore          # check a single entry module path
 spore check src/**/*.sp             # check all source files
 spore check --deny-warnings .       # treat warnings as errors (for CI)
 ```
@@ -1404,7 +1407,7 @@ note[H0101]: hole `tax_logic` requires filling
    = note: available bindings: income: Money, region: Region
    = note: available capabilities: [TaxTable]
    = note: candidate: `tax_table.lookup(region, income) -> Money`
-help: run `sporec --query-hole tax_logic` for full HoleReport
+help: run `sporec query-hole tax_logic` for full HoleReport
 ```
 
 ### Recovery strategies
@@ -1427,7 +1430,7 @@ errors into `= note: N additional errors caused by this`.
 
 ### Complete Error Code Registry
 
-All diagnostics carry a categorized code. Every code is queryable: `sporec --explain CODE`.
+All diagnostics carry a categorized code. Every code is queryable: `sporec explain CODE`.
 
 #### E0xxx — Type Errors
 
@@ -1540,7 +1543,7 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Hole System integration
 
 - `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
-- `sporec --query-hole <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
+- `sporec query-hole <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
 - Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
 - The HoleReport JSON extends the diagnostic schema with a `hole_report` field
 
@@ -1679,7 +1682,7 @@ Some `help:` lines are concrete (`try Money.from_string(...)`) and some are stra
 Codes like `E0301` are more useful than raw names:
 
 - **Filterable:** `sporec --json | jq '.diagnostics[] | select(.code | startswith("K"))'` gives all cost errors
-- **Discoverable:** `sporec --explain E0301` opens documentation
+- **Discoverable:** `sporec explain E0301` opens documentation
 - **Stable:** codes don't change when messages are reworded; CI can allowlist specific codes
 - **Cross-referencing:** docs, forums, and issue trackers reference `E0301` unambiguously
 
@@ -1832,7 +1835,7 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
    overwhelm agents processing large rebuilds.
 
 7. **Internationalization of diagnostics.** Error codes are language-independent,
-   but message text is currently English-only. Should `sporec --explain` support
+   but message text is currently English-only. Should `sporec explain` support
    localized explanations in a future version? This would require a translation
    infrastructure.
 
