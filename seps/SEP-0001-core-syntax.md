@@ -244,7 +244,7 @@ type FileError =
     | PermissionDenied(path: String)
     | IoError(message: String);
 
-fn read_config(path: String) -> Config ! [FileError, ParseError] {
+fn read_config(path: String) -> Config ! FileError | ParseError {
     let content = read_file(path)?;     // propagates FileError
     let config = parse_toml(content)?;  // propagates ParseError
     config
@@ -256,7 +256,7 @@ fn read_config(path: String) -> Config ! [FileError, ParseError] {
 When a function's error set differs from a callee's, Spore can automatically convert errors if a conversion exists:
 
 ```spore
-fn load_config(path: String) -> Config ! [ConfigError] {
+fn load_config(path: String) -> Config ! ConfigError {
     let content = read_file(path)?;       // FileError -> ConfigError (auto-converted)
     let config = parse_toml(content)?;    // ParseError -> ConfigError (auto-converted)
     config
@@ -279,8 +279,8 @@ fn get_config() -> Config {
 }
 
 // Retry with tail recursion (TCO guaranteed)
-fn fetch_with_retry(url: String, max_retries: Int) -> Data ! [NetworkError] {
-    fn retry(url: String, attempts: Int, max: Int) -> Data ! [NetworkError] {
+fn fetch_with_retry(url: String, max_retries: Int) -> Data ! NetworkError {
+    fn retry(url: String, attempts: Int, max: Int) -> Data ! NetworkError {
         match fetch(url) {
             Ok(data) => data,
             Err(NetworkError.Timeout) if attempts < max => {
@@ -322,7 +322,7 @@ fn identity[T](x: T) -> T {
 The full signature order is:
 
 ```text
-fn name[T](params) -> ReturnType ! [ErrorSet]
+fn name[T](params) -> ReturnType ! ErrorSet
 where T: Bound
 uses [effects]
 cost ≤ N
@@ -344,12 +344,12 @@ fn add(a: Int, b: Int) -> Int {
 }
 
 // 2. Function with errors
-fn parse_int(input: String) -> Int ! [InvalidFormat] {
+fn parse_int(input: String) -> Int ! InvalidFormat {
     ...
 }
 
 // 3. With generic constraints and behavioral spec
-fn serialize[T](value: T) -> Bytes ! [SerializeError]
+fn serialize[T](value: T) -> Bytes ! SerializeError
 where T: Serialize
 cost ≤ 500
 spec {
@@ -361,7 +361,7 @@ spec {
 
 // 4. Side-effectful function with intent examples
 /// @idempotent
-fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! [NetworkTimeout, AuthExpired]
+fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! NetworkTimeout | AuthExpired
 uses [NetConnect, FileRead, Clock]
 cost ≤ 8500
 spec {
@@ -393,7 +393,7 @@ trait Display {
 }
 
 trait Serialize {
-    fn serialize(self) -> Bytes ! [SerializeError]
+    fn serialize(self) -> Bytes ! SerializeError
 }
 
 // effect: external world operations
@@ -406,6 +406,8 @@ effect Console {
 effect HttpClient = NetConnect | Clock
 effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
 ```
+
+Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. `handle` accepts one or more `with` clauses. SEP-0003 defines the effect algebra and handler semantics; this SEP only fixes the settled outer syntax. The grammar intentionally leaves each handler operand as an expression because the richer handler/`handle` model is still pending the item-3 decision.
 
 The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
 
@@ -420,13 +422,13 @@ The `idempotent` property cannot be inferred and is annotated via doc comment: `
 The `uses` clause can mix atomic effect names with named effect aliases:
 
 ```spore
-fn query_database(sql: String) -> Data ! [DbError, Timeout]
+fn query_database(sql: String) -> Data ! DbError | Timeout
 uses [NetConnect]
 {
     ...
 }
 
-fn run_cli(config_path: String) -> Unit ! [Error]
+fn run_cli(config_path: String) -> Unit ! Error
 uses [CLI]
 {
     ...
@@ -468,7 +470,7 @@ example "handles leap year" {
 **`property` items** express universally quantified assertions using explicitly typed lambda syntax. The compiler generates random inputs for property-based testing:
 
 ```spore
-fn parse_date(s: String) -> Result[Date, ParseError] ! [ParseError]
+fn parse_date(s: String) -> Result[Date, ParseError] ! ParseError
 spec {
     example "ISO 8601":          parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
     example "rejects ambiguous": parse_date("01/15/24")   == Err(AmbiguousFormat)
@@ -506,7 +508,7 @@ impl Display for User {
 }
 
 impl Serialize for User {
-    fn serialize(self) -> String ! [SerializeError] {
+    fn serialize(self) -> String ! SerializeError {
         ...
     }
 }
@@ -846,7 +848,6 @@ Program         = { TopLevelItem } ;
 
 TopLevelItem    = ImportDecl
                 | AliasDecl
-                | ModuleDecl
                 | StructDecl
                 | TypeDecl
                 | TraitDecl
@@ -859,13 +860,13 @@ TopLevelItem    = ImportDecl
 (* ─── Imports & Aliases ───────────────────────────── *)
 
 ImportDecl      = "import" ImportPath [ "as" Ident ] ";" ;
-ImportPath      = Ident { "." Ident } [ "." "{" Ident { "," Ident } "}" ] ;
+ImportPath      = Ident { "." Ident } ;
 
 AliasDecl       = "alias" Ident "=" QualifiedIdent ";" ;
 
 (* ─── Module ──────────────────────────────────────── *)
-
-ModuleDecl      = "module" Ident [ UsesClause ] "{" { TopLevelItem } "}" ;
+(* REMOVED (D7): Module names are derived from file paths (see SEP-0008).
+   The `module` keyword is not part of the surface syntax. *)
 
 (* ─── Struct ──────────────────────────────────────── *)
 
@@ -954,7 +955,7 @@ TypeParam       = Ident
 ParamList       = Param { "," Param } [ "," ] ;
 Param           = Ident ":" TypeExpr ;
 
-ErrorClause     = "!" "[" TypeList "]" ;
+ErrorClause     = "!" TypeExpr { "|" TypeExpr } ;
 
 WhereClause     = { "where" Ident ":" BoundList } ;
 BoundList       = Ident { "+" Ident } ;
@@ -1169,7 +1170,7 @@ BinDigit        = "0" | "1" ;
 The function signature system is the heart of Spore's design. The clauses appear in this canonical order:
 
 ```text
-fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
+fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 [where <GenericName>: <Constraint>, ...]
 [uses [<Effect>, ...]]
 [cost ≤ <N>]
@@ -1183,7 +1184,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! [<ErrorTypes>]]
 
 1. **`-> ReturnType`** — The return type. Omitted for functions returning `Unit`.
 
-2. **`! [ErrorTypes]`** — The error set. A function with `! [E1, E2]` may produce errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
+2. **`! ErrorTypes`** — The error set. A function with `! E1 | E2` may produce errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
 
 3. **`where T: Bound`** — Generic constraints. Multiple bounds use `+` syntax: `where T: Eq + Hash`. Each `where` clause is on its own line.
 
@@ -1313,7 +1314,7 @@ The `@allows` annotation constrains which functions the compiler (or an AI agent
 
 ```spore
 @allows[validate, sanitize, format]
-fn process_input(raw: String) -> String ! [ValidationError] {
+fn process_input(raw: String) -> String ! ValidationError {
     let validated = validate(raw)?;
     let sanitized = sanitize(validated);
     ?final_step  // this hole can only call validate/sanitize/format
@@ -1355,7 +1356,7 @@ When queried (`sporec --query-hole ?name`), the compiler emits a structured repo
   },
   "available_capabilities": ["NetConnect"],
   "candidate_functions": [
-    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! [Declined, InsufficientFunds] uses [NetConnect]"
+    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! Declined | InsufficientFunds uses [NetConnect]"
   ],
   "error_types_to_handle": ["Declined", "InsufficientFunds"],
   "spec": {
@@ -1404,7 +1405,7 @@ type EvalError =
     | TypeError(message: String);
 
 // Evaluator — pure recursion, no loops
-fn eval(expr: Expr, env: Env) -> Int ! [EvalError]
+fn eval(expr: Expr, env: Env) -> Int ! EvalError
 cost ≤ expr_size(expr) * 10
 {
     match expr {
@@ -1446,7 +1447,7 @@ cost ≤ expr_size(expr) * 10
     }
 }
 
-fn eval_binop(op: Op, left: Int, right: Int) -> Int ! [EvalError] {
+fn eval_binop(op: Op, left: Int, right: Int) -> Int ! EvalError {
     match op {
         Add => left + right,
         Sub => left - right,
@@ -1577,7 +1578,7 @@ Spore is designed with AI code generation agents as first-class consumers:
 Function signatures are machine-readable contracts. An agent can extract:
 
 - **Input/output types** from the parameter list and return type
-- **Failure modes** from the `! [ErrorSet]`
+- **Failure modes** from the `! ErrorSet`
 - **Side effect profile** from `uses [...]`
 - **Performance budget** from `cost ≤ N`
 - **Generic requirements** from `where` clauses
@@ -1628,7 +1629,6 @@ The Spore AST is designed as a regular tree with strongly typed nodes. Key node 
 ```text
 Program
 ├── ImportDecl { path, alias? }
-├── ModuleDecl { name, uses, items[] }
 ├── StructDecl { name, type_params[], fields[] }
 ├── ImplDecl { trait, type_params[], target_type, methods[] }
 ├── TypeDecl { name, type_params[], body: TypeAlias | SumType | Refinement }
@@ -1705,7 +1705,7 @@ Spore's explicit syntax enables highly specific error messages:
 error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declare it
   --> src/api.spore:12:5
    |
-12 | fn fetch_data(url: Url) -> Data ! [NetworkError] {
+12 | fn fetch_data(url: Url) -> Data ! NetworkError {
    |    ^^^^^^^^^^ missing `uses` clause
    |
    = help: add `uses [NetConnect]` to the function signature
@@ -1780,7 +1780,7 @@ spec counterexample: `parse_date` — property "round-trip"
 warning[W0501]: public function `parse_date` has no `spec` block
   --> src/dates.spore:3:1
    |
- 3 | pub fn parse_date(s: String) -> Result[Date, ParseError] ! [ParseError] {
+ 3 | pub fn parse_date(s: String) -> Result[Date, ParseError] ! ParseError {
    |        ^^^^^^^^^^ no behavioral contract declared
    |
    = help: add a `spec { example "...": ... }` block before the function body
@@ -1801,7 +1801,7 @@ The parser can recover from common errors:
 
 1. **No loops**: Developers with imperative backgrounds may find the no-loop constraint frustrating initially, especially for simple counting patterns. The learning curve for converting loop-based thinking to recursion + HOFs is non-trivial.
 
-2. **Verbose error sets**: Functions that can fail in many ways produce long `! [E1, E2, E3, ...]` lists. This is deliberate (errors are visible) but can clutter signatures.
+2. **Verbose error sets**: Functions that can fail in many ways produce long `! E1 | E2 | E3 | ...` lists. This is deliberate (errors are visible) but can clutter signatures.
 
 3. **`cost` clause expressiveness**: The cost model is inherently limited — expressing accurate cost bounds for complex algorithms may be impractical. Wrong bounds are worse than no bounds.
 
@@ -1949,7 +1949,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 11. **Standard effect taxonomy evolution**: SEP-0003 now defines the initial built-in effect vocabulary (`Console`, `FileRead`, `FileWrite`, `NetConnect`, `NetListen`, `Env`, `Spawn`, `Clock`, `Random`, `Exit`). Future SEPs may extend it, but changes should preserve the intent-oriented classification.
 
-12. **Error type subtyping**: If function `f` declares `! [NetworkError]` and function `g` declares `! [NetworkError, ParseError]`, can `g` call `f` directly? How does error set subtyping work?
+12. **Error type subtyping**: If function `f` declares `! NetworkError` and function `g` declares `! NetworkError | ParseError`, can `g` call `f` directly? How does error set subtyping work?
 
 13. **`property` with `uses`**: If a property calls a function that has side effects, what capability scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
 
