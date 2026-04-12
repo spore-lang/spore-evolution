@@ -24,11 +24,11 @@ jobs:
         with:
           text: ${{ github.event.pull_request.title }}
 
-  pr-template:
-    name: PR template
+  body:
+    name: PR body
     runs-on: ubuntu-latest
     steps:
-      - name: Validate PR template checklist
+      - name: Validate PR body checklist
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
@@ -55,5 +55,5 @@ jobs:
                   print(f"- {item}", file=sys.stderr)
               raise SystemExit(1)
 
-          print("Pull request template checklist looks good.")
+          print("Pull request body checklist looks good.")
           PY
