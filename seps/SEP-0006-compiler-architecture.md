@@ -19,7 +19,7 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
-> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). Supports NDJSON watch mode for IDE integration, content-addressed caching via signature and implementation hashes, and a `--verbose` output mode for detailed diagnostic context.
+> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
 
 ## Summary
 
@@ -155,13 +155,15 @@ separate protocol.
 
 > **Current implementation status (2026-04):**
 >
-> - `sporec compile --json` is still coarse success/error output, not the final
->   canonical diagnostic schema.
-> - `sporec::compile_diagnostics` currently carries only `message`, `span`, and
->   `severity`.
-> - the current LSP server emits only `range`, `severity`, `source`, and
->   `message`.
-> - machine-applicable fixes are not yet a public CLI surface.
+> - the shared diagnostics direction is no longer hypothetical: CLI JSON, LSP,
+>   and hole-reporting surfaces are being aligned as projections over the same
+>   compiler-facing model
+> - `sporec holes FILE --json` and `sporec query-hole FILE ?name --json` already
+>   expose a shared typed-hole machine protocol
+> - `spore watch --json` already emits machine-readable `compile_result` and
+>   `hole_graph_update` events
+> - the remaining work is freezing the minimal canonical field set and layering
+>   richer watch / auto-fix transports without inventing parallel schemas
 
 ---
 
@@ -258,15 +260,17 @@ This separation is intentional:
 
 **Current implementation status (2026-04):**
 
-- parser already exposes typed `ParseError`
-- type checking already exposes typed `TypeError`
-- module loading already exposes typed `ModuleError`
-- but many other boundaries still use `Result<_, String>` or `Vec<String>`
-- `sporec::Diagnostic` is currently only a thin interim struct, not the final
-  canonical IR
+- parser, type checking, and module loading already expose typed diagnostic
+  producers
+- JSON, LSP, and hole-reporting are no longer separate greenfield designs; they
+  already have machine-readable surfaces and now need convergence rather than
+  reinvention
+- some crate boundaries still use `Result<_, String>` or `Vec<String>`, so the
+  migration is not finished
 
-The next diagnostics migration should converge these partial pieces on a shared
-`sporec-diagnostics` crate.
+The next diagnostics migration step should finish converging those remaining
+stringly boundaries on a shared `sporec-diagnostics` crate without regressing the
+working JSON/LSP/hole surfaces that already exist.
 
 ### IR layers
 
@@ -541,62 +545,23 @@ t=100ms  Begin incremental compile {A, B, C}
 
 #### NDJSON event stream
 
-`spore watch --json` emits newline-delimited JSON. Each line is one event:
-
-**Incremental compile event:**
+`spore watch --json` already emits newline-delimited JSON, but the **current stable** contract is intentionally smaller than the long-term watch transport:
 
 ```json
-{
-  "type": "incremental_compile",
-  "timestamp": "2026-01-15T10:30:45Z",
-  "trigger": {
-    "file": "src/auth/login.sp",
-    "change_type": "impl_only"
-  },
-  "recompiled": ["src/auth/login.sp"],
-  "skipped_downstream": true,
-  "duration_ms": 34,
-  "diagnostics": [],
-  "holes": {
-    "total": 4,
-    "filled_this_cycle": ["src/auth/login.sp:30"],
-    "ready_to_fill": ["src/auth/login.sp:45"]
-  }
-}
+{"event":"compile_result","file":"/tmp/spore-step9-watch.sp","status":"ok","errors":[],"timestamp":1775999403}
+{"event":"hole_graph_update","holes_total":1,"filled_this_cycle":0,"ready_to_fill":1,"blocked":0}
 ```
 
-**Diagnostic event:**
+Current stable events:
 
-```json
-{
-  "type": "diagnostic",
-  "file": "src/net/http.sp",
-  "line": 23, "column": 5,
-  "severity": "warning",
-  "code": "W001",
-  "message": "unused import: `Timeout`"
-}
-```
+| Event | Trigger | Data |
+|---|---|---|
+| `compile_result` | Each incremental compilation cycle | File path, status (`ok`/`error`), diagnostics payload, timestamp |
+| `hole_graph_update` | After a compile cycle that still contains holes | Hole-count summary: `holes_total`, `filled_this_cycle`, `ready_to_fill`, `blocked` |
 
-**Hole update event:**
+This summary stream is enough for save-compile feedback loops and for agents that pair watch mode with the richer batch hole commands (`sporec holes FILE --json`, `sporec query-hole FILE ?name --json`).
 
-```json
-{
-  "type": "hole_update",
-  "summary": { "total": 2, "ready_to_fill": 1, "blocked": 1 },
-  "changes": [
-    {
-      "action": "filled",
-      "hole": { "file": "src/auth.sp", "line": 10, "name": "hash_password" }
-    },
-    {
-      "action": "unblocked",
-      "hole": { "file": "src/auth.sp", "line": 20, "name": "verify_password" },
-      "reason": "dependency hash_password is now filled"
-    }
-  ]
-}
-```
+Future revisions may layer more detailed events — for example per-hole updates or full dependency-graph payloads — but those richer transports should extend the shared diagnostic / hole model rather than defining a competing watch-only schema.
 
 #### Error recovery
 
@@ -765,9 +730,9 @@ When the ceiling is exceeded:
 [watch] ✗ 1 error
 ```
 
-#### LSP Diagnostics JSON conversion + `spore/holeUpdate` schema
+#### LSP diagnostics mapping
 
-Watch events are converted to LSP messages by the Spore LSP server:
+LSP diagnostics are published directly from the compiler's shared diagnostics pipeline rather than by replaying watch NDJSON events:
 
 ```json
 {
@@ -788,7 +753,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
 }
 ```
 
-#### `spore/holeUpdate` custom LSP notification
+A custom `spore/holeUpdate` notification is a **future** extension, not the current stable LSP contract. If it is added later, it should reuse the same hole object/schema already exposed by `sporec holes` and `sporec query-hole`, rather than freezing a separate editor-only payload.
 
 ```json
 {
@@ -797,12 +762,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
     "holes": [
       {
         "uri": "file:///project/src/auth.sp",
-        "range": {
-          "start": { "line": 29, "character": 4 },
-          "end": { "line": 29, "character": 50 }
-        },
         "name": "authenticate",
-        "signature": "User -> Token",
         "status": "ready_to_fill"
       }
     ],
@@ -992,14 +952,11 @@ not part of the minimal stable contract.
 
 > **Current implementation status (2026-04):**
 >
-> The current implementation has not yet reached this schema. Today:
->
-> - `sporec compile --json` returns coarse `{status, warnings}` or
->   `{status, message}`
-> - `sporec::compile_diagnostics` returns only `message`, `span`, and
->   `severity`
-> - hole JSON is a separate command-specific structure rather than an instance of
->   the shared Diagnostic IR
+> The shared-model architecture is now the right description of the codebase: hole
+> commands already expose a shared typed-hole protocol, and CLI JSON plus LSP are
+> being treated as projections over the same diagnostics pipeline. The remaining
+> work is to finish freezing the minimal canonical field set and to extend richer
+> analysis/watch transports without reintroducing command-private schemas.
 
 #### Error code system
 
@@ -1299,9 +1256,10 @@ Target mapping from the canonical Diagnostic IR:
 
 > **Current implementation status (2026-04):**
 >
-> The current LSP server does **not** yet consume the full canonical IR. It
-> compiles in-process and currently publishes only `range`, `severity`,
-> `source`, and `message`.
+> The LSP server already publishes diagnostics from the compiler pipeline. The
+> remaining gap is lossless carriage of richer fields such as secondary labels,
+> notes, help, and hole-specific updates once the minimal canonical shape is fully
+> frozen.
 
 ### JSON as the machine projection
 
@@ -1316,18 +1274,14 @@ The minimal stable contract in this revision is:
 
 ### Streaming vs. batch
 
-This revision intentionally standardizes **batch diagnostic objects first**.
-Watch/NDJSON remains a follow-up transport layer.
+This revision still standardizes **batch diagnostic objects first**. Current watch NDJSON already emits `compile_result` plus summary `hole_graph_update`, but richer per-hole event payloads remain a later transport layer.
 
-When a richer streaming protocol is stabilized later, each event should carry
-either:
+When that richer streaming protocol is stabilized later, each event should carry either:
 
 - canonical `Diagnostic` objects, or
-- summaries explicitly derived from those diagnostics
+- references to the shared typed-hole objects already exposed by `sporec holes FILE --json` / `sporec query-hole FILE ?name --json`
 
-rather than inventing a separate ad hoc event-specific diagnostic schema.
-
----
+That keeps watch, batch JSON, and LSP aligned on one machine protocol family instead of growing separate schemas.
 
 ## Diagnostics impact
 
