@@ -1732,7 +1732,7 @@ Agents can query this registry to discover available functions, match types, and
 
 ### Hole reporting
 
-The checker tracks `HoleReport` — a map from hole names to their inferred expected types, available variables in scope, and suggested fill functions. This structured output is the primary input for Agent hole-filling strategies.
+The checker feeds the shared typed-hole protocol defined in SEP-0005. In practice, `sporec holes FILE --json` returns a batch object with `holes` plus `dependency_graph`, and `sporec query-hole FILE ?name --json` returns one hole object with the same inferred type, scope, and candidate information. This structured output is the primary input for Agent hole-filling strategies.
 
 ## Structured representation / protocol impact
 
@@ -1767,12 +1767,21 @@ Function signatures (parameter types, return type, error set, CapSet, cost bound
 
 ### Machine-readable output
 
-Type errors are emitted as structured JSON for Agent consumption:
+Type diagnostics participate in the shared diagnostics protocol described in SEP-0006. This SEP relies on the canonical type rendering, stable codes, severities, and spans provided by that protocol rather than defining a competing JSON schema.
 
 ```json
-{"error": "type_mismatch", "context": "function `add`",
- "expected": "Int", "actual": "String",
- "location": "main.spore:5:12"}
+{
+  "code": "E0301",
+  "severity": "error",
+  "message": "type mismatch: expected `Int`, found `String`",
+  "primary_span": {
+    "file": "main.sp",
+    "range": {
+      "start": { "line": 5, "col": 12 },
+      "end": { "line": 5, "col": 18 }
+    }
+  }
+}
 ```
 
 ## Diagnostics impact
@@ -1792,7 +1801,7 @@ Type errors are emitted as structured JSON for Agent consumption:
 
 ### Dual-channel diagnostics
 
-Every diagnostic is emitted in both machine-readable (JSON v0) and human-readable (Elm-style v2) formats. The type system provides:
+Every diagnostic is emitted as human-readable and machine-readable projections over the shared diagnostic objects described in SEP-0006. For the type system, those projections must preserve:
 
 - The **expected type** (from check mode / declared return type).
 - The **actual type** (from synth mode / expression).
@@ -1801,7 +1810,7 @@ Every diagnostic is emitted in both machine-readable (JSON v0) and human-readabl
 
 ### Hole diagnostics
 
-For each hole, the checker reports:
+For each hole, the checker reports the type-system facts that feed the shared SEP-0005 hole object rather than inventing a second hole-specific schema in this SEP.
 
 ```text
 Hole ?h1 in function `example`:
