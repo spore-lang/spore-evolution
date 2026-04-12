@@ -21,7 +21,7 @@ superseded_by: null
 
 This SEP introduces Spore's **effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic effects* it requires. The compiler verifies that a function body never exercises an effect absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and effect narrowing.
 
-The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the capability set used for subset checks, platform ceilings, and machine-readable fields such as `available_capabilities`.
+The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the capability set used for subset checks, platform ceilings, and machine-readable fields such as `capabilities`.
 
 The design is intentionally **flat and monomorphic**: effect sets are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`effect X = A | B`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
 
@@ -277,7 +277,7 @@ The module-level `uses` clause is **optional**. When omitted the compiler auto-i
 
 ### `@allows` — restricting Hole candidates
 
-The `@allows` annotation constrains which functions an AI agent (or developer) may use to fill a Hole. It acts as a filter on `candidate_functions` in the `HoleReport`:
+The `@allows` annotation constrains which functions an AI agent (or developer) may use to fill a Hole. In the shared SEP-0005 hole protocol, this shows up as a filtered `candidates` list rather than as a separate bespoke schema.
 
 ```spore
 fn process_input(raw: String) -> SafeInput ! ValidationError {
@@ -286,21 +286,31 @@ fn process_input(raw: String) -> SafeInput ! ValidationError {
 }
 ```
 
-The generated `HoleReport` includes the restriction:
+A representative machine-readable view is:
 
 ```json
 {
-  "hole": "clean_input",
+  "name": "clean_input",
+  "display_name": "?clean_input",
   "expected_type": "SafeInput",
-  "allows": ["validate", "sanitize"],
-  "candidate_functions": [
-    "validate(raw: String) -> SafeInput ! ValidationError",
-    "sanitize(raw: String) -> SafeInput ! ValidationError"
+  "candidates": [
+    {
+      "name": "validate",
+      "type_match": 1.0,
+      "capability_fit": 1.0,
+      "overall": 1.0
+    },
+    {
+      "name": "sanitize",
+      "type_match": 1.0,
+      "capability_fit": 1.0,
+      "overall": 1.0
+    }
   ]
 }
 ```
 
-Without `@allows`, all functions matching the type and effect constraints appear. With `@allows`, the candidate list is further filtered to only the named functions.
+Without `@allows`, all functions matching the type and effect constraints may appear. With `@allows`, the candidate list is further filtered to only the named functions.
 
 ### Pure recursive function example — fibonacci
 
@@ -587,20 +597,30 @@ uses [FileRead, NetConnect]
 
 ### 11. Interaction with the Hole system
 
-When the compiler encounters a Hole (`?name`), the generated `HoleReport` includes the capability set available at that program point. The field is named `available_capabilities` for protocol compatibility, but its elements are the same intent-oriented effect names described in this SEP:
+When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object includes the capability set available at that program point under the field name `capabilities`:
 
 ```json
 {
-  "hole": "fetch_logic",
+  "name": "fetch_logic",
+  "display_name": "?fetch_logic",
   "expected_type": "Data",
   "bindings": {
     "url": "Url",
     "timeout": "Duration"
   },
-  "available_capabilities": ["NetConnect"],
-  "cost_budget": 5000,
-  "candidate_functions": [
-    "http.get(url: Url) -> Data ! NetworkError uses [NetConnect]"
+  "capabilities": ["NetConnect"],
+  "cost_budget": {
+    "budget_total": 5000,
+    "cost_before_hole": 0,
+    "budget_remaining": 5000
+  },
+  "candidates": [
+    {
+      "name": "http.get",
+      "type_match": 1.0,
+      "capability_fit": 1.0,
+      "overall": 1.0
+    }
   ]
 }
 ```
@@ -774,7 +794,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Structured effect information in HoleReport
 
-LLM-based agents filling Holes receive the `available_capabilities` field in the JSON `HoleReport`. This enables agents to:
+LLM-based agents filling Holes receive the `capabilities` field in the shared SEP-0005 hole object. This enables agents to:
 
 1. **Constrain code generation.** The agent knows which operations are permissible and avoids generating code that would fail effect checks.
 2. **Filter candidate functions.** Only functions whose `uses S` satisfies S ⊆ S_available are presented as candidates.
@@ -833,7 +853,7 @@ All effect alias definitions are collected into a structured registry available 
 
 ### LSP extensions
 
-The language server protocol integration should expose:
+The language server protocol integration should expose effect information through the shared hover and diagnostics pipeline described in SEP-0006:
 
 - Effect set in hover information for functions.
 - Inferred properties (`pure`, `deterministic`, `total`) in hover tooltips.

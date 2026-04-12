@@ -1342,41 +1342,21 @@ fn example() {
 }
 ```
 
-#### HoleReport JSON format
+#### Hole protocol reference
 
-When queried (`sporec query-hole <file> <name>`), the compiler emits a structured report:
+`sporec query-hole <file> <name> --json` returns one hole object from the shared typed-hole protocol, and `sporec holes <file> --json` returns the batch form with both `holes` and `dependency_graph`. SEP-0005 is the authoritative schema and workflow specification; SEP-0001 intentionally avoids freezing a second inline JSON shape here.
 
-```json
-{
-  "hole": "validate_logic",
-  "expected_type": "Receipt",
-  "bindings": {
-    "amount": "Money",
-    "method": "PaymentMethod"
-  },
-  "available_capabilities": ["NetConnect"],
-  "candidate_functions": [
-    "payment_gateway.charge(amount: Money, method: PaymentMethod) -> Receipt ! Declined | InsufficientFunds uses [NetConnect]"
-  ],
-  "error_types_to_handle": ["Declined", "InsufficientFunds"],
-  "spec": {
-    "examples": [
-      {
-        "label": "successful charge",
-        "expr": "validate(Money(100), CreditCard(\"4242...\")).is_ok()"
-      }
-    ],
-    "properties": [
-      {
-        "label": "idempotent",
-        "predicate": "|a: Money, m: PaymentMethod| validate(a, m) == validate(a, m)"
-      }
-    ]
-  }
-}
-```
+At minimum, the shared hole object includes:
 
-When a function has both a `spec` block and a hole body, the HoleReport includes the spec items as additional constraints. This gives hole-filling agents a self-contained behavioral contract alongside the existing type and capability context, even though the examples and properties are not yet runnable without hitting the hole.
+- `name` / `display_name`
+- `location`
+- `expected_type` / `type_inferred_from`
+- `function` / `enclosing_signature`
+- `bindings` / `binding_dependencies`
+- `capabilities`, `errors_to_handle`, `cost_budget`
+- `candidates`, `dependent_holes`, `confidence`, `error_clusters`
+
+When a function has both a `spec` block and a hole body, that shared hole object may surface the `spec` items as additional behavioral context for tooling. The authoritative transport and evolution rules remain in SEP-0005 so SEP-0001 does not accidentally freeze a stale field layout.
 
 ## Complete examples
 
