@@ -19,7 +19,7 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
-> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). Supports NDJSON watch mode for IDE integration, content-addressed caching via signature and implementation hashes, and a `--verbose` output mode for detailed diagnostic context.
+> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
 
 ## Summary
 
@@ -74,13 +74,14 @@ models, holes, and content-addressed modules.
 
 ### Compiling a Spore program
 
-A developer interacts with the toolchain through both `spore` and `sporec`:
+A developer interacts with the compiler pipeline through the project-facing
+`spore` CLI and the lower-level `sporec` CLI:
 
 ```bash
 # Project-aware build
 spore build
 
-# Check without codegen
+# Project-aware check
 spore check src/main.sp
 
 # Watch mode — recompile on save, show diagnostics in real time
@@ -96,7 +97,7 @@ sporec compile src/main.sp
 sporec explain E0301
 
 # Query a specific hole
-sporec query-hole --json src/main.sp tax_logic
+sporec query-hole --json src/main.sp ?tax_logic
 ```
 
 ### What the developer sees
@@ -141,14 +142,28 @@ $ spore watch src/main.sp
 
 ### Error output modes
 
-| Mode | Flag | Audience | Content |
-|------|------|----------|---------|
-| **Default** | *(none)* | Developers, agents | Rust-style concise text with color and help suggestions |
-| **Verbose** | `--verbose` | Developers debugging complex errors | Default + inference chains + candidate types + capability/cost context |
-| **JSON** | `--json` | CI/CD, scripts, LSP, agents | LSP-compatible JSON with Spore extensions — the superset of all information |
+| Mode | Flag | Audience | Contract |
+|------|------|----------|----------|
+| **Default** | *(none)* | Developers | Human-readable projection of the canonical Diagnostic IR |
+| **Verbose** | `--verbose` | Developers debugging complex errors | Default projection plus optional analysis detail not required by the base IR |
+| **JSON** | `--json` | CI/CD, scripts, LSP, agents | Machine-readable projection of the canonical Diagnostic IR |
 
-The relationship is: `Default ⊂ --verbose ⊂ --json`. JSON contains everything;
-verbose adds analysis detail to default; default is the minimal actionable view.
+The architectural target is one shared Diagnostic IR with multiple projections.
+`Default` and `--json` are two renderings of the same diagnostics; `--verbose`
+adds extra analysis detail on top of that shared model rather than defining a
+separate protocol.
+
+> **Current implementation status (2026-04):**
+>
+> - the shared diagnostics direction is no longer hypothetical: CLI JSON, LSP,
+>   and hole-reporting surfaces are being aligned as projections over the same
+>   compiler-facing model
+> - `sporec holes FILE --json` and `sporec query-hole FILE ?name --json` already
+>   expose a shared typed-hole machine protocol
+> - `spore watch --json` already emits machine-readable `compile_result` and
+>   `hole_graph_update` events
+> - the remaining work is freezing the minimal canonical field set and layering
+>   richer watch / auto-fix transports without inventing parallel schemas
 
 ---
 
@@ -219,6 +234,44 @@ Source Text (.sp files)
   Native executable / object code
 ```
 
+### Diagnostics architecture
+
+The diagnostics architecture is split into three layers:
+
+1. **crate-local typed errors**
+   - parser, type checker, module loader, codegen runtime, and CLI code each use
+     their own error enums or domain-specific diagnostic builders
+2. **shared Diagnostic IR**
+   - `sporec-diagnostics` owns the canonical `Diagnostic` model and related
+     label/span/reference types
+3. **renderers and adapters**
+   - human CLI rendering
+   - JSON serialization
+   - LSP mapping
+   - future watch/event-stream transports
+
+This separation is intentional:
+
+- `thiserror` belongs at crate boundaries and implementation-facing error enums
+- `ariadne` belongs only to the human-rendering layer
+- the core compiler should not depend on terminal-formatting concerns
+- JSON and LSP should be derived from the same IR, not maintained as parallel
+  ad hoc structures
+
+**Current implementation status (2026-04):**
+
+- parser, type checking, and module loading already expose typed diagnostic
+  producers
+- JSON, LSP, and hole-reporting are no longer separate greenfield designs; they
+  already have machine-readable surfaces and now need convergence rather than
+  reinvention
+- some crate boundaries still use `Result<_, String>` or `Vec<String>`, so the
+  migration is not finished
+
+The next diagnostics migration step should finish converging those remaining
+stringly boundaries on a shared `sporec-diagnostics` crate without regressing the
+working JSON/LSP/hole surfaces that already exist.
+
 ### IR layers
 
 #### Layer 1: AST (Abstract Syntax Tree)
@@ -232,7 +285,7 @@ Properties:
 - All nodes carry `Span` (file ID + byte offset range)
 - **Preserves all syntactic sugar:** `|>`, `?`, `f"..."`, `t"..."`
 - Used for: precise error location reporting, syntax highlighting, code
-  formatting (`spore fmt`)
+  formatting (`spore format` / `spore fmt`)
 
 Core data structures:
 
@@ -492,62 +545,23 @@ t=100ms  Begin incremental compile {A, B, C}
 
 #### NDJSON event stream
 
-`spore watch --json` emits newline-delimited JSON. Each line is one event:
-
-**Incremental compile event:**
+`spore watch --json` already emits newline-delimited JSON, but the **current stable** contract is intentionally smaller than the long-term watch transport:
 
 ```json
-{
-  "type": "incremental_compile",
-  "timestamp": "2026-01-15T10:30:45Z",
-  "trigger": {
-    "file": "src/auth/login.sp",
-    "change_type": "impl_only"
-  },
-  "recompiled": ["src/auth/login.sp"],
-  "skipped_downstream": true,
-  "duration_ms": 34,
-  "diagnostics": [],
-  "holes": {
-    "total": 4,
-    "filled_this_cycle": ["src/auth/login.sp:30"],
-    "ready_to_fill": ["src/auth/login.sp:45"]
-  }
-}
+{"event":"compile_result","file":"/tmp/spore-step9-watch.sp","status":"ok","errors":[],"timestamp":1775999403}
+{"event":"hole_graph_update","holes_total":1,"filled_this_cycle":0,"ready_to_fill":1,"blocked":0}
 ```
 
-**Diagnostic event:**
+Current stable events:
 
-```json
-{
-  "type": "diagnostic",
-  "file": "src/net/http.sp",
-  "line": 23, "column": 5,
-  "severity": "warning",
-  "code": "W001",
-  "message": "unused import: `Timeout`"
-}
-```
+| Event | Trigger | Data |
+|---|---|---|
+| `compile_result` | Each incremental compilation cycle | File path, status (`ok`/`error`), diagnostics payload, timestamp |
+| `hole_graph_update` | After a compile cycle that still contains holes | Hole-count summary: `holes_total`, `filled_this_cycle`, `ready_to_fill`, `blocked` |
 
-**Hole update event:**
+This summary stream is enough for save-compile feedback loops and for agents that pair watch mode with the richer batch hole commands (`sporec holes FILE --json`, `sporec query-hole FILE ?name --json`).
 
-```json
-{
-  "type": "hole_update",
-  "summary": { "total": 2, "ready_to_fill": 1, "blocked": 1 },
-  "changes": [
-    {
-      "action": "filled",
-      "hole": { "file": "src/auth.sp", "line": 10, "name": "hash_password" }
-    },
-    {
-      "action": "unblocked",
-      "hole": { "file": "src/auth.sp", "line": 20, "name": "verify_password" },
-      "reason": "dependency hash_password is now filled"
-    }
-  ]
-}
-```
+Future revisions may layer more detailed events — for example per-hole updates or full dependency-graph payloads — but those richer transports should extend the shared diagnostic / hole model rather than defining a competing watch-only schema.
 
 #### Error recovery
 
@@ -716,9 +730,9 @@ When the ceiling is exceeded:
 [watch] ✗ 1 error
 ```
 
-#### LSP Diagnostics JSON conversion + `spore/holeUpdate` schema
+#### LSP diagnostics mapping
 
-Watch events are converted to LSP messages by the Spore LSP server:
+LSP diagnostics are published directly from the compiler's shared diagnostics pipeline rather than by replaying watch NDJSON events:
 
 ```json
 {
@@ -739,7 +753,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
 }
 ```
 
-#### `spore/holeUpdate` custom LSP notification
+A custom `spore/holeUpdate` notification is a **future** extension, not the current stable LSP contract. If it is added later, it should reuse the same hole object/schema already exposed by `sporec holes` and `sporec query-hole`, rather than freezing a separate editor-only payload.
 
 ```json
 {
@@ -748,12 +762,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
     "holes": [
       {
         "uri": "file:///project/src/auth.sp",
-        "range": {
-          "start": { "line": 29, "character": 4 },
-          "end": { "line": 29, "character": 50 }
-        },
         "name": "authenticate",
-        "signature": "User -> Token",
         "status": "ready_to_fill"
       }
     ],
@@ -802,9 +811,10 @@ Color scheme: errors in red, warnings in yellow, notes in blue, help in green.
 Colors are disabled when output is piped (not a TTY) or when `--no-color` is
 passed.
 
-Every diagnostic **always** includes a `help:` line with a concrete fix
-suggestion. This is a hard design rule — no diagnostic may leave the user
-without a next step.
+Human-facing diagnostics should be **help-rich** when the compiler has a
+concrete next step to offer. The minimal shared IR keeps `help` optional so
+global diagnostics and self-explanatory failures are not forced to invent a
+fake suggestion.
 
 #### Verbose format (`--verbose`)
 
@@ -842,78 +852,111 @@ help: try `Money.from_string("fifty dollars")`
 
 #### JSON format (`--json`)
 
-The single source of truth. Every field rendered in default or verbose mode is
-derived from a JSON field. Schema:
+The long-term single source of truth is the shared Diagnostic IR. The first
+stabilized machine contract should freeze only the minimal canonical fields and
+make richer analysis payloads an explicit later layer.
+
+#### Canonical Diagnostic IR (minimal architecture target)
 
 ```json
 {
-  "version": "0.1",
-  "compiler": "sporec",
-  "diagnostics": [
+  "code": "E0301",
+  "severity": "error",
+  "message": "type mismatch: expected `Money`, found `String`",
+  "primary_span": {
+    "file": "src/billing.sp",
+    "range": {
+      "start": { "line": 42, "col": 22 },
+      "end": { "line": 42, "col": 37 }
+    }
+  },
+  "secondary_labels": [
     {
-      "severity": "error | warning | note",
-      "code": "E0301",
-      "message": "type mismatch: expected `Money`, found `String`",
-      "location": {
+      "span": {
         "file": "src/billing.sp",
         "range": {
-          "start": { "line": 42, "col": 22 },
-          "end": { "line": 42, "col": 37 }
+          "start": { "line": 42, "col": 5 },
+          "end": { "line": 42, "col": 11 }
         }
       },
-      "related": [],
-      "inference_chain": [],
-      "candidates": [],
-      "context": {
-        "capabilities": ["PaymentGateway"],
-        "cost_used": 120,
-        "cost_budget": 500,
-        "enclosing_function": "charge_customer",
-        "enclosing_module": "billing.payment",
-        "hole": null
-      },
-      "suggested_fix": {
-        "description": "use Money.from_string",
-        "applicability": "safe | unsafe | informational",
-        "edits": [
-          {
-            "file": "src/billing.sp",
-            "range": { "start": { "line": 42, "col": 22 }, "end": { "line": 42, "col": 37 } },
-            "new_text": "Money.from_string(\"fifty dollars\")"
-          }
-        ]
-      }
+      "message": "callee expects `Money` here"
     }
   ],
-  "summary": { "errors": 1, "warnings": 0, "notes": 0, "holes": 0 }
+  "notes": [
+    "enclosing function `charge_customer` uses `PaymentGateway`"
+  ],
+  "help": "try `Money.from_string(\"fifty dollars\")`",
+  "related": []
 }
 ```
 
-#### JSON field requirements
+The base IR deliberately excludes richer fields such as inference chains,
+candidate rankings, capability/cost context blobs, and machine-edit payloads.
+Those may be layered later as extension data or adjacent protocols, but they are
+not part of the minimal stable contract.
+
+#### Diagnostic field requirements
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `severity` | string | **required** | `"error"`, `"warning"`, or `"note"` |
-| `code` | string | **required** | Error code (e.g., `"E0301"`) |
+| `code` | string | **required** | Stable diagnostic code, for example `E0301` |
+| `severity` | string | **required** | `error`, `warning`, or `note` |
 | `message` | string | **required** | Human-readable headline |
-| `location` | object | **required** | Primary source location with file and range |
-| `related` | array | optional | Related source locations with messages |
-| `inference_chain` | array | optional | Step-by-step type derivation (populated in `--verbose` and `--json`) |
-| `candidates` | array | optional | Conversions/overloads considered by the compiler |
-| `context` | object | **required** | Capability, cost, and scope context |
-| `context.capabilities` | string[] | **required** | Capabilities in scope at error site |
-| `context.cost_used` | int | optional | Cost accumulated before error site (null if no cost clause) |
-| `context.cost_budget` | int | optional | Total cost budget (null if no cost clause) |
-| `context.enclosing_function` | string | **required** | Name of the containing function |
-| `context.enclosing_module` | string | **required** | Module path |
-| `context.hole` | string | optional | Hole name if this diagnostic is hole-related (null otherwise) |
-| `suggested_fix` | object | optional | Machine-applicable fix suggestion |
-| `suggested_fix.applicability` | string | **required** (if `suggested_fix` present) | `"safe"`, `"unsafe"`, or `"informational"` |
-| `suggested_fix.edits` | array | **required** (if `suggested_fix` present) | List of text edits |
+| `primary_span` | object \| null | **required** | Primary source location; `null` only for global diagnostics |
+| `secondary_labels` | array | optional | Additional labeled spans related to the same diagnostic |
+| `notes` | string[] | optional | Supplemental context lines |
+| `help` | string | optional | One actionable fix hint or next step |
+| `related` | array | optional | References to related diagnostics or locations |
 
-LSP compatibility: the JSON schema maps directly to LSP `Diagnostic` objects.
-Spore extension fields (`inference_chain`, `candidates`, `context`) are placed
-in the standard LSP `data.spore` namespace.
+```json
+{
+  "primary_span": {
+    "file": "src/billing.sp",
+    "range": {
+      "start": { "line": 42, "col": 22 },
+      "end": { "line": 42, "col": 37 }
+    }
+  }
+}
+```
+
+```json
+{
+  "secondary_labels": [
+    {
+      "span": {
+        "file": "src/billing.sp",
+        "range": {
+          "start": { "line": 42, "col": 5 },
+          "end": { "line": 42, "col": 11 }
+        }
+      },
+      "message": "callee expects `Money` here"
+    }
+  ],
+  "related": [
+    {
+      "code": "E0302",
+      "message": "return type mismatch",
+      "span": {
+        "file": "src/billing.sp",
+        "range": {
+          "start": { "line": 51, "col": 5 },
+          "end": { "line": 51, "col": 19 }
+        }
+      }
+    }
+  ]
+}
+```
+
+> **Current implementation status (2026-04):**
+>
+> The shared-model architecture is now the right description of the codebase: hole
+> commands already expose a shared typed-hole protocol, and CLI JSON plus LSP are
+> being treated as projections over the same diagnostics pipeline. The remaining
+> work is to finish freezing the minimal canonical field set and to extend richer
+> analysis/watch transports without reintroducing command-private schemas.
 
 #### Error code system
 
@@ -985,7 +1028,7 @@ Target latencies (aspirational, not hard guarantees):
 primary project-aware command for verifying correctness during development.
 
 ```bash
-spore check src/main.sp             # check a single entry module path
+spore check src/main.sp             # check one explicit file
 spore check src/main.sp src/net/http.sp
 spore check --deny-warnings src/main.sp src/net/http.sp
 ```
@@ -1012,13 +1055,14 @@ is passed.
 
 **Lint warnings** (severity = Warning, code prefix `W`) follow the same rule.
 
-#### `spore fmt`
+#### `spore format` / `spore fmt`
 
-`spore fmt` rewrites source files to conform to the canonical Spore style.
+`spore format` rewrites source files to conform to the canonical Spore style.
+`spore fmt` remains an alias.
 
 ```bash
-spore fmt src/main.sp src/net/http.sp
-spore fmt --check src/main.sp src/net/http.sp
+spore format src/main.sp src/net/http.sp
+spore format --check src/main.sp src/net/http.sp
 ```
 
 ##### Implementation strategy
@@ -1036,14 +1080,14 @@ implementation attaches comments to adjacent AST nodes during parsing (stored as
 leading/trailing trivia on `Spanned<T>`). Future work may adopt a CST
 (Concrete Syntax Tree) approach for perfect fidelity.
 
-**CI integration**: `spore fmt --check` is designed for CI pipelines. It exits
+**CI integration**: `spore format --check` is designed for CI pipelines. It exits
 with code 1 if any file would change, without modifying files. Combined with
 `spore check --deny-warnings`, these two commands form a complete CI static
 analysis gate:
 
 ```yaml
 # Example CI step
-- run: spore fmt --check src/main.sp src/net/http.sp
+- run: spore format --check src/main.sp src/net/http.sp
 - run: spore check --deny-warnings src/main.sp src/net/http.sp
 ```
 
@@ -1060,12 +1104,12 @@ modules are untouched. In practice this means sub-100ms feedback for most edits.
 
 ### Actionable diagnostics
 
-Every error message includes a `help:` line — no diagnostic leaves the
-developer stranded. The default output is concise (5–8 lines per error) and
-visually structured with Rust-style gutters and underlines, making it easy to
-scan 10–20 errors without fatigue. `--verbose` mode provides inference chains
-for complex type errors, letting developers understand *why* the compiler
-reached its conclusion without needing to read source code in a different window.
+The design goal is **help-rich** diagnostics without making `help` a fake
+required field. When the compiler has a concrete next step, the human renderer
+should show a `help:` line; otherwise it should still provide precise spans,
+clear notes, and stable codes. The default output remains concise (5–8 lines per
+error) and visually structured with Rust-style gutters and underlines, making
+10–20 diagnostics scannable without fatigue.
 
 ### Watch mode as primary workflow
 
@@ -1091,41 +1135,54 @@ implementations, then fill them one by one with immediate feedback.
 
 ### Structured consumption via `--json`
 
-Agents consume `spore check --json` output directly. The structured format enables
-programmatic reasoning without parsing human-readable text. Key fields:
+Agents should consume CLI JSON output directly instead of parsing human-readable
+text. The minimal stable contract for diagnostics is:
 
-- `diagnostics[]` — iterate over all diagnostics
-- `severity` — filter by error (must fix) vs. warning (should fix) vs. note
-- `code` prefix — categorize by subsystem (E/W/C/K/H/M)
-- `context.hole` — if non-null, use `--query-hole` for full report
-- `suggested_fix.edits` — if `applicability == "safe"`, apply directly
-- `inference_chain` + `candidates` — enough context to reason about errors
-  without re-reading source files
+- `code`
+- `severity`
+- `message`
+- `primary_span`
+- `secondary_labels`
+- `notes`
+- `help`
+- `related`
+
+Typical machine-oriented commands include:
+
+- `spore check --json`
+- `sporec holes FILE --json`
+- `sporec query-hole FILE ?HOLE --json`
+
+Richer analysis payloads such as inference chains, candidate rankings, and
+machine edits are follow-up layers, not part of the minimal contract frozen by
+this revision.
 
 ### Agent hole-filling workflow
 
 ```text
-1. Start  spore watch --json src/main.sp
-2. Parse initial hole list from NDJSON stream
-3. Select a  ready_to_fill  hole → generate implementation → write to file
-4. Wait for watch to emit compilation result
+1. Start  spore watch --json src/main.sp  or re-run  spore check --json
+2. Read batch diagnostics / hole summaries
+3. Select one hole → generate implementation → write to file
+4. Observe the next compilation result
 5. Success → proceed to next hole; Failure → read diagnostics, fix, retry
-6. Repeat until  holes = 0
+6. Repeat until no holes remain
 ```
 
-The NDJSON stream provides a continuous event bus: the agent subscribes to
-`incremental_compile`, `diagnostic`, and `hole_update` events without polling.
+The first stable milestone does **not** require a rich NDJSON protocol. Agents
+can already iterate on a combination of batch diagnostics and hole-specific JSON
+commands. A richer watch/event stream can be layered later on the same shared
+Diagnostic IR.
 
 #### Agent mode selection
 
 | Scenario | Recommended Mode | Rationale |
 |----------|-----------------|-----------|
-| Agent filling holes | `--json` | Parse diagnostics, apply fixes programmatically |
-| Agent debugging complex type error | `--json` | Use `inference_chain` and `candidates` for reasoning |
-| Agent in CI pipeline | `--json --stream` | Machine-readable, earliest feedback per diagnostic |
+| Agent filling holes | `spore check --json` + hole JSON commands | Stable machine-readable diagnostics plus hole-specific context |
+| Agent debugging compiler error | `--json` | Consume code/severity/message/spans/notes/help without parsing text |
+| Agent in CI pipeline | `--json` | Stable machine-readable contract |
 | Human scanning build output | Default | Concise, color-coded, glanceable |
-| Human debugging inference failure | `--verbose` | See inference chain in terminal |
-| IDE / LSP client | `--json` | Map to LSP Diagnostics with Spore extensions in `data` |
+| Human debugging inference failure | `--verbose` | Richer renderer over the same base diagnostics |
+| IDE / LSP client | LSP adapter over Diagnostic IR | Same canonical fields, editor-specific transport |
 
 #### Agent error recovery
 
@@ -1133,159 +1190,98 @@ When an Agent's fix introduces new errors, the diagnostic system supports iterat
 
 ```text
 1. Agent applies fix for E0301 (type mismatch)
-2. spore check --json → new E0303 (error type mismatch introduced by fix)
-3. Agent reads inference_chain for E0303 → understands the cascading error
+2. spore check --json → new diagnostic batch after the edit
+3. Agent reads code/span/notes/help for the new failure
 4. Agent applies a second fix addressing E0303
 5. spore check --json → 0 errors
 ```
 
-The `inference_chain` and `candidates` fields are specifically designed to give Agents enough context to reason about errors **without re-reading source files**. The original diagnostic for the first error is preserved in the Agent's context, enabling diff-based reasoning.
+The minimal shared fields are enough for iterative repair because the agent can
+anchor each retry on stable codes, spans, and notes. Richer analysis payloads
+can improve this loop later, but they should not be required for the base
+machine contract.
 
-### Future machine-applicable fix metadata
+### Future auto-fix integration
 
-The current public CLI does **not** yet expose machine-applicable fixes, fix
-flags, or a stable fix-specific JSON payload. This section records the future
-design target for editor / agent integration once such a surface exists.
+Machine-applicable fixes are intentionally **not** part of the minimal
+Diagnostic IR frozen by this SEP revision.
 
-Fix applicability categories:
+The current public CLI does not yet expose `--fix` or `--unsafe-fix`. When
+auto-fix support lands later, it should be layered as a separate code-action or
+edit payload built on top of the shared diagnostics model rather than expanding
+the minimal IR immediately.
 
-| Category | Future mode | Meaning |
-|----------|-------------|---------|
-| `safe` | dedicated fix mode | Preserves behavior and type safety |
-| `unsafe` | dedicated unsafe-fix mode | May change behavior; apply with caution |
-| `informational` | manual only | Requires judgment |
-
-#### Fix suggestion types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| **Replacement** | Replace a span with new text | `"fifty dollars"` → `Money.from_string("fifty dollars")` |
-| **Insertion** | Insert text at a position (zero-width range) | Adding `currency: Currency.USD` to struct literal |
-| **Deletion** | Remove a span (new_text is empty string) | Removing a redundant match arm |
-| **Multi-edit** | Multiple edits in one file | Adding `uses [NetRead]` clause and updating a binding |
-| **Multi-file** | Edits spanning multiple files | Adding `pub` in defining module and updating import in consumer |
-
-#### Fix suggestion JSON examples
-
-**Safe fix — missing import (Insertion):**
-
-```json
-{
-  "description": "add missing import for `DateTime`",
-  "applicability": "safe",
-  "edits": [
-    {
-      "file": "src/scheduler.sp",
-      "range": { "start": { "line": 2, "col": 1 }, "end": { "line": 2, "col": 1 } },
-      "new_text": "import time.DateTime\n"
-    }
-  ]
-}
-```
-
-**Unsafe fix — remove unused variable (Deletion):**
-
-```json
-{
-  "description": "remove unused variable `temp`",
-  "applicability": "unsafe",
-  "edits": [
-    {
-      "file": "src/billing.sp",
-      "range": { "start": { "line": 38, "col": 5 }, "end": { "line": 38, "col": 45 } },
-      "new_text": ""
-    }
-  ]
-}
-```
-
-**Multi-file fix — make function public (Multi-file):**
-
-```json
-{
-  "description": "make `helper_fn` public and update import",
-  "applicability": "unsafe",
-  "edits": [
-    {
-      "file": "src/utils.sp",
-      "range": { "start": { "line": 10, "col": 1 }, "end": { "line": 10, "col": 3 } },
-      "new_text": "pub fn"
-    },
-    {
-      "file": "src/api.sp",
-      "range": { "start": { "line": 3, "col": 1 }, "end": { "line": 3, "col": 1 } },
-      "new_text": "import utils.helper_fn\n"
-    }
-  ]
-}
-```
+That future layer may still distinguish categories such as `safe`, `unsafe`,
+and `informational`, but those categories should be specified only when the
+public CLI and edit protocol exist.
 
 ---
 
 ## Structured representation / protocol impact
 
-### LSP integration architecture
+### Shared diagnostics pipeline
+
+The stable machine contract is the shared Diagnostic IR, not any one renderer or
+transport:
 
 ```text
-┌──────────────┐   LSP Protocol   ┌──────────────┐  stdin/stdout  ┌──────────────┐
-│  Editor/IDE  │ ←──────────────→ │  Spore LSP   │ ←────────────→ │ spore watch  │
-│              │                   │  Server       │    (NDJSON)    │ --json       │
-└──────────────┘                   └──────────────┘                └──────────────┘
+typed crate-local errors
+  (ParseError / TypeError / ModuleError / ...)
+            │
+            ▼
+   sporec-diagnostics::Diagnostic
+            │
+      ┌─────┼─────┬──────────────┐
+      ▼     ▼     ▼              ▼
+   ariadne  JSON  LSP adapter    future watch / NDJSON transport
+   text     output
 ```
 
-The LSP server launches `spore watch --json <entry-file>` as a subprocess and translates the
-NDJSON event stream into LSP messages:
+This PR freezes the shared object model first. Rich streaming protocols are a
+later layer and should carry canonical diagnostics rather than inventing a
+separate schema.
 
-| Watch event | LSP message |
-|-------------|-------------|
-| `diagnostic` | `textDocument/publishDiagnostics` |
-| `incremental_compile` | Diagnostics refresh |
-| `hole_update` | Custom `spore/holeUpdate` notification |
+### LSP mapping
 
-#### LSP Diagnostic field mapping (precise)
+Target mapping from the canonical Diagnostic IR:
 
-| Spore JSON | LSP `Diagnostic` | Conversion |
-|------------|------------------|------------|
-| `severity: "error"` | `severity: 1` | Direct: error=1, warning=2, note=3 |
-| `severity: "warning"` | `severity: 2` | |
-| `severity: "note"` | `severity: 3` | |
-| `code` | `code` | Direct string copy |
-| `message` | `message` | Direct string copy |
-| `location.range.start.line` | `range.start.line` | Spore is 1-indexed; LSP is 0-indexed. Subtract 1. |
-| `location.range.start.col` | `range.start.character` | Spore is 1-indexed; LSP is 0-indexed. Subtract 1. |
-| `location.range.end.line` | `range.end.line` | Subtract 1 |
-| `location.range.end.col` | `range.end.character` | Subtract 1 |
-| `related` | `relatedInformation` | Map each entry to `DiagnosticRelatedInformation` |
-| `suggested_fix` | via `codeAction` | Mapped to LSP `CodeAction` with `edit.changes` |
-| `inference_chain` | `data.spore.inference_chain` | Spore extension in `data` field |
-| `candidates` | `data.spore.candidates` | Spore extension in `data` field |
-| `context` | `data.spore.context` | Spore extension in `data` field |
+| Diagnostic IR | LSP `Diagnostic` | Notes |
+|---------------|------------------|-------|
+| `severity` | `severity` | `error=1`, `warning=2`, `note=3` |
+| `code` | `code` | direct copy |
+| `message` | `message` | direct copy |
+| `primary_span.range` | `range` | convert 1-indexed line/col to LSP 0-indexed positions |
+| `related` | `relatedInformation` | when representable |
+| `secondary_labels`, `notes`, `help` | `data.spore` | retained even when the base LSP surface cannot render them losslessly |
 
-Compilation is triggered by file-system save events, not LSP `didChange` — this
-avoids expensive compilation of half-edited states.
+> **Current implementation status (2026-04):**
+>
+> The LSP server already publishes diagnostics from the compiler pipeline. The
+> remaining gap is lossless carriage of richer fields such as secondary labels,
+> notes, help, and hole-specific updates once the minimal canonical shape is fully
+> frozen.
 
-### JSON as the superset
+### JSON as the machine projection
 
-The `--json` format is the single source of truth:
+`--json` should serialize canonical diagnostics directly. Default text and
+future verbose text are renderer projections over the same objects.
 
-- Default mode renders a *projection* of the JSON
-- Verbose mode renders a *larger projection*
-- JSON mode renders *everything*
+The minimal stable contract in this revision is:
 
-This guarantees consistency: if the default output says "expected `Money`, found
-`String`", the JSON contains the same message *plus* the inference chain that
-produced it.
+- batch diagnostics first
+- shared field names across CLI JSON and LSP mapping
+- richer analysis payloads only after the base IR is stable
 
 ### Streaming vs. batch
 
-- **Batch** (default `--json`): single JSON object after compilation completes
-- **Streaming** (`--json --stream`): one NDJSON line per diagnostic as
-  discovered, with a `"type": "summary"` final line
+This revision still standardizes **batch diagnostic objects first**. Current watch NDJSON already emits `compile_result` plus summary `hole_graph_update`, but richer per-hole event payloads remain a later transport layer.
 
-Streaming is preferred for large projects and CI/CD pipelines where early
-feedback matters.
+When that richer streaming protocol is stabilized later, each event should carry either:
 
----
+- canonical `Diagnostic` objects, or
+- references to the shared typed-hole objects already exposed by `sporec holes FILE --json` / `sporec query-hole FILE ?name --json`
+
+That keeps watch, batch JSON, and LSP aligned on one machine protocol family instead of growing separate schemas.
 
 ## Diagnostics impact
 
@@ -1305,8 +1301,9 @@ help: <suggested fix>
 ```
 
 Severity, code, location, source context, and help are **mandatory** for every
-diagnostic. The `= note:` lines and `related` locations are optional but
-encouraged for complex errors.
+diagnostic architecture target. In the minimal shared IR, `code`, `severity`,
+`message`, and `primary_span` are mandatory; `secondary_labels`, `notes`,
+`help`, and `related` are optional enrichments.
 
 #### Multi-line error display
 
@@ -1396,7 +1393,7 @@ note[H0101]: hole `tax_logic` requires filling
    = note: available bindings: income: Money, region: Region
    = note: available capabilities: [TaxTable]
    = note: candidate: `tax_table.lookup(region, income) -> Money`
-help: run `sporec query-hole <file> tax_logic` for full HoleReport
+help: run `sporec query-hole src/tax.sp ?tax_logic` for full HoleReport
 ```
 
 ### Recovery strategies
@@ -1532,15 +1529,19 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Hole System integration
 
 - `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
-- `sporec query-hole <file> <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
+- `sporec query-hole <file> ?name` returns a full `HoleReport` — a superset of
+  `H0101` with candidate ranking, binding types, and cost budget
 - Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
 - The HoleReport JSON extends the diagnostic schema with a `hole_report` field
 
 #### Cost System integration
 
-- `K0101` (budget exceeded) includes cost breakdown in `inference_chain`
-- `K0102` (symbolic exceeded) includes the symbolic expression and concrete counterexample
-- `context.cost_used` and `context.cost_budget` are populated for **all** diagnostics in functions with `cost ≤ K`, not just cost errors
+- `K0101` (budget exceeded) should at minimum surface the exceeded budget and
+  the primary contributing span
+- `K0102` (symbolic exceeded) should at minimum surface the symbolic expression
+  and concrete counterexample when available
+- richer cost-breakdown payloads can be layered later as verbose or extension
+  data; they are not part of the minimal frozen IR
 
 #### Capability System integration
 
@@ -1550,21 +1551,24 @@ Three enforcement levels:
 2. **Module level** (`C0102`): function `uses` exceeds module ceiling
 3. **Platform level** (`C0201`): package requests capabilities Platform does not grant
 
-`context.capabilities` in every diagnostic lists capabilities in scope, enabling Agents to reason about available operations.
+Capability context may be rendered in notes or future verbose/extension data, but
+it is not a required field in the minimal frozen IR.
 
 #### Snapshot System integration
 
 - `M0401` (snapshot-changed) emits both expected and actual signature hashes
-- The `suggested_fix` for `M0401` is always `informational` — the developer must explicitly run `spore --permit` to accept the change
-- `related` field points to the changed signature's declaration
+- when there is a concrete next step, the human renderer may include a `help:`
+  line explaining that the developer must explicitly run `spore --permit`
+- `related` can point to the changed signature's declaration
 
 > **Note on `--permit`:** The `--permit` flag is a Codebase Manager (`spore`) command, not a compiler (`sporec`) flag. It updates `.spore-lock` to accept the new signature hash.
 
 #### Module System integration
 
-- `M0101` (circular dependency): `inference_chain` shows the full cycle path
-- `M0201` (visibility violation): `candidates` may list public alternatives
-- `M0301` (import not found): `suggested_fix` uses fuzzy matching for closest valid import
+- `M0101` (circular dependency): `notes` and `related` can surface the full cycle path
+- `M0201` (visibility violation): later verbose or extension data may list public alternatives
+- `M0301` (import not found): when fuzzy matches exist, the human renderer may
+  surface them via `help:` or `notes`
 
 ---
 
@@ -1656,15 +1660,19 @@ shares trait resolution infrastructure. Cost checking depends on fully resolved
 types and call graphs. Merging all three into a unified TypeCheck pass avoids
 redundant tree traversals and simplifies the impl hash boundary.
 
-### Why every diagnostic includes `help:`
+### Why diagnostics should be help-rich
 
-A diagnostic without a suggestion is a dead end. By mandating `help:` on every diagnostic:
+A diagnostic without a suggestion is often a dead end. The design therefore
+pushes strongly toward emitting `help:` whenever the compiler has a concrete next
+step:
 
-- Beginners always have a next step
-- Agents can extract fix suggestions without additional reasoning
-- The compiler team is forced to think about actionability when defining new error codes
+- beginners more often have an obvious next action
+- agents can extract fix suggestions when they exist
+- the compiler team is pushed to think about actionability when defining new
+  error codes
 
-Some `help:` lines are concrete (`try Money.from_string(...)`) and some are strategic (`extract shared types into a new module`). Both are valuable.
+But the minimal IR keeps `help` optional so global failures and
+self-explanatory diagnostics do not need to invent a fake suggestion.
 
 ### Why category-based error codes
 
@@ -1809,19 +1817,19 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
 
 4. **Parallel type-checking within a module.** The current design parallelizes
    across modules at the same topological level. Could independent functions
-   within a single module be type-checked in parallel? This depends on salsa's
-   granularity and the cost of synchronizing shared state (e.g., trait
-   resolution caches).
+   within a single module be type-checked in parallel? This depends on the
+   eventual dependency-tracking granularity and the cost of synchronizing shared
+   state (e.g., trait resolution caches).
 
 5. **LLVM backend.** When should an LLVM backend be added for release-optimized
    builds? This is a significant engineering effort. Cranelift may be sufficient
    for Spore's target use cases (networked services, CLI tools) where compile
    speed matters more than runtime performance.
 
-6. **Streaming granularity.** For `--json --stream`, should events be
-   per-diagnostic (current proposal, finest granularity) or per-module (less
-   noise, more batched)? Per-diagnostic gives earliest feedback but may
-   overwhelm agents processing large rebuilds.
+6. **Streaming granularity.** When the richer watch / JSON event transport is
+   standardized later, should events be per-diagnostic (finest granularity) or
+   per-module (less noise, more batched)? Per-diagnostic gives earliest
+   feedback but may overwhelm agents processing large rebuilds.
 
 7. **Internationalization of diagnostics.** Error codes are language-independent,
    but message text is currently English-only. Should `sporec explain` support
