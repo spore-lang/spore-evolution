@@ -170,7 +170,7 @@ fn generate_invoice(
 **Step 2 — Agent queries holes:**
 
 ```text
-$ sporec --query-hole ?validate_items --json
+$ sporec query-hole src/billing/invoice.sp ?validate_items --json
 ```
 
 The compiler returns a HoleReport (see §4 for the full structure) containing: expected type `Vec[LineItem]`, available bindings, candidate function `validate_line_items` with an exact type match, cost 300 within budget 5000.
@@ -184,7 +184,7 @@ validate_line_items(items)
 **Step 4 — Compiler verifies:**
 
 ```text
-$ sporec check src/billing/invoice.spore
+$ spore check src/billing/invoice.sp
 
 [partial] generate_invoice
   ?validate_items: filled ✓ (cost 300)
@@ -510,7 +510,7 @@ Circular hole dependencies are **compile errors**. Detection uses standard DFS c
 
 ```text
 error[H0301]: circular hole dependency detected
-  --> src/order.spore
+  --> src/order.sp
   |
   | ?validate_order depends on ?check_inventory  (value dependency)
   | ?check_inventory depends on ?validate_order  (type dependency)
@@ -684,7 +684,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
                │ select a hole from ready_to_fill                │
                ▼                                                 │
           ┌──────────┐                                           │
-          │ ANALYZE  │── sporec --query-hole ?name --json        │
+          │ ANALYZE  │── sporec query-hole <file> <name> --json  │
           └────┬─────┘   receive full HoleReport v0.3            │
                │                                                 │
                │ generate fill code                              │
@@ -715,7 +715,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
 
 **DISCOVER**: The Agent starts `spore watch --json` and receives a `hole_graph_update` event containing the full dependency graph, `ready_to_fill` list, and `blocked` list. The Agent selects one or more holes from `ready_to_fill`.
 
-**ANALYZE**: For each selected hole, the Agent requests its HoleReport via `sporec --query-hole ?name --json`. It examines:
+**ANALYZE**: For each selected hole, the Agent requests its HoleReport via `sporec query-hole <file> <name> --json`. It examines:
 
 - `confidence.candidate_ranking`:
   - `"unique_best"` → use the top candidate directly
@@ -748,7 +748,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
       {
         "code": "E0301",
         "message": "type mismatch: expected Vec[ValidItem], found Vec[RawItem]",
-        "location": { "file": "src/orders.spore", "line": 18, "column": 5 },
+        "location": { "file": "src/orders.sp", "line": 18, "column": 5 },
         "suggestion": "consider using validate_items(raw_input).map(|i| i.into())"
       }
     ],
@@ -825,14 +825,14 @@ fn convert(input: ?InputType) -> ?OutputType
 **Reporting:**
 
 ```text
-$ sporec --holes --type-holes
+$ sporec holes --type-holes
 
 Type holes:
-  ?InputType   in convert (src/convert.spore:1)  — parameter type
-  ?OutputType  in convert (src/convert.spore:1)  — return type
+  ?InputType   in convert (src/convert.sp:1)  — parameter type
+  ?OutputType  in convert (src/convert.sp:1)  — return type
 
 Value holes:
-  ?conversion_logic  in convert (src/convert.spore:5)  — body
+  ?conversion_logic  in convert (src/convert.sp:5)  — body
 ```
 
 **Intended behavior:** When both type holes and value holes are present, the compiler first attempts to infer type holes from usage context (e.g., if `convert` is called with a known argument type). If inference succeeds, the value hole's expected type becomes determined. If inference fails, the value hole is reported with type `_` (unconstrained).
@@ -924,10 +924,10 @@ If the Agent fills with an impure expression:
 ### CLI interface
 
 ```text
-$ sporec --holes                         # list all holes
-$ sporec --holes --json                  # machine-readable
-$ sporec --query-hole ?name              # full HoleReport for one hole
-$ sporec --query-hole ?name --json       # JSON format
+$ sporec holes                           # list all holes
+$ sporec holes --json                    # machine-readable
+$ sporec query-hole <file> <name>        # full HoleReport for one hole
+$ sporec query-hole <file> <name> --json # JSON format
 $ sporec --simulate fn_name              # multi-path simulation
 $ spore holes --suggest-order            # topological ordering
 $ spore holes --graph                    # dependency graph visualization
@@ -1113,14 +1113,14 @@ t13        COMMIT ── all holes filled ────────────�
 
 All hole-related commands support `--json` for machine consumption.
 
-**`sporec --holes --json`:**
+**`sporec holes --json`:**
 
 ```json
 {
   "holes": [
     {
       "name": "charge_payment",
-      "location": { "file": "src/orders.spore", "line": 18, "column": 5 },
+      "location": { "file": "src/orders.sp", "line": 18, "column": 5 },
       "enclosing_function": "process_order",
       "expected_type": "Response ! PaymentFailed",
       "capabilities": ["Inventory", "PaymentGateway"],
@@ -1134,7 +1134,7 @@ All hole-related commands support `--json` for machine consumption.
 }
 ```
 
-**`sporec --query-hole ?name --json`:** Returns the full HoleReport v0.3 structure (see §4).
+**`sporec query-hole <file> <name> --json`:** Returns the full HoleReport v0.3 structure (see §4).
 
 **`spore watch --json`:** Emits an NDJSON event stream with `hole_graph_update`, `hole_update`, and `compile_result` events.
 
@@ -1149,8 +1149,8 @@ All hole-related commands support `--json` for machine consumption.
     "filled_holes": 3,
     "remaining_holes": 5,
     "ready_to_fill": [
-      { "name": "validate_input", "file": "src/order.spore", "line": 42 },
-      { "name": "check_auth", "file": "src/auth.spore", "line": 15 }
+      { "name": "validate_input", "file": "src/order.sp", "line": 42 },
+      { "name": "check_auth", "file": "src/auth.sp", "line": 15 }
     ],
     "blocked": [
       { "name": "process_order", "blocked_by": ["validate_input", "check_auth"] },
@@ -1229,7 +1229,7 @@ On failed fill: full diagnostic with `root_cause`, `fix_hints`, and `suggestion`
 
 ### Alternative 1: Anonymous Holes (`?`)
 
-Rejected. Anonymous holes create ambiguity in CLI queries (`sporec --query-hole ?` with multiple holes) and prevent clear communication between human and Agent. No mainstream language with typed holes (Agda, Idris, Lean) defaults to anonymous holes in practice — users always name them.
+Rejected. Anonymous holes create ambiguity in CLI queries (`sporec query-hole <file> ?` with multiple holes) and prevent clear communication between human and Agent. No mainstream language with typed holes (Agda, Idris, Lean) defaults to anonymous holes in practice — users always name them.
 
 ### Alternative 2: Holes Affect Signature Hashes
 

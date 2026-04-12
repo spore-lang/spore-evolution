@@ -244,7 +244,7 @@ fn save_data(data: Data) -> Unit {
 
 ```text
 error[cap-violation]: function body uses undeclared effect
-  --> src/storage.spore:1:1
+  --> src/storage.sp:1:1
    |
  1 | fn save_data(data: Data) -> Unit {
    |    ^^^^^^^^^ no `uses` clause declared
@@ -617,7 +617,7 @@ When an agent or developer fills a Hole with code that exceeds the available set
 
 ```text
 ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised effects:
-  --> src/service.spore:15:5
+  --> src/service.sp:15:5
    |
 15 |     ?fetch_logic    // filled with: fetch_and_save(url)
    |     ^^^^^^^^^^^^ hole fill exceeds available effects
@@ -865,7 +865,7 @@ Example diagnostic:
 
 ```text
 error[cap-violation]: function body uses undeclared effect
-  --> src/app.spore:12:5
+  --> src/app.sp:12:5
    |
 10 | fn process(data: Data) -> Result
 11 | uses [FileRead]

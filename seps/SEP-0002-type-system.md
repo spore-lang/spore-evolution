@@ -1772,7 +1772,7 @@ Type errors are emitted as structured JSON for Agent consumption:
 ```json
 {"error": "type_mismatch", "context": "function `add`",
  "expected": "Int", "actual": "String",
- "location": "main.spore:5:12"}
+ "location": "main.sp:5:12"}
 ```
 
 ## Diagnostics impact

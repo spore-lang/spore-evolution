@@ -1344,7 +1344,7 @@ fn example() {
 
 #### HoleReport JSON format
 
-When queried (`sporec --query-hole ?name`), the compiler emits a structured report:
+When queried (`sporec query-hole <file> <name>`), the compiler emits a structured report:
 
 ```json
 {
@@ -1703,7 +1703,7 @@ Spore's explicit syntax enables highly specific error messages:
 
 ```text
 error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declare it
-  --> src/api.spore:12:5
+  --> src/api.sp:12:5
    |
 12 | fn fetch_data(url: Url) -> Data ! NetworkError {
    |    ^^^^^^^^^^ missing `uses` clause
@@ -1716,7 +1716,7 @@ error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declar
 
 ```text
 error[E0401]: non-exhaustive match expression
-  --> src/main.spore:25:5
+  --> src/main.sp:25:5
    |
 25 | match color {
    |       ^^^^^ missing variant `Blue`
@@ -1728,7 +1728,7 @@ error[E0401]: non-exhaustive match expression
 
 ```text
 error[E0101]: `for` loops are not supported in Spore
-  --> src/main.spore:10:5
+  --> src/main.sp:10:5
    |
 10 | for x in list {
    | ^^^ Spore uses recursion and higher-order functions instead of loops
@@ -1741,7 +1741,7 @@ error[E0101]: `for` loops are not supported in Spore
 
 ```text
 error[E0501]: `spec` must appear after all other signature clauses
-  --> src/lib.spore:5:1
+  --> src/lib.sp:5:1
    |
  5 | spec { ... }
  6 | cost ≤ 500
@@ -1753,7 +1753,7 @@ error[E0501]: `spec` must appear after all other signature clauses
 
 ```text
 spec failure: `parse_date` — example "ISO 8601"
-  --> src/dates.spore:5:5
+  --> src/dates.sp:5:5
    |
  5 |     example "ISO 8601": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
    |
@@ -1765,7 +1765,7 @@ spec failure: `parse_date` — example "ISO 8601"
 
 ```text
 spec counterexample: `parse_date` — property "round-trip"
-  --> src/dates.spore:9:5
+  --> src/dates.sp:9:5
    |
  9 |     property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
    |
@@ -1778,7 +1778,7 @@ spec counterexample: `parse_date` — property "round-trip"
 
 ```text
 warning[W0501]: public function `parse_date` has no `spec` block
-  --> src/dates.spore:3:1
+  --> src/dates.sp:3:1
    |
  3 | pub fn parse_date(s: String) -> Result[Date, ParseError] ! ParseError {
    |        ^^^^^^^^^^ no behavioral contract declared
