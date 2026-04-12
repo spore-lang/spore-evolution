@@ -986,8 +986,8 @@ primary project-aware command for verifying correctness during development.
 
 ```bash
 spore check src/main.sp             # check a single entry module path
-spore check src/**/*.sp             # check all source files
-spore check --deny-warnings src/**/*.sp
+spore check src/main.sp src/net/http.sp
+spore check --deny-warnings src/main.sp src/net/http.sp
 ```
 
 ##### Implementation strategy
@@ -1017,8 +1017,8 @@ is passed.
 `spore fmt` rewrites source files to conform to the canonical Spore style.
 
 ```bash
-spore fmt src/**/*.sp               # format files in place
-spore fmt --check src/**/*.sp       # exit 1 if any file would change (no writes)
+spore fmt src/main.sp src/net/http.sp
+spore fmt --check src/main.sp src/net/http.sp
 ```
 
 ##### Implementation strategy
@@ -1043,8 +1043,8 @@ analysis gate:
 
 ```yaml
 # Example CI step
-- run: spore fmt --check src/**/*.sp
-- run: spore check --deny-warnings src/**/*.sp
+- run: spore fmt --check src/main.sp src/net/http.sp
+- run: spore check --deny-warnings src/main.sp src/net/http.sp
 ```
 
 ---
@@ -1141,27 +1141,19 @@ When an Agent's fix introduces new errors, the diagnostic system supports iterat
 
 The `inference_chain` and `candidates` fields are specifically designed to give Agents enough context to reason about errors **without re-reading source files**. The original diagnostic for the first error is preserved in the Agent's context, enabling diff-based reasoning.
 
-### Machine-applicable fix metadata
+### Future machine-applicable fix metadata
 
-Agents can apply machine-applicable fixes from `spore check --json`
-diagnostics even though the current public CLI does not yet expose a dedicated
-`fix` subcommand:
-
-```bash
-# Inspect machine-readable fixes for one file
-spore check --json src/billing.sp
-
-# Example: extract proposed edits for an editor or agent workflow
-spore check --json src/billing.sp | jq '.diagnostics[]? | select(.fixes != null) | .fixes'
-```
+The current public CLI does **not** yet expose machine-applicable fixes, fix
+flags, or a stable fix-specific JSON payload. This section records the future
+design target for editor / agent integration once such a surface exists.
 
 Fix applicability categories:
 
-| Category | Flag | Meaning |
-|----------|------|---------|
-| `safe` | `--fix` | Preserves behavior and type safety |
-| `unsafe` | `--unsafe-fix` | May change behavior; apply with caution |
-| `informational` | *(manual)* | Requires judgment |
+| Category | Future mode | Meaning |
+|----------|-------------|---------|
+| `safe` | dedicated fix mode | Preserves behavior and type safety |
+| `unsafe` | dedicated unsafe-fix mode | May change behavior; apply with caution |
+| `informational` | manual only | Requires judgment |
 
 #### Fix suggestion types
 

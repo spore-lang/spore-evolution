@@ -600,10 +600,10 @@ handler MockClock {
 }
 ```
 
-Running `spore test tests/**/*.sp` automatically uses the Test Platform:
+Running `spore test tests/fetch_weather_test.sp` automatically uses the Test Platform:
 
 ```bash
-$ spore test tests/**/*.sp
+$ spore test tests/fetch_weather_test.sp
    Using test platform: spore-platform/test v1.0.0
    Running 3 tests
 
@@ -753,9 +753,9 @@ $ spore check src/billing/invoice.sp
 **Full workflow**:
 
 ```bash
-spore check src/**/*.sp        # see [info] diagnostics suggesting capabilities
+spore check src/billing/invoice.sp
 # add the suggested #![uses(...)] pragma manually or via editor tooling
-spore check src/**/*.sp        # clean: no more [info] suggestions
+spore check src/billing/invoice.sp
 ```
 
 The current public CLI reports the inferred capability pragma in diagnostics, but
@@ -1597,14 +1597,14 @@ effect Exit   { fn exit(code: I32) -> Never }
 #### Module and build commands
 
 ```text
-spore check [path...]           Check one or more source / entry files
-spore build [path]             Build the current project or one explicit file
-spore test [path...]           Validate test / spec files
-spore fmt [path...]            Format source, including import ordering
-sporec compile [path...]       Compile explicit input files
-sporec holes [path]            List holes in a source file
-sporec query-hole [path] [id]  Inspect one named hole in a source file
-sporec explain [code]          Explain one diagnostic code
+spore check [path...]            Check one or more source / entry files
+spore build [path]               Build the current project or one explicit file
+spore test [path...]             Validate test / spec files
+spore fmt [path...]              Format source, including import ordering
+sporec compile [path...]         Compile explicit input files
+sporec holes [path]              List holes in a source file
+sporec query-hole [path] [id]    Inspect one named hole in a source file
+sporec explain [code]            Explain one diagnostic code
 ```
 
 #### Snapshot and lock commands
@@ -1675,10 +1675,10 @@ spore add https://github.com/spore-std/json --sig-only
 spore check src/main.sp
 
 # 4. Format before review
-spore fmt src/**/*.sp
+spore fmt src/main.sp src/cli.sp
 
 # 5. Build and test
-spore build && spore test tests/**/*.sp
+spore build && spore test tests/main_test.sp
 
 # 6. If a dependency's signature changed, review and accept
 spore --permit billing.tax.calculate
@@ -1706,7 +1706,7 @@ spore run src/main.sp
 ```bash
 spore deps                      # view current dependency tree
 spore update http               # update to latest commit
-spore test tests/**/*.sp        # verify tests still pass
+spore test tests/http_test.sp   # verify tests still pass
 spore audit                     # check for capability changes
 git add .spore-lock spore.toml
 git commit -m "Update http to latest"
