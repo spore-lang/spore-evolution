@@ -532,37 +532,67 @@ The type system tracks all effects. Effects propagate upward: if you call a func
 A Platform declares three things:
 
 1. **Capability set**: Which IO capabilities it handles.
-2. **Effect handler implementations**: Runtime logic for each capability.
-3. **Startup contract**: The function contract that the selected module's
+2. **Startup contract**: The function contract that the selected module's
    startup function must satisfy.
+3. **Host adapter surface**: The package-owned adapter that bridges the
+   application startup into the Platform runtime.
+
+For the current MVP bridge, the source of truth is split between the Platform
+package manifest and a dedicated contract module inside the package:
+
+```toml
+# basic-cli/spore.toml
+[package]
+name = "basic-cli"
+type = "platform"
+
+[platform]
+contract-module = "platform_contract"
+startup-contract = "main"
+adapter-function = "main_for_host"
+handles = ["Console", "FileRead", "FileWrite", "Env", "Spawn"]
+```
 
 ```spore
-platform CliPlatform {
-    version: "1.0.0"
-    handles [FileRead, FileWrite, StdOut, StdErr, NetRead, NetWrite, Clock, Spawn, Exit]
-    startup: fn(args: List[Str]) -> I32 ! Exit
+// basic-cli/src/platform_contract.sp
+pub fn main() -> () {
+    ?platform_startup_contract
+}
 
-    handler FileReadHandler {
-        File.read(path: Path) -> Result[Bytes, IoError] {
-            resume(ffi_read_file(path))
-        }
-    }
-    // ...
+pub fn main_for_host(app_main: () -> ()) -> () {
+    app_main()
+    return
 }
 ```
 
-Platform selection in `spore.toml`:
+The hole-backed startup function in the Platform contract module is the
+authoritative startup signature. Applications targeting that Platform must
+implement the same startup function name/signature in their entry module. Any
+`spec` items attached to the Platform contract and the application
+implementation both apply.
+
+Parser-level `platform { ... }` blocks remain future sugar over the same
+package-owned contract; the MVP does not require that syntax to land first.
+
+Application-side Platform selection in `spore.toml`:
 
 ```toml
-[platform]
-git = "https://github.com/spore-platform/cli"
-version = "1.0.0"
+[dependencies]
+basic-cli = { path = "../basic-cli" }
+
+[project]
+platform = "basic-cli"
+default-entry = "app"
+
+[entries.app]
+path = "src/main.sp"
 ```
 
 The compiler verifies:
 
-- Every capability used by application code is handled by the selected Platform.
-- The startup function in the selected entry module matches the Platform's startup contract.
+- Every capability used by application code is handled by the selected Platform package's `[platform]` metadata.
+- The startup function in the selected entry module matches the Platform contract module's startup contract.
+- The selected Platform package exports the named adapter from its contract module.
 - Test and mock Platforms may be substituted during testing, but a project binds to one Platform at a time.
 
 #### One Platform per project
@@ -803,7 +833,10 @@ Package names are `kebab-case` and globally unique within a registry. Module pat
 
 An application declares one or more named **entries** in `spore.toml`. Each
 entry selects an **entry module**, and the selected Platform then validates the
-module's **startup function** against its **startup contract**.
+module's **startup function** against its **startup contract**. Under the MVP
+bridge, the selected Platform package manifest names the contract module and
+startup symbol, and that contract module owns the hole-backed startup
+definition whose `spec` items stack with the application's own implementation.
 
 The default emitted executable or run target name is the selected entry name:
 
@@ -828,8 +861,10 @@ path = "src/migrate.sp"
 ```
 
 Each entry path must point to a `.sp` file containing a startup function that
-satisfies the selected Platform's startup contract. Today that function is
-usually `main`.
+satisfies the selected Platform's startup contract. Under the MVP bridge, the
+selected Platform package manifest names the contract module and startup symbol,
+while that contract module owns the hole-backed startup definition and adapter.
+`basic-cli` currently uses `main` plus `main_for_host`.
 
 #### Content-addressed dependencies (BLAKE3, no semver)
 
@@ -1387,7 +1422,7 @@ platform LambdaPlatform {
 
 Effect handlers support three dispatch modes:
 
-1. **Direct FFI**: Handler calls native code directly.
+1. **Direct FFI (inside a Platform package)**: Handler calls native code directly.
 
 ```spore
 handler DirectFfi {
@@ -1426,7 +1461,7 @@ handler StatefulCache {
 }
 ```
 
-**FFI integration**: Platform handlers call native code via `foreign fn` declarations:
+**FFI integration**: Platform handlers call native code via `foreign fn` declarations. These declarations live in Platform-owned modules; application packages consume the Platform surface, not the native symbols directly:
 
 ```spore
 foreign fn ffi_read_file(path: Bytes) -> FfiResult[Bytes]
