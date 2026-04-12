@@ -81,13 +81,13 @@ A developer interacts with the toolchain through both `spore` and `sporec`:
 spore build
 
 # Check without codegen
-spore check
+spore check src/main.sp
 
 # Watch mode — recompile on save, show diagnostics in real time
-spore watch
+spore watch src/main.sp
 
 # Watch mode with JSON output for agents / IDEs
-spore watch --json
+spore watch --json src/main.sp
 
 # Explicit-input compiler invocation
 sporec compile src/main.sp
@@ -96,7 +96,7 @@ sporec compile src/main.sp
 sporec explain E0301
 
 # Query a specific hole
-sporec query-hole tax_logic --json
+sporec query-hole --json src/main.sp tax_logic
 ```
 
 ### What the developer sees
@@ -126,7 +126,7 @@ help: try `Money.from_string("fifty dollars")`
 **In watch mode:**
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] Watching project: ./my-project (42 modules)
 [watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
 
@@ -471,11 +471,8 @@ fn on_file_changed(path: Path) -> ChangeResult:
 #### Command and flags
 
 ```bash
-spore watch                        # Watch current project
-spore watch --json                 # NDJSON output for IDEs / agents
-spore watch --project ./my-proj    # Specify project path
-spore watch --quiet                # Only show errors
-spore watch --jobs 4               # Specify parallelism
+spore watch src/main.sp             # Watch one entry file / project target
+spore watch --json src/main.sp      # NDJSON output for IDEs / agents
 ```
 
 #### Debounce strategy
@@ -566,7 +563,7 @@ Watch mode **never exits** (except on Ctrl+C). Recovery behavior:
 #### Complete watch terminal output
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] Watching project: ./my-project (42 modules)
 [watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
 
@@ -587,7 +584,7 @@ $ spore watch
 #### Hole fill progressive watch session
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] ✓ Initial compilation complete, 0 errors, 3 holes
 
   Holes (3):
@@ -988,9 +985,9 @@ Target latencies (aspirational, not hard guarantees):
 primary project-aware command for verifying correctness during development.
 
 ```bash
-spore check                       # check the current project
+spore check src/main.sp             # check a single entry module path
 spore check src/**/*.sp             # check all source files
-spore check --deny-warnings .       # treat warnings as errors (for CI)
+spore check --deny-warnings src/**/*.sp
 ```
 
 ##### Implementation strategy
@@ -1108,7 +1105,7 @@ programmatic reasoning without parsing human-readable text. Key fields:
 ### Agent hole-filling workflow
 
 ```text
-1. Start  spore watch --json
+1. Start  spore watch --json src/main.sp
 2. Parse initial hole list from NDJSON stream
 3. Select a  ready_to_fill  hole → generate implementation → write to file
 4. Wait for watch to emit compilation result
@@ -1144,18 +1141,18 @@ When an Agent's fix introduces new errors, the diagnostic system supports iterat
 
 The `inference_chain` and `candidates` fields are specifically designed to give Agents enough context to reason about errors **without re-reading source files**. The original diagnostic for the first error is preserved in the Agent's context, enabling diff-based reasoning.
 
-### Auto-fix integration
+### Machine-applicable fix metadata
 
-Agents can apply machine-applicable fixes automatically:
-
-> **Note:** DESIGN.md uses `--fixes` in some places; the canonical CLI flag is `--fix` (consistent with `compiler-output-v0.1` spec).
+Agents can apply machine-applicable fixes from `spore check --json`
+diagnostics even though the current public CLI does not yet expose a dedicated
+`fix` subcommand:
 
 ```bash
-# Apply all safe fixes
-sporec --fix src/billing.sp
+# Inspect machine-readable fixes for one file
+spore check --json src/billing.sp
 
-# Preview fixes without applying
-sporec --fix --dry-run src/billing.sp
+# Example: extract proposed edits for an editor or agent workflow
+spore check --json src/billing.sp | jq '.diagnostics[]? | select(.fixes != null) | .fixes'
 ```
 
 Fix applicability categories:
@@ -1244,7 +1241,7 @@ Fix applicability categories:
 └──────────────┘                   └──────────────┘                └──────────────┘
 ```
 
-The LSP server launches `spore watch --json` as a subprocess and translates the
+The LSP server launches `spore watch --json <entry-file>` as a subprocess and translates the
 NDJSON event stream into LSP messages:
 
 | Watch event | LSP message |
@@ -1407,7 +1404,7 @@ note[H0101]: hole `tax_logic` requires filling
    = note: available bindings: income: Money, region: Region
    = note: available capabilities: [TaxTable]
    = note: candidate: `tax_table.lookup(region, income) -> Money`
-help: run `sporec query-hole tax_logic` for full HoleReport
+help: run `sporec query-hole <file> tax_logic` for full HoleReport
 ```
 
 ### Recovery strategies
@@ -1543,7 +1540,7 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Hole System integration
 
 - `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
-- `sporec query-hole <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
+- `sporec query-hole <file> <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
 - Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
 - The HoleReport JSON extends the diagnostic schema with a `hole_report` field
 

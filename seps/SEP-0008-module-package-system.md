@@ -69,6 +69,9 @@ In traditional languages, IO operations are built into the standard library, mak
 
 Every `.sp` file is exactly one module. The module name is derived from the file's path relative to the package's `src/` root:
 
+The canonical source extension in docs and manifests is `.sp`. Compatibility-only
+`.spore` handling, where it exists, is secondary to this spelling.
+
 | File Path | Module Name |
 |---|---|
 | `src/billing/invoice.sp` | `billing.invoice` |
@@ -249,9 +252,7 @@ The compiler builds a directed acyclic graph (DAG) of module dependencies:
 3. Determine topological build order. Modules at the same level compile in parallel.
 
 ```text
-$ spore build --show-order
-
-Build order (topological):
+Illustrative topological build order:
   1. billing.types       (0 dependencies)
   2. billing.tax         (1 dependency: billing.types)
   3. billing.invoice     (2 dependencies: billing.types, billing.tax)
@@ -384,7 +385,7 @@ Compatibility checking uses only `sig`: if `sig` is unchanged, dependents need n
 When a signature changes, all downstream modules referencing the old `sig` are flagged:
 
 ```text
-$ spore check
+$ spore check src/main.sp
 
 [warning] signature changed: billing.tax.calculate
   old sig: d91e4b
@@ -599,10 +600,10 @@ handler MockClock {
 }
 ```
 
-Running `spore test` automatically uses the Test Platform:
+Running `spore test tests/**/*.sp` automatically uses the Test Platform:
 
 ```bash
-$ spore test
+$ spore test tests/**/*.sp
    Using test platform: spore-platform/test v1.0.0
    Running 3 tests
 
@@ -692,7 +693,7 @@ pub fn fetch(url: Url) -> Result[Bytes, NetError]
 { ... }
 ```
 
-If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration. The `sporec --fix` flag auto-applies the inferred pragma.
+If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration.
 
 #### Capability propagation
 
@@ -732,11 +733,11 @@ fn send_email(to: Email, body: String) -> Unit ! SmtpError
         or move this function to a module that allows EmailService
 ```
 
-#### Capability violation error examples and `--fix` flow
+#### Capability violation error examples and remediation flow
 
 **Ceiling violation**: The error shown above.
 
-**Auto-fix with `sporec --fix`**: When a module omits its capability pragma, the compiler infers it:
+**Diagnostic hint**: When a module omits its capability pragma, the compiler infers it:
 
 ```text
 $ spore check src/billing/invoice.sp
@@ -752,12 +753,13 @@ $ spore check src/billing/invoice.sp
 **Full workflow**:
 
 ```bash
-spore check src/               # see [info] diagnostics suggesting capabilities
-sporec --fix src/              # auto-apply all capability declarations
-spore check src/               # clean: no more [info] suggestions
+spore check src/**/*.sp        # see [info] diagnostics suggesting capabilities
+# add the suggested #![uses(...)] pragma manually or via editor tooling
+spore check src/**/*.sp        # clean: no more [info] suggestions
 ```
 
-The `--fix` flag writes the inferred capability pragma as the first line of the module file.
+The current public CLI reports the inferred capability pragma in diagnostics, but
+does not yet auto-apply it.
 
 ### Package management
 
@@ -887,7 +889,7 @@ grant = [
 At runtime, the capability ceiling is enforced:
 
 ```bash
-spore run --allow network:listen:8080 --allow filesystem:read:/data
+spore run src/main.sp
 ```
 
 The `spore audit` command reports the full capability graph, flagging any ungrantable or suspicious requirements.
@@ -1143,7 +1145,7 @@ network:          filesystem:        env:            process:
                                       monotonic       fast
 ```
 
-For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime (`spore run --allow ...`), not in the type system. Promoting fine-grained capabilities into the type system is reserved for a future SEP.
+For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained capabilities into the type system is reserved for a future SEP.
 
 ### Publish and discovery flow
 
@@ -1595,13 +1597,14 @@ effect Exit   { fn exit(code: I32) -> Never }
 #### Module and build commands
 
 ```text
-spore check [path]            Check modules for errors
-spore check --show-deps       Show dependency graph
-spore build                   Build project entries in topological order
-spore build --show-order      Show module build order
-sporec holes [path]           List all holes across modules
-sporec --fix [path]           Auto-apply inferred capability declarations
-spore fmt [path]              Format source, including import ordering
+spore check [path...]           Check one or more source / entry files
+spore build [path]             Build the current project or one explicit file
+spore test [path...]           Validate test / spec files
+spore fmt [path...]            Format source, including import ordering
+sporec compile [path...]       Compile explicit input files
+sporec holes [path]            List holes in a source file
+sporec query-hole [path] [id]  Inspect one named hole in a source file
+sporec explain [code]          Explain one diagnostic code
 ```
 
 #### Snapshot and lock commands
@@ -1669,13 +1672,13 @@ spore add https://github.com/spore-std/http --alias std-http
 spore add https://github.com/spore-std/json --sig-only
 
 # 3. Write code, then check
-spore check src/
+spore check src/main.sp
 
-# 4. Auto-apply capability declarations
-sporec --fix src/
+# 4. Format before review
+spore fmt src/**/*.sp
 
 # 5. Build and test
-spore build && spore test
+spore build && spore test tests/**/*.sp
 
 # 6. If a dependency's signature changed, review and accept
 spore --permit billing.tax.calculate
@@ -1693,9 +1696,9 @@ mkdir my-app && cd my-app
 spore init
 spore add https://github.com/spore-std/http --alias std-http
 spore add https://github.com/spore-std/json --sig-only
-spore check src/
+spore check src/main.sp
 spore build
-spore run --allow network:listen:8080
+spore run src/main.sp
 ```
 
 #### Scenario 2: Update a dependency
@@ -1703,7 +1706,7 @@ spore run --allow network:listen:8080
 ```bash
 spore deps                      # view current dependency tree
 spore update http               # update to latest commit
-spore test                      # verify tests still pass
+spore test tests/**/*.sp        # verify tests still pass
 spore audit                     # check for capability changes
 git add .spore-lock spore.toml
 git commit -m "Update http to latest"
@@ -1780,7 +1783,7 @@ git push origin main --tags
 
 ### Workflow ergonomics
 
-- **`sporec --fix`** auto-applies inferred capability declarations, lowering the barrier for new users.
+- **Structured diagnostics** surface inferred capability declarations for manual or editor-assisted application, lowering the barrier for new users.
 - **`spore --permit`** provides explicit acknowledgment of breaking changes, preventing accidental API breakage.
 - **No semver** means developers never debate whether a change is "major" or "minor". The compiler decides mechanically.
 
@@ -1998,7 +2001,7 @@ New fields added to `.spore-lock` are ignored by older tools (forward-compatible
 
 The module system does not require wholesale adoption:
 
-- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later via `sporec --fix`.
+- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later once diagnostics show the inferred set.
 - Dependencies can mix Git, local path, and registry sources.
 - The `version` field in `spore.toml` remains available for human communication during the transition from semver.
 
@@ -2095,11 +2098,14 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 | Command | Description |
 |---|---|
-| `spore check [path]` | Check modules for errors and warnings |
-| `spore build` | Build project entries in topological order |
-| `sporec holes [path]` | List all holes in modules |
-| `sporec --fix [path]` | Auto-apply inferred capability declarations |
-| `spore fmt [path]` | Format source code (including import ordering) |
+| `spore check [path...]` | Check one or more source / entry files |
+| `spore build [path]` | Build the current project or one explicit file |
+| `spore test [path...]` | Validate test / spec files |
+| `spore fmt [path...]` | Format source code (including import ordering) |
+| `sporec compile [path...]` | Compile explicit input files |
+| `sporec holes [path]` | List all holes in a source file |
+| `sporec query-hole [path] [id]` | Inspect one named hole in a source file |
+| `sporec explain [code]` | Explain one diagnostic code |
 
 ### Snapshot and hash commands
 
