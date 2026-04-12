@@ -181,6 +181,25 @@
       "discussion": "https://github.com/spore-lang/spore-evolution/discussions",
       "pr": null,
       "superseded_by": null
+    },
+    {
+      "path": "drafts/script-mode.md",
+      "sep": null,
+      "title": "Draft SEP: Script Mode & Inline Script Metadata",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Spore maintainers"
+      ],
+      "created": "2026-04-12",
+      "requires": [
+        1,
+        6,
+        8
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions",
+      "pr": null,
+      "superseded_by": null
     }
   ]
 }
