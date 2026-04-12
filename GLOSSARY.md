@@ -60,7 +60,13 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (capability), K (cost), M (module), W (warning).
 
+**Default entry** (SEP-0008): The manifest-selected entry used when project commands omit an explicit entry name.
+
 ## E
+
+**Entry** (SEP-0008): A manifest-selected executable target within a project. An entry resolves to an entry module.
+
+**Entry module** (SEP-0008): The source file and derived module selected by an entry, such as `src/main.sp` → `main`.
 
 **`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
 
@@ -122,7 +128,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## P
 
-**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded), granting capabilities and defining the program entry point.
+**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded). Each manifest-backed project binds exactly one Platform, and each selected entry module must satisfy its startup contract.
 
 **Prelude** (SEP-0009): The set of types and functions available in every Spore module without explicit import.
 
@@ -148,7 +154,15 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
 
+**spore** (SEP-0006, SEP-0008): The project/package workflow CLI. It owns `build`, `check`, `test`, `run`, `fmt`, `update`, and `upgrade`.
+
+**sporec** (SEP-0006, SEP-0008): The low-level explicit-input compiler CLI. It owns `compile`, `holes`, `query-hole`, and `explain`.
+
 **Structured concurrency** (SEP-0007): Concurrency model where all spawned tasks are scoped to their parent block, ensuring no task outlives its creator.
+
+**Startup contract** (SEP-0008): The Platform-defined requirement on the startup function's parameters, return type, and effect boundary.
+
+**Startup function** (SEP-0008): The callable inside the selected entry module that satisfies the Platform's startup contract. Today this is usually `main`.
 
 ## T
 

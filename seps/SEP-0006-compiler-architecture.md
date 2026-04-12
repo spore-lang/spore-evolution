@@ -74,26 +74,29 @@ models, holes, and content-addressed modules.
 
 ### Compiling a Spore program
 
-A developer interacts with the compiler through the `sporec` CLI:
+A developer interacts with the toolchain through both `spore` and `sporec`:
 
 ```bash
-# One-shot compilation
-sporec build src/main.spore
+# Project-aware build
+spore build
 
 # Check without codegen
-sporec check src/main.spore
+spore check src/main.sp
 
 # Watch mode — recompile on save, show diagnostics in real time
-spore watch
+spore watch src/main.sp
 
 # Watch mode with JSON output for agents / IDEs
-spore watch --json
+spore watch --json src/main.sp
+
+# Explicit-input compiler invocation
+sporec compile src/main.sp
 
 # Explain an error code
-sporec --explain E0301
+sporec explain E0301
 
 # Query a specific hole
-sporec --query-hole tax_logic --json
+sporec query-hole --json src/main.sp tax_logic
 ```
 
 ### What the developer sees
@@ -101,10 +104,10 @@ sporec --query-hole tax_logic --json
 **On success:**
 
 ```text
-$ sporec build src/main.spore
-  Compiling main (src/main.spore)
-  Compiling http (src/net/http.spore)
-  Compiling auth (src/auth/login.spore)
+$ spore build
+  Compiling main (src/main.sp)
+  Compiling http (src/net/http.sp)
+  Compiling auth (src/auth/login.sp)
     Finished build in 1.4s — 3 modules, 0 errors, 0 warnings
 ```
 
@@ -112,7 +115,7 @@ $ sporec build src/main.spore
 
 ```text
 error[E0301]: type mismatch
-  --> src/billing.spore:42:22
+  --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
    |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
@@ -123,15 +126,15 @@ help: try `Money.from_string("fifty dollars")`
 **In watch mode:**
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] Watching project: ./my-project (42 modules)
 [watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
 
 [watch] Waiting for file changes...
 
 [watch] ─── Change detected ─────────────────────
-[watch] File changed: src/auth/login.spore
-[watch] Recompiling: src/auth/login.spore ... OK (34ms)
+[watch] File changed: src/auth/login.sp
+[watch] Recompiling: src/auth/login.sp ... OK (34ms)
 [watch] sig hash unchanged → skipping downstream
   ✓ 0 errors, 2 warnings, 4 holes (was: 5)
 ```
@@ -154,7 +157,7 @@ verbose adds analysis detail to default; default is the minimal actionable view.
 ### Pipeline overview
 
 ```text
-Source Text (.spore files)
+Source Text (.sp files)
     │
     ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -468,11 +471,8 @@ fn on_file_changed(path: Path) -> ChangeResult:
 #### Command and flags
 
 ```bash
-spore watch                        # Watch current project
-spore watch --json                 # NDJSON output for IDEs / agents
-spore watch --project ./my-proj    # Specify project path
-spore watch --quiet                # Only show errors
-spore watch --jobs 4               # Specify parallelism
+spore watch src/main.sp             # Watch one entry file / project target
+spore watch --json src/main.sp      # NDJSON output for IDEs / agents
 ```
 
 #### Debounce strategy
@@ -501,17 +501,17 @@ t=100ms  Begin incremental compile {A, B, C}
   "type": "incremental_compile",
   "timestamp": "2026-01-15T10:30:45Z",
   "trigger": {
-    "file": "src/auth/login.spore",
+    "file": "src/auth/login.sp",
     "change_type": "impl_only"
   },
-  "recompiled": ["src/auth/login.spore"],
+  "recompiled": ["src/auth/login.sp"],
   "skipped_downstream": true,
   "duration_ms": 34,
   "diagnostics": [],
   "holes": {
     "total": 4,
-    "filled_this_cycle": ["src/auth/login.spore:30"],
-    "ready_to_fill": ["src/auth/login.spore:45"]
+    "filled_this_cycle": ["src/auth/login.sp:30"],
+    "ready_to_fill": ["src/auth/login.sp:45"]
   }
 }
 ```
@@ -521,7 +521,7 @@ t=100ms  Begin incremental compile {A, B, C}
 ```json
 {
   "type": "diagnostic",
-  "file": "src/net/http.spore",
+  "file": "src/net/http.sp",
   "line": 23, "column": 5,
   "severity": "warning",
   "code": "W001",
@@ -538,11 +538,11 @@ t=100ms  Begin incremental compile {A, B, C}
   "changes": [
     {
       "action": "filled",
-      "hole": { "file": "src/auth.spore", "line": 10, "name": "hash_password" }
+      "hole": { "file": "src/auth.sp", "line": 10, "name": "hash_password" }
     },
     {
       "action": "unblocked",
-      "hole": { "file": "src/auth.spore", "line": 20, "name": "verify_password" },
+      "hole": { "file": "src/auth.sp", "line": 20, "name": "verify_password" },
       "reason": "dependency hash_password is now filled"
     }
   ]
@@ -563,20 +563,20 @@ Watch mode **never exits** (except on Ctrl+C). Recovery behavior:
 #### Complete watch terminal output
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] Watching project: ./my-project (42 modules)
 [watch] ✓ Initial compilation complete (1.2s), 0 errors, 2 warnings, 5 holes
 
   Warnings:
-    src/net/http.spore:23:5  unused import: `Timeout`        [W0102]
-    src/db/query.spore:45:12 unused capability: `FileSystem`  [W0105]
+    src/net/http.sp:23:5  unused import: `Timeout`        [W0102]
+    src/db/query.sp:45:12 unused capability: `FileSystem`  [W0105]
 
   Holes (5):
-    ◯ src/auth/login.spore:30   authenticate     : User -> Token
-    ◯ src/auth/login.spore:45   validate_token   : Token -> Bool
-    ◯ src/db/query.spore:12     execute_query    : Query -> Result
-    ◯ src/net/http.spore:67     handle_request   : Request -> Response
-    ◯ src/net/http.spore:89     parse_headers    : Bytes -> Headers
+    ◯ src/auth/login.sp:30   authenticate     : User -> Token
+    ◯ src/auth/login.sp:45   validate_token   : Token -> Bool
+    ◯ src/db/query.sp:12     execute_query    : Query -> Result
+    ◯ src/net/http.sp:67     handle_request   : Request -> Response
+    ◯ src/net/http.sp:89     parse_headers    : Bytes -> Headers
 
 [watch] Waiting for file changes...
 ```
@@ -584,21 +584,21 @@ $ spore watch
 #### Hole fill progressive watch session
 
 ```text
-$ spore watch
+$ spore watch src/main.sp
 [watch] ✓ Initial compilation complete, 0 errors, 3 holes
 
   Holes (3):
-    ◯ src/auth.spore:10  hash_password     : String -> HashedPassword
-    ◯ src/auth.spore:20  verify_password   : String -> HashedPassword -> Bool
-    ◯ src/app.spore:50   create_user       : UserInput -> Result User Error
+    ◯ src/auth.sp:10  hash_password     : String -> HashedPassword
+    ◯ src/auth.sp:20  verify_password   : String -> HashedPassword -> Bool
+    ◯ src/app.sp:50   create_user       : UserInput -> Result User Error
          ⚠ blocked: depends on hash_password, verify_password
   Ready to fill: hash_password, verify_password
 
 // --- Developer fills hash_password ---
 
 [watch] ─── Change detected ────────────────────────
-[watch] File changed: src/auth.spore
-[watch] Recompiling: src/auth.spore ... OK (28ms)
+[watch] File changed: src/auth.sp
+[watch] Recompiling: src/auth.sp ... OK (28ms)
 [watch] sig hash unchanged → skipping downstream
   ✓ 0 errors, 2 holes (was: 3)
     ● hash_password      [filled ✓]
@@ -609,10 +609,10 @@ $ spore watch
 // --- Developer fills verify_password ---
 
 [watch] ─── Change detected ────────────────────────
-[watch] File changed: src/auth.spore
-[watch] Recompiling: src/auth.spore ... OK (31ms)
+[watch] File changed: src/auth.sp
+[watch] Recompiling: src/auth.sp ... OK (31ms)
 [watch] sig hash changed → checking downstream:
-         └─ src/app.spore ... OK (22ms)
+         └─ src/app.sp ... OK (22ms)
   ✓ 0 errors, 1 hole
     ● verify_password    [filled ✓]
     ◯ create_user       → no longer blocked!
@@ -621,8 +621,8 @@ $ spore watch
 // --- Developer fills create_user ---
 
 [watch] ─── Change detected ────────────────────────
-[watch] File changed: src/app.spore
-[watch] Recompiling: src/app.spore ... OK (35ms)
+[watch] File changed: src/app.sp
+[watch] Recompiling: src/app.sp ... OK (35ms)
   ✓ 0 errors, 0 holes 🎉 All holes filled!
 ```
 
@@ -691,8 +691,8 @@ fn update_dep_graph(module_id: ModuleId, old_deps: Set<ModuleId>, new_deps: Set<
 [watch] Checking project capability ceiling...
          ceiling allows: {Network, FileSystem, Clock} → ✓ within bounds
 [watch] Downstream capability compatibility:
-         ├─ src/api/client.spore → OK
-         └─ src/app.spore → propagation stops
+         ├─ src/api/client.sp → OK
+         └─ src/app.sp → propagation stops
 [watch] ✓ 3 modules recompiled, 0 errors, 1 capability warning
 ```
 
@@ -709,9 +709,9 @@ When the ceiling is exceeded:
 ```text
 [watch] Cost change: sort: O(n·log n) → O(n²)
 [watch] Checking downstream cost budgets:
-         ├─ src/data/table.spore
+         ├─ src/data/table.sp
          │   sort_column budget: O(n·log n) → ✗ exceeded
-         └─ src/app.spore
+         └─ src/app.sp
              process_data budget: O(n²) → ✓ within bounds
 [watch] ✗ 1 error
 ```
@@ -724,7 +724,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
 {
   "method": "textDocument/publishDiagnostics",
   "params": {
-    "uri": "file:///project/src/auth.spore",
+    "uri": "file:///project/src/auth.sp",
     "diagnostics": [{
       "range": {
         "start": { "line": 22, "character": 9 },
@@ -747,7 +747,7 @@ Watch events are converted to LSP messages by the Spore LSP server:
   "params": {
     "holes": [
       {
-        "uri": "file:///project/src/auth.spore",
+        "uri": "file:///project/src/auth.sp",
         "range": {
           "start": { "line": 29, "character": 4 },
           "end": { "line": 29, "character": 50 }
@@ -820,7 +820,7 @@ Example:
 
 ```text
 error[E0301]: type mismatch
-  --> src/billing.spore:42:22
+  --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
    |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
@@ -855,7 +855,7 @@ derived from a JSON field. Schema:
       "code": "E0301",
       "message": "type mismatch: expected `Money`, found `String`",
       "location": {
-        "file": "src/billing.spore",
+        "file": "src/billing.sp",
         "range": {
           "start": { "line": 42, "col": 22 },
           "end": { "line": 42, "col": 37 }
@@ -877,7 +877,7 @@ derived from a JSON field. Schema:
         "applicability": "safe | unsafe | informational",
         "edits": [
           {
-            "file": "src/billing.spore",
+            "file": "src/billing.sp",
             "range": { "start": { "line": 42, "col": 22 }, "end": { "line": 42, "col": 37 } },
             "new_text": "Money.from_string(\"fifty dollars\")"
           }
@@ -928,13 +928,13 @@ All diagnostics carry categorized codes:
 | `H0xxx` | Hole diagnostics | hole report, partial function, type conflict |
 | `M0xxx` | Module errors | circular dependency, visibility violation |
 
-Every code is queryable: `sporec --explain E0301` prints a detailed explanation
+Every code is queryable: `sporec explain E0301` prints a detailed explanation
 with common causes, examples, and fix strategies.
 
-#### `sporec --explain` output format
+#### `sporec explain` output format
 
 ```text
-$ sporec --explain E0301
+$ sporec explain E0301
 
   E0301: type mismatch
 
@@ -982,12 +982,12 @@ Target latencies (aspirational, not hard guarantees):
 #### `spore check`
 
 `spore check` performs all static analyses without code generation. It is the
-primary command for verifying correctness during development.
+primary project-aware command for verifying correctness during development.
 
 ```bash
-spore check src/main.spore          # check a single entry point
-spore check src/**/*.sp             # check all source files
-spore check --deny-warnings .       # treat warnings as errors (for CI)
+spore check src/main.sp             # check a single entry module path
+spore check src/main.sp src/net/http.sp
+spore check --deny-warnings src/main.sp src/net/http.sp
 ```
 
 ##### Implementation strategy
@@ -1012,13 +1012,13 @@ is passed.
 
 **Lint warnings** (severity = Warning, code prefix `W`) follow the same rule.
 
-#### `spore format`
+#### `spore fmt`
 
-`spore format` rewrites source files to conform to the canonical Spore style.
+`spore fmt` rewrites source files to conform to the canonical Spore style.
 
 ```bash
-spore format src/**/*.sp            # format files in place
-spore format --check src/**/*.sp    # exit 1 if any file would change (no writes)
+spore fmt src/main.sp src/net/http.sp
+spore fmt --check src/main.sp src/net/http.sp
 ```
 
 ##### Implementation strategy
@@ -1036,15 +1036,15 @@ implementation attaches comments to adjacent AST nodes during parsing (stored as
 leading/trailing trivia on `Spanned<T>`). Future work may adopt a CST
 (Concrete Syntax Tree) approach for perfect fidelity.
 
-**CI integration**: `spore format --check` is designed for CI pipelines. It exits
+**CI integration**: `spore fmt --check` is designed for CI pipelines. It exits
 with code 1 if any file would change, without modifying files. Combined with
 `spore check --deny-warnings`, these two commands form a complete CI static
 analysis gate:
 
 ```yaml
 # Example CI step
-- run: spore format --check src/**/*.sp
-- run: spore check --deny-warnings src/**/*.sp
+- run: spore fmt --check src/main.sp src/net/http.sp
+- run: spore check --deny-warnings src/main.sp src/net/http.sp
 ```
 
 ---
@@ -1091,7 +1091,7 @@ implementations, then fill them one by one with immediate feedback.
 
 ### Structured consumption via `--json`
 
-Agents consume `sporec --json` output directly. The structured format enables
+Agents consume `spore check --json` output directly. The structured format enables
 programmatic reasoning without parsing human-readable text. Key fields:
 
 - `diagnostics[]` — iterate over all diagnostics
@@ -1105,7 +1105,7 @@ programmatic reasoning without parsing human-readable text. Key fields:
 ### Agent hole-filling workflow
 
 ```text
-1. Start  spore watch --json
+1. Start  spore watch --json src/main.sp
 2. Parse initial hole list from NDJSON stream
 3. Select a  ready_to_fill  hole → generate implementation → write to file
 4. Wait for watch to emit compilation result
@@ -1133,35 +1133,27 @@ When an Agent's fix introduces new errors, the diagnostic system supports iterat
 
 ```text
 1. Agent applies fix for E0301 (type mismatch)
-2. sporec --json → new E0303 (error type mismatch introduced by fix)
+2. spore check --json → new E0303 (error type mismatch introduced by fix)
 3. Agent reads inference_chain for E0303 → understands the cascading error
 4. Agent applies a second fix addressing E0303
-5. sporec --json → 0 errors
+5. spore check --json → 0 errors
 ```
 
 The `inference_chain` and `candidates` fields are specifically designed to give Agents enough context to reason about errors **without re-reading source files**. The original diagnostic for the first error is preserved in the Agent's context, enabling diff-based reasoning.
 
-### Auto-fix integration
+### Future machine-applicable fix metadata
 
-Agents can apply machine-applicable fixes automatically:
-
-> **Note:** DESIGN.md uses `--fixes` in some places; the canonical CLI flag is `--fix` (consistent with `compiler-output-v0.1` spec).
-
-```bash
-# Apply all safe fixes
-sporec --fix src/billing.spore
-
-# Preview fixes without applying
-sporec --fix --dry-run src/billing.spore
-```
+The current public CLI does **not** yet expose machine-applicable fixes, fix
+flags, or a stable fix-specific JSON payload. This section records the future
+design target for editor / agent integration once such a surface exists.
 
 Fix applicability categories:
 
-| Category | Flag | Meaning |
-|----------|------|---------|
-| `safe` | `--fix` | Preserves behavior and type safety |
-| `unsafe` | `--unsafe-fix` | May change behavior; apply with caution |
-| `informational` | *(manual)* | Requires judgment |
+| Category | Future mode | Meaning |
+|----------|-------------|---------|
+| `safe` | dedicated fix mode | Preserves behavior and type safety |
+| `unsafe` | dedicated unsafe-fix mode | May change behavior; apply with caution |
+| `informational` | manual only | Requires judgment |
 
 #### Fix suggestion types
 
@@ -1183,7 +1175,7 @@ Fix applicability categories:
   "applicability": "safe",
   "edits": [
     {
-      "file": "src/scheduler.spore",
+      "file": "src/scheduler.sp",
       "range": { "start": { "line": 2, "col": 1 }, "end": { "line": 2, "col": 1 } },
       "new_text": "import time.DateTime\n"
     }
@@ -1199,7 +1191,7 @@ Fix applicability categories:
   "applicability": "unsafe",
   "edits": [
     {
-      "file": "src/billing.spore",
+      "file": "src/billing.sp",
       "range": { "start": { "line": 38, "col": 5 }, "end": { "line": 38, "col": 45 } },
       "new_text": ""
     }
@@ -1215,12 +1207,12 @@ Fix applicability categories:
   "applicability": "unsafe",
   "edits": [
     {
-      "file": "src/utils.spore",
+      "file": "src/utils.sp",
       "range": { "start": { "line": 10, "col": 1 }, "end": { "line": 10, "col": 3 } },
       "new_text": "pub fn"
     },
     {
-      "file": "src/api.spore",
+      "file": "src/api.sp",
       "range": { "start": { "line": 3, "col": 1 }, "end": { "line": 3, "col": 1 } },
       "new_text": "import utils.helper_fn\n"
     }
@@ -1241,7 +1233,7 @@ Fix applicability categories:
 └──────────────┘                   └──────────────┘                └──────────────┘
 ```
 
-The LSP server launches `spore watch --json` as a subprocess and translates the
+The LSP server launches `spore watch --json <entry-file>` as a subprocess and translates the
 NDJSON event stream into LSP messages:
 
 | Watch event | LSP message |
@@ -1322,7 +1314,7 @@ When an error spans multiple lines, the gutter marks the full range:
 
 ```text
 error[E0102]: struct missing required field `currency`
-  --> src/billing.spore:15:5
+  --> src/billing.sp:15:5
    |
 15 | /   let invoice = Invoice {
 16 | |       amount: 100,
@@ -1356,7 +1348,7 @@ Colors are disabled when output is piped (not a TTY) or when `--no-color` is pas
 
 ```text
 error[E0301]: type mismatch
-  --> src/billing.spore:42:22
+  --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
    |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
@@ -1368,7 +1360,7 @@ help: try `Money.from_string("fifty dollars")`
 
 ```text
 error[C0101]: undeclared capability
-  --> src/report.spore:27:5
+  --> src/report.sp:27:5
    |
 27 |     http.get(endpoint)
    |     ^^^^^^^^^^^^^^^^^^ requires `NetRead`, not declared in `uses`
@@ -1382,7 +1374,7 @@ help: add a `uses [NetRead]` clause to `fetch_data`
 
 ```text
 error[K0101]: cost budget exceeded
-  --> src/analytics.spore:55:5
+  --> src/analytics.sp:55:5
    |
 55 |     full_table_scan(records)
    |     ^^^^^^^^^^^^^^^^^^^^^^^^ this call costs 8200 op
@@ -1396,7 +1388,7 @@ help: filter `records` before scanning, or increase budget to `cost ≤ 10000`
 
 ```text
 note[H0101]: hole `tax_logic` requires filling
-  --> src/tax.spore:12:5
+  --> src/tax.sp:12:5
    |
 12 |     ?tax_logic
    |     ^^^^^^^^^^ expected type: `Money`, remaining cost budget: 400 op
@@ -1404,7 +1396,7 @@ note[H0101]: hole `tax_logic` requires filling
    = note: available bindings: income: Money, region: Region
    = note: available capabilities: [TaxTable]
    = note: candidate: `tax_table.lookup(region, income) -> Money`
-help: run `sporec --query-hole tax_logic` for full HoleReport
+help: run `sporec query-hole <file> tax_logic` for full HoleReport
 ```
 
 ### Recovery strategies
@@ -1427,7 +1419,7 @@ errors into `= note: N additional errors caused by this`.
 
 ### Complete Error Code Registry
 
-All diagnostics carry a categorized code. Every code is queryable: `sporec --explain CODE`.
+All diagnostics carry a categorized code. Every code is queryable: `sporec explain CODE`.
 
 #### E0xxx — Type Errors
 
@@ -1540,7 +1532,7 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Hole System integration
 
 - `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
-- `sporec --query-hole <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
+- `sporec query-hole <file> <name>` returns a full `HoleReport` — a superset of H0101 with candidate ranking, binding types, cost budget
 - Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
 - The HoleReport JSON extends the diagnostic schema with a `hole_report` field
 
@@ -1678,8 +1670,8 @@ Some `help:` lines are concrete (`try Money.from_string(...)`) and some are stra
 
 Codes like `E0301` are more useful than raw names:
 
-- **Filterable:** `sporec --json | jq '.diagnostics[] | select(.code | startswith("K"))'` gives all cost errors
-- **Discoverable:** `sporec --explain E0301` opens documentation
+- **Filterable:** `spore check --json | jq '.diagnostics[] | select(.code | startswith("K"))'` gives all cost errors
+- **Discoverable:** `sporec explain E0301` opens documentation
 - **Stable:** codes don't change when messages are reworded; CI can allowlist specific codes
 - **Cross-referencing:** docs, forums, and issue trackers reference `E0301` unambiguously
 
@@ -1832,7 +1824,7 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
    overwhelm agents processing large rebuilds.
 
 7. **Internationalization of diagnostics.** Error codes are language-independent,
-   but message text is currently English-only. Should `sporec --explain` support
+   but message text is currently English-only. Should `sporec explain` support
    localized explanations in a future version? This would require a translation
    infrastructure.
 

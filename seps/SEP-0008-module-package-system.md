@@ -20,7 +20,7 @@ superseded_by: null
 
 ## Summary
 
-This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `spore.lock` for reproducible builds, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a two-layer capability ceiling (project-wide in `spore.toml` + file-level `#![uses(...)]` pragma) secures the supply chain.
+This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a two-layer capability ceiling (project-wide in `spore.toml` + file-level `#![uses(...)]` pragma) secures the supply chain.
 
 The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the two-layer capability ceiling, the import/alias separation, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
 
@@ -67,19 +67,22 @@ In traditional languages, IO operations are built into the standard library, mak
 
 ### Module declaration
 
-Every `.spore` file is exactly one module. The module name is derived from the file's path relative to the package's `src/` root:
+Every `.sp` file is exactly one module. The module name is derived from the file's path relative to the package's `src/` root:
+
+The canonical source extension in docs and manifests is `.sp`. Compatibility-only
+`.spore` handling, where it exists, is secondary to this spelling.
 
 | File Path | Module Name |
 |---|---|
-| `src/billing/invoice.spore` | `billing.invoice` |
-| `src/auth/token.spore` | `auth.token` |
-| `src/utils.spore` | `utils` |
-| `src/main.spore` | `main` |
+| `src/billing/invoice.sp` | `billing.invoice` |
+| `src/auth/token.sp` | `auth.token` |
+| `src/utils.sp` | `utils` |
+| `src/main.sp` | `main` |
 
 There is no `module` keyword — the filesystem **is** the declaration. A file-level pragma may narrow the module's capability ceiling (see [Two-layer capability ceiling](#two-layer-capability-ceiling)):
 
 ```spore
-// src/billing/invoice.spore
+// src/billing/invoice.sp
 #![uses(PaymentGateway, AuditLog)]
 
 import billing.types
@@ -158,49 +161,29 @@ my-billing-lib/
 ├── spore.toml              // package manifest
 ├── src/
 │   ├── billing/
-│   │   ├── invoice.spore   -- module: billing.invoice
-│   │   ├── tax.spore       -- module: billing.tax
-│   │   └── types.spore     -- module: billing.types
-│   └── utils.spore         -- module: utils
+│   │   ├── invoice.sp   -- module: billing.invoice
+│   │   ├── tax.sp       -- module: billing.tax
+│   │   └── types.sp     -- module: billing.types
+│   └── utils.sp         -- module: utils
 └── test/
     └── billing/
-        └── invoice_test.spore
+        └── invoice_test.sp
 ```
 
-Four package types exist:
+Three package types exist:
 
 | Type | Has Platform? | Can do IO? | Use Case |
 |---|---|---|---|
 | `package` | No | No (declares capability requirements) | Libraries, reusable components |
 | `application` | Yes | Yes (via Platform) | Executables, services |
 | `platform` | Is the Platform | Yes (raw syscalls) | Runtime providers |
-| `script` | Implicit | Yes (via `--platform` flag) | Single-file programs, prototypes |
 
 ### Script Mode
 
-Spore supports a lightweight **script mode** for single-file programs that require no `spore.toml` manifest:
-
-```bash
-# Run a single file directly with an implicit platform
-spore run hello.sp --platform cli
-
-# Equivalent to an implicit application with:
-#   [package]
-#   type = "application"
-#   platform = { git = "https://github.com/spore-lang/basic-cli" }
-```
-
-Script mode is ideal for quick prototypes, teaching, and small utilities. The compiler infers:
-
-- **Platform**: From `--platform` flag (required for scripts using IO effects). `cli` is shorthand for `spore-lang/basic-cli`.
-- **Capabilities**: Inherited from the specified platform's defaults.
-- **Dependencies**: Scripts cannot declare external dependencies. For multi-file or dependency-heavy projects, use `spore.toml`.
-
-Constraints:
-
-- A script is a single `.sp` file with a `main` function.
-- No `spore.toml` or `spore.lock` is generated.
-- The file's module name is derived from its filename (e.g., `hello.sp` → module `hello`).
+Script mode is intentionally **out of scope** for SEP-0008. Manifest-free
+single-file execution, file-header metadata, and script-vs-project precedence
+rules are specified by a separate script-mode SEP. SEP-0008 covers
+manifest-backed packages and applications only.
 
 ### Platforms
 
@@ -228,27 +211,30 @@ The same application code can run on different Platforms—CLI, Web, WASM, Embed
 
 #### File-to-module mapping
 
-The compiler maps `.spore` files to modules using the path relative to `src/`:
+The compiler maps `.sp` files to modules using the path relative to `src/`:
 
 ```text
 module_name = path.relative_to("src/")
-                  .strip_extension(".spore")
+                  .strip_extension(".sp")
                   // path separators become '.' in the module name
 ```
 
-Module name segments must be lowercase `snake_case`. Reserved names (`main`, `platform`, `test`) carry special semantics.
+Module name segments must be lowercase `snake_case`. Reserved names (`platform`,
+`test`) may carry tooling conventions, but executable selection is
+manifest-level: a module named `main` is only the default entry module by
+convention, not by special module semantics.
 
 #### Empty modules
 
-An empty `.spore` file is a valid module. It compiles successfully, exports nothing, and has no capabilities:
+An empty `.sp` file is a valid module. It compiles successfully, exports nothing, and has no capabilities:
 
 ```spore
-// src/billing/future.spore
+// src/billing/future.sp
 // This module is a placeholder for future billing features.
 ```
 
 ```text
-$ sporec check src/billing/future.spore
+$ spore check src/billing/future.sp
 
 [ok] billing.future
   exports: (none)
@@ -266,9 +252,7 @@ The compiler builds a directed acyclic graph (DAG) of module dependencies:
 3. Determine topological build order. Modules at the same level compile in parallel.
 
 ```text
-$ sporec build --show-order
-
-Build order (topological):
+Illustrative topological build order:
   1. billing.types       (0 dependencies)
   2. billing.tax         (1 dependency: billing.types)
   3. billing.invoice     (2 dependencies: billing.types, billing.tax)
@@ -296,7 +280,7 @@ qualified_item ::= module_path '.' IDENT
 
 #### Import ordering convention
 
-The compiler does not enforce import order, but `sporec fmt` auto-sorts imports into four groups separated by blank lines:
+The compiler does not enforce import order, but `spore fmt` auto-sorts imports into four groups separated by blank lines:
 
 ```spore
 // 1. Platform / standard library imports
@@ -401,7 +385,7 @@ Compatibility checking uses only `sig`: if `sig` is unchanged, dependents need n
 When a signature changes, all downstream modules referencing the old `sig` are flagged:
 
 ```text
-$ sporec check
+$ spore check src/main.sp
 
 [warning] signature changed: billing.tax.calculate
   old sig: d91e4b
@@ -453,17 +437,17 @@ alias Compute = billing.invoice.compute_totals          // private alias
 Attempting to access a private item from another module:
 
 ```text
-[error] visibility violation at src/api/handler.spore:15
+[error] visibility violation at src/api/handler.sp:15
   billing.invoice.compute_totals is private
   ─── it is only visible within module billing.invoice
 
-  help: add `pub` or `pub(pkg)` to its definition in src/billing/invoice.spore
+  help: add `pub` or `pub(pkg)` to its definition in src/billing/invoice.sp
 ```
 
 Attempting to access a `pub(pkg)` item from an external package:
 
 ```text
-[error] visibility violation at src/handler.spore:8
+[error] visibility violation at src/handler.sp:8
   billing.invoice.validate is pub(pkg)
   ─── it is only visible within the 'my-billing-lib' package
   ─── your module 'handler' is in the 'my-api' package
@@ -477,7 +461,7 @@ Holes inherit the visibility context of their enclosing function. A HoleReport i
 
 ```json
 {
-  "hole": { "name": "payment_logic", "location": "src/api/handler.spore:15" },
+  "hole": { "name": "payment_logic", "location": "src/api/handler.sp:15" },
   "candidates": [
     {
       "function": "billing.invoice.generate_invoice",
@@ -508,7 +492,7 @@ This ensures agents filling holes never suggest inaccessible functions.
 The only re-export mechanism is `pub alias`:
 
 ```spore
-// src/billing/shortcuts.spore
+// src/billing/shortcuts.sp
 import billing.invoice
 import billing.types
 
@@ -549,13 +533,14 @@ A Platform declares three things:
 
 1. **Capability set**: Which IO capabilities it handles.
 2. **Effect handler implementations**: Runtime logic for each capability.
-3. **Entry point type**: The type signature the application's `main` must satisfy.
+3. **Startup contract**: The function contract that the selected module's
+   startup function must satisfy.
 
 ```spore
 platform CliPlatform {
     version: "1.0.0"
     handles [FileRead, FileWrite, StdOut, StdErr, NetRead, NetWrite, Clock, Spawn, Exit]
-    entry: fn(args: List[Str]) -> I32 ! Exit
+    startup: fn(args: List[Str]) -> I32 ! Exit
 
     handler FileReadHandler {
         File.read(path: Path) -> Result[Bytes, IoError] {
@@ -566,31 +551,27 @@ platform CliPlatform {
 }
 ```
 
-Platform declaration in `spore.toml`:
+Platform selection in `spore.toml`:
 
 ```toml
-[platforms]
-main = { git = "https://github.com/spore-platform/cli", version = "1.0.0" }
+[platform]
+git = "https://github.com/spore-platform/cli"
+version = "1.0.0"
 ```
 
 The compiler verifies:
 
-- Every capability used by application code is handled by some Platform.
-- The entry point type matches the Platform's requirement.
-- No two Platforms handle the same capability (unless priorities are explicit).
+- Every capability used by application code is handled by the selected Platform.
+- The startup function in the selected entry module matches the Platform's startup contract.
+- Test and mock Platforms may be substituted during testing, but a project binds to one Platform at a time.
 
-#### Multi-Platform support
+#### One Platform per project
 
-Applications may use multiple Platforms for different capability domains (e.g., CLI + GPU + S3):
-
-```toml
-[platforms]
-cli = { git = "https://github.com/spore-platform/cli", priority = 1 }
-gpu = { git = "https://github.com/spore-platform/cuda", priority = 2 }
-s3  = { git = "https://github.com/spore-platform/aws", priority = 3 }
-```
-
-Each effect is routed to the highest-priority Platform that handles it. The compiler ensures every effect has exactly one handler.
+A manifest-backed project selects exactly one Platform. Different deployment
+targets use different manifests, overrides, or future higher-level workspace
+flows; they are not modeled as multiple concurrent Platform bindings within one
+project. Multiple executable targets are modeled as project entries, not as
+multiple Platforms.
 
 #### Test Platforms for deterministic testing
 
@@ -599,7 +580,7 @@ Since application code is decoupled from IO implementations, a Test Platform can
 ```spore
 platform TestPlatform {
     handles [FileRead, FileWrite, NetRead, Clock]
-    entry: fn() -> TestResult
+    startup: fn() -> TestResult
 }
 
 handler MockFileSystem {
@@ -619,10 +600,10 @@ handler MockClock {
 }
 ```
 
-Running `spore test` automatically uses the Test Platform:
+Running `spore test tests/fetch_weather_test.sp` automatically uses the Test Platform:
 
 ```bash
-$ spore test
+$ spore test tests/fetch_weather_test.sp
    Using test platform: spore-platform/test v1.0.0
    Running 3 tests
 
@@ -676,7 +657,7 @@ This defines the maximum set of capabilities available to **any** file in the pr
 Individual files can narrow the project ceiling to declare the maximum capabilities their functions may use:
 
 ```spore
-// src/billing/invoice.spore
+// src/billing/invoice.sp
 #![uses(PaymentGateway, AuditLog)]
 ```
 
@@ -687,10 +668,10 @@ Individual files can narrow the project ceiling to declare the maximum capabilit
 
 **Example — two layers in action:**
 
-`spore.toml` allows `IO`, `FileRead`, `FileWrite`, `Net`, `PaymentGateway`, `AuditLog`. But `src/billing/invoice.spore` only needs payment and audit:
+`spore.toml` allows `IO`, `FileRead`, `FileWrite`, `Net`, `PaymentGateway`, `AuditLog`. But `src/billing/invoice.sp` only needs payment and audit:
 
 ```spore
-// src/billing/invoice.spore
+// src/billing/invoice.sp
 #![uses(PaymentGateway, AuditLog)]
 
 import billing.types
@@ -701,10 +682,10 @@ pub fn generate_invoice(order: Order) -> Invoice ! TaxError
 { ... }
 ```
 
-Meanwhile, `src/net/client.spore` needs only network capabilities:
+Meanwhile, `src/net/client.sp` needs only network capabilities:
 
 ```spore
-// src/net/client.spore
+// src/net/client.sp
 #![uses(Net)]
 
 pub fn fetch(url: Url) -> Result[Bytes, NetError]
@@ -712,7 +693,7 @@ pub fn fetch(url: Url) -> Result[Bytes, NetError]
 { ... }
 ```
 
-If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration. The `sporec --fixes` flag auto-applies the inferred pragma.
+If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration.
 
 #### Capability propagation
 
@@ -723,7 +704,7 @@ Importing a module does **not** grant its capabilities. If you call a function t
 Private functions are **also** bound by the module's capability ceiling (if declared). However, they do **not** contribute to the inferred capability set:
 
 ```spore
-// src/billing/invoice.spore
+// src/billing/invoice.sp
 #![uses(PaymentGateway, AuditLog)]
 
 pub fn generate_invoice(order: Order) -> Invoice ! TaxError
@@ -742,7 +723,7 @@ fn send_email(to: Email, body: String) -> Unit ! SmtpError
 ```
 
 ```text
-[error] capability ceiling violation at src/billing/invoice.spore:12
+[error] capability ceiling violation at src/billing/invoice.sp:12
   function send_email uses [EmailService]
   module billing.invoice allows [PaymentGateway, AuditLog]
   ─── EmailService is not in the module's capability set
@@ -752,14 +733,14 @@ fn send_email(to: Email, body: String) -> Unit ! SmtpError
         or move this function to a module that allows EmailService
 ```
 
-#### Capability violation error examples and `--fixes` flow
+#### Capability violation error examples and remediation flow
 
 **Ceiling violation**: The error shown above.
 
-**Auto-fix with `sporec --fixes`**: When a module omits its capability pragma, the compiler infers it:
+**Diagnostic hint**: When a module omits its capability pragma, the compiler infers it:
 
 ```text
-$ sporec check src/billing/invoice.spore
+$ spore check src/billing/invoice.sp
 
 [ok] billing.invoice
   exports: generate_invoice, void_invoice
@@ -772,12 +753,13 @@ $ sporec check src/billing/invoice.spore
 **Full workflow**:
 
 ```bash
-sporec check src/              # see [info] diagnostics suggesting capabilities
-sporec --fixes src/            # auto-apply all capability declarations
-sporec check src/              # clean: no more [info] suggestions
+spore check src/billing/invoice.sp
+# add the suggested #![uses(...)] pragma manually or via editor tooling
+spore check src/billing/invoice.sp
 ```
 
-The `--fixes` flag writes the inferred capability pragma as the first line of the module file.
+The current public CLI reports the inferred capability pragma in diagnostics, but
+does not yet auto-apply it.
 
 ### Package management
 
@@ -817,30 +799,37 @@ Dependencies are declared **per-project** in `spore.toml`, not per-file. The `[c
 
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
 
-### Application Entry Points
+### Application Entries
 
-An application's default entry point is `src/main.sp`, and the resulting binary name defaults to the package name from `spore.toml`:
+An application declares one or more named **entries** in `spore.toml`. Each
+entry selects an **entry module**, and the selected Platform then validates the
+module's **startup function** against its **startup contract**.
+
+The default emitted executable or run target name is the selected entry name:
 
 ```toml
 [package]
 name = "my-tool"
 type = "application"
-# Binary name: "my-tool", entry: src/main.sp
+default-entry = "my-tool"
+
+[entries.my-tool]
+path = "src/main.sp"
 ```
 
-To override the default or define additional binaries, use `[[bin]]`:
+Additional entries use the same table form:
 
 ```toml
-[[bin]]
-name = "my-tool"
-path = "src/main.sp"      # default, can be omitted
+[entries.my-tool]
+path = "src/main.sp"
 
-[[bin]]
-name = "my-tool-migrate"
-path = "src/migrate.sp"   # additional binary
+[entries.my-tool-migrate]
+path = "src/migrate.sp"
 ```
 
-Each `[[bin]]` entry must point to a `.sp` file containing a `main` function with the platform-required signature.
+Each entry path must point to a `.sp` file containing a startup function that
+satisfies the selected Platform's startup contract. Today that function is
+usually `main`.
 
 #### Content-addressed dependencies (BLAKE3, no semver)
 
@@ -900,7 +889,7 @@ grant = [
 At runtime, the capability ceiling is enforced:
 
 ```bash
-spore run --allow network:listen:8080 --allow filesystem:read:/data
+spore run src/main.sp
 ```
 
 The `spore audit` command reports the full capability graph, flagging any ungrantable or suspicious requirements.
@@ -1072,9 +1061,9 @@ All fetched dependencies are cached in `.spore-store/`:
 │       └── interface.spore-sig
 ├── impls/                   # Implementation cache
 │   ├── 7b8d4f2a.../
-│   │   └── module.spore
+│   │   └── module.sp
 │   └── 2f3e4d5c.../
-│       └── module.spore
+│       └── module.sp
 ├── git/                     # Git source cache
 │   └── github.com/
 │       └── user/
@@ -1110,7 +1099,7 @@ pub trait StorageBackend {
 **Cache strategy**:
 
 - **Content-addressed**: Identical hashes share storage. Two packages using the same dependency version store it once.
-- **Global shared**: By default `~/.spore-store` is shared across all projects. Configurable via `~/.spore/config.toml`.
+- **Global shared**: By default `~/.spore-store` is shared across all projects. Configurable via `~/.sp/config.toml`.
 - **Offline-capable**: Once cached, dependencies are available without network access.
 
 **Garbage collection**:
@@ -1156,7 +1145,7 @@ network:          filesystem:        env:            process:
                                       monotonic       fast
 ```
 
-For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime (`spore run --allow ...`), not in the type system. Promoting fine-grained capabilities into the type system is reserved for a future SEP.
+For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained capabilities into the type system is reserved for a future SEP.
 
 ### Publish and discovery flow
 
@@ -1198,7 +1187,7 @@ Holes respect module boundaries:
 - A module calling a partial function becomes **transitively partial**.
 
 ```text
-$ sporec --holes
+$ sporec holes
 
 Holes by module:
 
@@ -1246,7 +1235,7 @@ Snapshots use `sig` hashes only at the module and package level (impl changes do
 Error types follow the same visibility rules as all other types. A function's error list (`! TaxError`) must reference only error types visible from the function's module:
 
 ```spore
-// src/api/handler.spore
+// src/api/handler.sp
 import billing.invoice
 import billing.errors
 
@@ -1266,14 +1255,14 @@ pub fn handle_create(req: Request) -> Response ! errors.BillingError | ParseErro
 A module containing only type definitions is valid and pure:
 
 ```spore
-// src/billing/types.spore
+// src/billing/types.sp
 pub type Invoice { id: InvoiceId, total: Money, status: InvoiceStatus }
 pub type InvoiceStatus { Draft, Sent, Paid, Void }
 pub type LineItem { description: String, quantity: Int, unit_price: Money }
 ```
 
 ```text
-$ sporec check src/billing/types.spore
+$ spore check src/billing/types.sp
 
 [ok] billing.types
   exports: Invoice, InvoiceStatus, LineItem
@@ -1312,12 +1301,12 @@ impl = "e9f3d2"
 Partial modules can be imported and their types used. Only function calls at runtime are blocked:
 
 ```spore
-// src/billing/invoice.spore (has holes)
+// src/billing/invoice.sp (has holes)
 pub fn generate_invoice(order: Order) -> Invoice ! TaxError {
     ?invoice_logic
 }
 
-// src/api/handler.spore
+// src/api/handler.sp
 import billing.invoice
 
 // Compiles fine — handler is transitively partial
@@ -1328,7 +1317,7 @@ pub fn handle(req: Request) -> Response ! ApiError {
 ```
 
 ```text
-$ sporec check
+$ spore check
 
 [partial] billing.invoice.generate_invoice
   holes: ?invoice_logic
@@ -1342,7 +1331,7 @@ Build: success (2 partial functions)
 #### Alias chains are forbidden
 
 ```text
-[error] alias chain detected at src/api/shortcuts.spore:3
+[error] alias chain detected at src/api/shortcuts.sp:3
   api_gen → billing.shortcuts.gen → billing.invoice.generate_invoice
   ─── aliases must point directly to original definitions
 
@@ -1368,7 +1357,7 @@ Spore and Roc share the same design philosophy: no built-in Platform; all Platfo
 platform WebPlatform {
     version: "1.0.0"
     handles [HttpServer, NetRead, NetWrite, Clock, Spawn, DbQuery]
-    entry: fn(req: Request) -> Response ! HttpServer | DbQuery
+    startup: fn(req: Request) -> Response ! HttpServer | DbQuery
 
     handler HttpServerHandler {
         Server.listen(port: U16, handler: fn(Request) -> Response) {
@@ -1384,7 +1373,7 @@ platform WebPlatform {
 platform LambdaPlatform {
     version: "1.0.0"
     handles [NetRead, NetWrite, S3Read, S3Write, DynamoRead, DynamoWrite]
-    entry: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
+    startup: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
 
     handler S3Handler {
         S3.get(bucket: Str, key: Str) -> Result[Bytes, S3Error] {
@@ -1508,13 +1497,13 @@ Creating a new Platform follows six steps:
 spore init my-platform --type platform
 ```
 
-**Step 2**: Define the Platform contract in `platform.spore`:
+**Step 2**: Define the Platform contract in `platform.sp`:
 
 ```spore
 platform EmbeddedPlatform {
     version: "0.1.0"
     handles [GpioRead, GpioWrite, Timer, SerialRead, SerialWrite]
-    entry: fn() -> Never ! GpioRead | GpioWrite | Timer
+    startup: fn() -> Never ! GpioRead | GpioWrite | Timer
 
     config: {
         cpu_freq: U32,
@@ -1526,7 +1515,7 @@ platform EmbeddedPlatform {
 **Step 3**: Implement effect handlers:
 
 ```spore
-// handlers/gpio.spore
+// handlers/gpio.sp
 handler GpioHandler {
     Gpio.read(pin: U8) -> Bool {
         resume(ffi_gpio_read(pin))
@@ -1598,9 +1587,9 @@ effect Exit   { fn exit(code: I32) -> Never }
 |---|---|---|---|---|
 | Platform concept | ✓ | Partial (runtime) | ✗ | ✓ |
 | Effect system | ✗ (tag unions) | ✗ (Cmd/Sub) | ✓ | ✓ |
-| Multi-Platform | ✗ | ✗ | N/A | ✓ |
+| One Platform / project | ✗ | ✗ | N/A | ✓ |
 | Test Platform | Mock Platform | Mock Cmd | Manual mock | Test Platform |
-| Entry point | Platform-defined | Fixed (main) | Fixed (main) | Platform-defined |
+| Startup contract | Platform-defined | Fixed (main) | Fixed (main) | Platform-defined |
 | Concurrency | Platform-provided | Built-in runtime | Effect handler | Effect handler |
 
 ### CLI command reference
@@ -1608,13 +1597,14 @@ effect Exit   { fn exit(code: I32) -> Never }
 #### Module and build commands
 
 ```text
-sporec check [path]           Check modules for errors
-sporec check --show-deps      Show dependency graph
-sporec build                  Build all modules in topological order
-sporec build --show-order     Show build order
-sporec --holes [path]         List all holes across modules
-sporec --fixes [path]         Auto-apply inferred capability declarations
-sporec fmt [path]             Format source, including import ordering
+spore check [path...]            Check one or more source / entry files
+spore build [path]               Build the current project or one explicit file
+spore test [path...]             Validate test / spec files
+spore fmt [path...]              Format source, including import ordering
+sporec compile [path...]         Compile explicit input files
+sporec holes [path]              List holes in a source file
+sporec query-hole [path] [id]    Inspect one named hole in a source file
+sporec explain [code]            Explain one diagnostic code
 ```
 
 #### Snapshot and lock commands
@@ -1682,13 +1672,13 @@ spore add https://github.com/spore-std/http --alias std-http
 spore add https://github.com/spore-std/json --sig-only
 
 # 3. Write code, then check
-sporec check src/
+spore check src/main.sp
 
-# 4. Auto-apply capability declarations
-sporec --fixes src/
+# 4. Format before review
+spore fmt src/main.sp src/cli.sp
 
 # 5. Build and test
-sporec build && spore test
+spore build && spore test tests/main_test.sp
 
 # 6. If a dependency's signature changed, review and accept
 spore --permit billing.tax.calculate
@@ -1706,9 +1696,9 @@ mkdir my-app && cd my-app
 spore init
 spore add https://github.com/spore-std/http --alias std-http
 spore add https://github.com/spore-std/json --sig-only
-sporec check src/
-sporec build
-spore run --allow network:listen:8080
+spore check src/main.sp
+spore build
+spore run src/main.sp
 ```
 
 #### Scenario 2: Update a dependency
@@ -1716,7 +1706,7 @@ spore run --allow network:listen:8080
 ```bash
 spore deps                      # view current dependency tree
 spore update http               # update to latest commit
-spore test                      # verify tests still pass
+spore test tests/http_test.sp   # verify tests still pass
 spore audit                     # check for capability changes
 git add .spore-lock spore.toml
 git commit -m "Update http to latest"
@@ -1749,7 +1739,7 @@ utils = { path = "../utils", sig = "...", impl = "..." }
 ```bash
 # After editing core or utils:
 spore update --recompute-hash   # update hashes for path deps
-sporec build
+spore build
 ```
 
 #### Scenario 5: Publish a package
@@ -1786,14 +1776,14 @@ git push origin main --tags
 
 ### Readability and navigation
 
-- **File = module** eliminates the confusion of Rust's `mod`/`use` distinction or OCaml's separate `.mli` files. Opening a `.spore` file immediately tells you the module name — no `module` keyword needed.
+- **File = module** eliminates the confusion of Rust's `mod`/`use` distinction or OCaml's separate `.mli` files. Opening a `.sp` file immediately tells you the module name — no `module` keyword needed.
 - **Dot-separated imports** (`import billing.invoice`) use a uniform separator for both path segments and item access, avoiding the confusion of mixing `/` and `.`. The import path mirrors the module name directly.
 - **Import/alias separation** removes ambiguity: `import` always means module, `alias` always means item.
 - **Three visibility levels** are intuitive. The default is private; opt-in to exposure via `pub` or `pub(pkg)`.
 
 ### Workflow ergonomics
 
-- **`sporec --fixes`** auto-applies inferred capability declarations, lowering the barrier for new users.
+- **Structured diagnostics** surface inferred capability declarations for manual or editor-assisted application, lowering the barrier for new users.
 - **`spore --permit`** provides explicit acknowledgment of breaking changes, preventing accidental API breakage.
 - **No semver** means developers never debate whether a change is "major" or "minor". The compiler decides mechanically.
 
@@ -1875,9 +1865,9 @@ The compiler generates a capability routing table mapping each effect to its han
 | `E3004` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
 | `E3005` | Alias chain | `pub alias` pointing to another alias |
 | `E3006` | Shadowing conflict | Import alias conflicts with module name |
-| `E4201` | Effect handler conflict | Multiple Platforms handle the same effect |
+| `E4201` | Platform binding conflict | Project declares more than one Platform binding |
 | `E4202` | Missing effect handler | No Platform handles a required effect |
-| `E4203` | Entry point type mismatch | `main` signature doesn't match Platform requirement |
+| `E4203` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
 
 ### Diagnostic structure
 
@@ -1951,7 +1941,7 @@ Unison pioneered content-addressed functions where every definition is identifie
 
 ### Roc
 
-Roc's platform/package separation is the primary inspiration for Spore's Platform system. Roc demonstrated that packages can be pure by default, with IO delegated entirely to the Platform. Spore extends this with algebraic effect handlers (Roc uses tag unions) and multi-Platform support.
+Roc's platform/package separation is the primary inspiration for Spore's Platform system. Roc demonstrated that packages can be pure by default, with IO delegated entirely to the Platform. Spore extends this with algebraic effect handlers (Roc uses tag unions), named entries, and explicit startup contracts.
 
 ### Elm
 
@@ -2011,7 +2001,7 @@ New fields added to `.spore-lock` are ignored by older tools (forward-compatible
 
 The module system does not require wholesale adoption:
 
-- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later via `sporec --fixes`.
+- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later once diagnostics show the inferred set.
 - Dependencies can mix Git, local path, and registry sources.
 - The `version` field in `spore.toml` remains available for human communication during the transition from semver.
 
@@ -2078,7 +2068,7 @@ field          ::= IDENT ':' type
 platform_decl  ::= 'platform' IDENT '{' platform_body '}'
 platform_body  ::= ('version:' STRING)?
                    ('handles' cap_list)
-                   ('entry:' type)
+                   ('startup:' type)
                    handler_decl*
 
 // Handler declarations
@@ -2090,12 +2080,13 @@ effect_decl    ::= 'effect' IDENT '{' effect_fn* '}'
 effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 // spore.toml (TOML subset)
-// [package]       name, version, type, description, license, authors, spore-version
+// [package]       name, version, type, description, license, authors, spore-version, default-entry
 // [capabilities]  allowed
 // [dependencies]  <name> = { git|path|alias, sig, impl?, optional?, branch?, tag?, rev? }
 // [dev-dependencies]
 // [features]      <name> = [deps/features]
-// [platforms]     <name> = { git, version?, priority?, handles? }
+// [entries.<name>] path = STRING
+// [platform]      git|path, version?, handles?
 // [overrides]     <name> = { sig, impl }
 // [build]         script
 // [metadata]      arbitrary key-value
@@ -2107,11 +2098,14 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 | Command | Description |
 |---|---|
-| `sporec check [path]` | Check modules for errors and warnings |
-| `sporec build` | Compile all modules in topological order |
-| `sporec --holes [path]` | List all holes in modules |
-| `sporec --fixes [path]` | Auto-apply inferred capability declarations |
-| `sporec fmt [path]` | Format source code (including import ordering) |
+| `spore check [path...]` | Check one or more source / entry files |
+| `spore build [path]` | Build the current project or one explicit file |
+| `spore test [path...]` | Validate test / spec files |
+| `spore fmt [path...]` | Format source code (including import ordering) |
+| `sporec compile [path...]` | Compile explicit input files |
+| `sporec holes [path]` | List all holes in a source file |
+| `sporec query-hole [path] [id]` | Inspect one named hole in a source file |
+| `sporec explain [code]` | Explain one diagnostic code |
 
 ### Snapshot and hash commands
 
