@@ -1901,7 +1901,7 @@ Spore's type system is most directly influenced by Rust:
 - Sealed enums with exhaustive pattern matching.
 - No implicit conversions.
 
-**Differences from Rust:** No lifetime system (Spore uses GC or region-based memory), no borrow checker, effects replace `unsafe` blocks, refinement types replace some `debug_assert!` patterns.
+**Differences from Rust:** No lifetime system (Spore currently targets Perceus-style reference counting with region optimization rather than a borrow checker), no borrow checker, effects replace `unsafe` blocks, refinement types replace some `debug_assert!` patterns.
 
 ### Haskell / GHC
 
