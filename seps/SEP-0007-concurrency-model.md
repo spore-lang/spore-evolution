@@ -238,16 +238,25 @@ Because `Spawn` is an effect, different handlers give the same code different ru
 
 ```spore
 // Production: real parallel execution on a thread pool
-handle concurrent_work()
-    with platform.spawn_handler(thread_pool)
+handle {
+    concurrent_work()
+} with {
+    use ParallelHandler { pool: thread_pool }
+}
 
 // Testing: deterministic sequential execution
-handle concurrent_work()
-    with sequential_handler()
+handle {
+    concurrent_work()
+} with {
+    use SequentialHandler {}
+}
 
 // Compile-time simulation: abstract interpretation for cost analysis
-handle concurrent_work()
-    with cost_analysis_handler()
+handle {
+    concurrent_work()
+} with {
+    use CostAnalysisHandler {}
+}
 ```
 
 A test can replace the `Spawn` handler with `SequentialHandler` and a `NetConnect` handler with a mock—**no async test framework needed**:
@@ -261,9 +270,12 @@ test "fetch_and_merge produces correct results" {
         ])
     }
 
-    let result = handle fetch_and_merge([url1, url2])
-        with sequential_handler()
-        with mock_net
+    let result = handle {
+        fetch_and_merge([url1, url2])
+    } with {
+        use SequentialHandler {}
+        use mock_net
+    }
 
     assert_eq(result, expected_merged)
 }
@@ -509,8 +521,11 @@ Functions declare the effect via `uses [Spawn]`. Without this declaration, the c
 An effect handler is a concrete interpretation of an effect's operations:
 
 ```spore
-handle concurrent_work()
-    with platform.spawn_handler(thread_pool)
+handle {
+    concurrent_work()
+} with {
+    use ParallelHandler { pool: thread_pool }
+}
 ```
 
 #### Built-in handlers
@@ -531,18 +546,22 @@ Users may define their own concurrency-related effects:
 
 ```spore
 effect RateLimit {
-    fn acquire_permit() -> Unit ! RateLimitExceeded
-    fn release_permit() -> Unit
+    fn acquire_permit() -> () ! RateLimitExceeded
+    fn release_permit() -> ()
 }
 
 handler token_bucket_handler(rate: Int, per: Duration) for RateLimit {
-    fn acquire_permit() -> Unit ! RateLimitExceeded {
-        if tokens > 0 { tokens -= 1; resume(()) }
-        else { raise(RateLimitExceeded) }
+    fn acquire_permit() -> () ! RateLimitExceeded {
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            ()
+        } else {
+            throw RateLimitExceeded
+        }
     }
-    fn release_permit() -> Unit {
-        tokens += 1
-        resume(())
+    fn release_permit() -> () {
+        self.tokens += 1;
+        ()
     }
 }
 ```

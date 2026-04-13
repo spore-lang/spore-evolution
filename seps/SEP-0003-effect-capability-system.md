@@ -15,7 +15,7 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines Spore's effect system as a flat capability-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The surface syntax uses `effect`, `handler`, and `handle ... with`, while semantic checking remains a subset test over capability sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
+> **Executive Summary**: Defines Spore's effect system as a flat capability-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The canonical surface syntax uses explicit `effect` declarations, `perform Effect.op(...)`, top-level `handler`, and `handle { ... } with { ... }`, while semantic checking remains a subset test over capability sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
 
 ## Summary
 
@@ -65,10 +65,14 @@ Modern programs interleave pure computation with diverse side effects — file I
 Every Spore function may carry a `uses` clause listing the atomic effects it requires:
 
 ```spore
-fn read_config(path: String) -> Config ! IoError | ParseError
+effect FileRead {
+    fn read_file(path: Str) -> Str ! IoError
+}
+
+fn read_config(path: Str) -> Config ! IoError | ParseError
 uses [FileRead]
 {
-    let content = read_file(path)
+    let content = perform FileRead.read_file(path)
     parse_toml(content)
 }
 ```
@@ -76,8 +80,12 @@ uses [FileRead]
 A function that interacts with the terminal declares `Console`:
 
 ```spore
-fn greet(name: String) uses [Console] {
-    println("Hello, " + name)
+effect Console {
+    fn println(msg: Str) -> ()
+}
+
+fn greet(name: Str) uses [Console] {
+    perform Console.println("Hello, " + name)
 }
 ```
 
@@ -263,17 +271,14 @@ error[cap-violation]: function body uses undeclared effect
 
 Running `sporec --fixes` auto-inserts the missing `uses` clause.
 
-### Module-level `uses` declarations
+### No module-level `uses` declarations
 
-A module may declare its effect ceiling with `module X uses [...]`:
+Spore does **not** have module-level `uses` ceilings or carriers. Source files declare no ambient effect budget. Effect checking happens at:
 
-```spore
-module billing uses [NetConnect, FileRead, Clock]
-```
+1. function signatures (`uses [...]`)
+2. project / Platform boundaries
 
-All functions within the module are constrained: their `uses` sets must be subsets of the module-level set. If a function exceeds the module ceiling the compiler emits a `cap-narrowing-violation` error.
-
-The module-level `uses` clause is **optional**. When omitted the compiler auto-infers the module's effect ceiling as the union of all its functions' effect sets. Running `sporec --fixes` inserts the inferred declaration.
+Diagnostics and tooling should therefore not synthesize or rely on `module X uses [...]` declarations.
 
 ### `@allows` — restricting Hole candidates
 
@@ -678,37 +683,37 @@ Effects are not merely string tags — each effect is a **typed construct** whos
 
 ```spore
 effect Console {
-    fn println(msg: String) -> Unit
-    fn eprintln(msg: String) -> Unit
-    fn read_line() -> String ! IoError
+    fn println(msg: Str) -> ()
+    fn eprintln(msg: Str) -> ()
+    fn read_line() -> Str ! IoError
 }
 
 effect FileRead {
-    fn read_file(path: String) -> Bytes ! IoError
-    fn list_dir(path: String) -> List[String] ! IoError
+    fn read_file(path: Str) -> Str ! IoError
+    fn list_dir(path: Str) -> List[Str] ! IoError
 }
 
 effect FileWrite {
-    fn write_file(path: String, data: Bytes) -> Unit ! IoError
-    fn create_dir(path: String) -> Unit ! IoError
-    fn delete(path: String) -> Unit ! IoError
+    fn write_file(path: Str, data: Str) -> () ! IoError
+    fn create_dir(path: Str) -> () ! IoError
+    fn delete(path: Str) -> () ! IoError
 }
 
 effect Env {
-    fn get(name: String) -> Option[String]
-    fn vars() -> List[(String, String)]
+    fn get(name: Str) -> Option[Str]
+    fn vars() -> List[(Str, Str)]
 }
 ```
 
-When a function declares `uses [FileRead]`, the compiler makes the `FileRead` effect's operations available. This design unifies effect tracking with method dispatch: calling `read_file(path)` dispatches to the bound handler for the `FileRead` effect.
+Declaring `uses [FileRead]` authorizes the effect, but operations remain explicit: `perform FileRead.read_file(path)` dispatches to the active `FileRead` handler. Canonical v0.1 semantics require the corresponding `effect` interface to be declared explicitly; undeclared pseudo-effect paths are compatibility-only.
 
-Effect aliases remain purely syntactic:
+Effect aliases are part of the committed v0.1 surface:
 
 ```spore
 effect FileIO = FileRead | FileWrite
 ```
 
-This expands to the union of the two effects and does not define a new effect.
+This expands semantically to the union of the two effects and does not define a new operation surface of its own.
 
 ### 14. Effect handlers
 
@@ -718,15 +723,15 @@ Effect handlers provide concrete implementations for effect operations, enabling
 
 ```spore
 handler MockConsole for Console {
-    fn println(msg: Str) -> Unit { self.output.push(msg) }
-    fn read_line() -> Str ! IOError { "mock input" }
+    fn println(msg: Str) -> () { self.output.push(msg) }
+    fn read_line() -> Str ! IoError { "mock input" }
 }
 
 handler RealFileRead for FileRead {
-    fn read_file(path: String) -> Bytes ! IoError {
+    fn read_file(path: Str) -> Str ! IoError {
         platform.fs.read(path)
     }
-    fn list_dir(path: String) -> List[String] ! IoError {
+    fn list_dir(path: Str) -> List[Str] ! IoError {
         platform.fs.list(path)
     }
 }
@@ -734,16 +739,30 @@ handler RealFileRead for FileRead {
 
 #### Handler binding
 
-The `handle ... with` expression binds one or more handler expressions to a computation. SEP-0001 fixes the settled outer grammar as `handle <expr>` followed by one or more `with <handler-expr>` clauses; the richer handler model remains under item-3 discussion.
+The canonical handler form is `handle { ... } with { ... }`. The `with` block may contain inline effect arms and/or named handler installations via `use HandlerExpr`.
 
 ```spore
-// Bind a single handler
-handle greet("world") with MockConsole { output: [] }
+// Bind a single named handler
+handle {
+    greet("world")
+} with {
+    use MockConsole { output: [] }
+}
 
-// Bind multiple handlers
-handle app.run()
-    with RealFileRead {}
-    with MockConsole { output: [] }
+// Bind multiple named handlers
+handle {
+    app.run()
+} with {
+    use RealFileRead {}
+    use MockConsole { output: [] }
+}
+
+// Inline handler arms remain available
+handle {
+    perform Console.println("hello")
+} with {
+    Console.println(msg) => ()
+}
 ```
 
 #### User-defined effects (allowed from v1)
@@ -955,7 +974,7 @@ Algebraic effect handlers (as in Koka or OCaml 5) allow effects to be intercepte
 3. **Platform abstraction** — The same user code runs on different platforms by swapping handlers (e.g., browser vs. server filesystem).
 4. **Colorless functions** — Unlike async/await, effect handlers do not bifurcate the function space.
 
-Spore's handler model is intentionally simpler than full algebraic effects: handlers do not support continuations or resumptions beyond simple `resume()`. This keeps the runtime overhead minimal and compilation straightforward while capturing the most valuable use cases.
+Spore's handler model is intentionally simpler than full algebraic effects: handlers are lexical, non-resumable, and one-shot. A matching handler arm computes the value of the corresponding `perform` expression directly; there is no continuation capture or `resume()` path in canonical v0.1 semantics.
 
 Syntax: `effect` defines operations, `handler` provides implementations, `handle ... with` binds handlers at call sites. See §13-14 for full details.
 

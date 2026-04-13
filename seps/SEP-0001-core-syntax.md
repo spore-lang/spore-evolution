@@ -398,8 +398,8 @@ trait Serialize {
 
 // effect: external world operations
 effect Console {
-    fn println(msg: Str) -> Unit
-    fn read_line() -> Str ! IOError
+    fn println(msg: Str) -> ()
+    fn read_line() -> Str ! IoError
 }
 
 // effect alias (uses | for union)
@@ -407,7 +407,7 @@ effect HttpClient = NetConnect | Clock
 effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
 ```
 
-Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. `handle` accepts one or more `with` clauses. SEP-0003 defines the effect algebra and handler semantics; this SEP only fixes the settled outer syntax. The grammar intentionally leaves each handler operand as an expression because the richer handler/`handle` model is still pending the item-3 decision.
+Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. The settled outer handler grammar is `handle { ... } with { ... }`: the body is always a block, and the `with` block may contain inline effect arms and/or named handler installations via `use HandlerExpr`. SEP-0003 defines the effect algebra and handler semantics; this SEP fixes the corresponding surface syntax.
 
 The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
 
@@ -422,13 +422,13 @@ The `idempotent` property cannot be inferred and is annotated via doc comment: `
 The `uses` clause can mix atomic effect names with named effect aliases:
 
 ```spore
-fn query_database(sql: String) -> Data ! DbError | Timeout
+fn query_database(sql: Str) -> Data ! DbError | Timeout
 uses [NetConnect]
 {
     ...
 }
 
-fn run_cli(config_path: String) -> Unit ! Error
+fn run_cli(config_path: Str) -> () ! Error
 uses [CLI]
 {
     ...
@@ -653,13 +653,12 @@ fn event_loop(rx1: Channel.Receiver[Int], rx2: Channel.Receiver[String]) {
 ### Modules and imports
 
 ```spore
-module math uses [] {
-    pub fn add(a: Int, b: Int) -> Int { a + b }
-    fn helper() -> Int { 42 }  // private by default
-}
+// src/math.sp
+pub fn add(a: Int, b: Int) -> Int { a + b }
+fn helper() -> Int { 42 }  // private by default
 
 import std.collections as collections;
-import std.math.{sin, cos, tan};
+import std.math as math;
 ```
 
 ## Reference-level explanation
@@ -835,7 +834,7 @@ t"Dear {customer}, order {id}"    // template string
 
 ### EBNF Grammar
 
-For effect handling, the settled outer grammar is `perform <expr>` and `handle <expr>` followed by one or more `with <handler-expr>` clauses. The handler side remains expression-shaped here until the richer handler model is finalized.
+For effect handling, the settled outer grammar is `perform <expr>` together with `handle { ... } with { ... }`. Inline handler arms live inside the `with` block, and reusable named handlers are installed there with `use HandlerExpr`.
 
 ```ebnf
 (* ═══════════════════════════════════════════════════ *)
@@ -920,8 +919,10 @@ HandlerDecl     = "handler" Ident [ "(" ParamList ")" ] "for" Ident
 
 PerformExpr     = "perform" Expr ;
 
-HandleExpr      = "handle" Expr HandlerClause { HandlerClause } ;
-HandlerClause   = "with" Expr ;
+HandleExpr      = "handle" Block "with" HandlerBlock ;
+HandlerBlock    = "{" { HandlerEntry } "}" ;
+HandlerEntry    = EffectArm | HandlerUse ;
+HandlerUse      = "use" Expr ;
 
 (* ─── Impl (Trait Implementation) ─────────────────── *)
 
@@ -957,13 +958,13 @@ Param           = Ident ":" TypeExpr ;
 
 ErrorClause     = "!" TypeExpr { "|" TypeExpr } ;
 
-WhereClause     = { "where" Ident ":" BoundList } ;
-BoundList       = Ident { "+" Ident } ;
+WhereClause     = "where" WhereConstraint { "," WhereConstraint } ;
+WhereConstraint = Ident ":" Ident ;
 
 UsesClause      = "uses" "[" [ EffectList ] "]" ;
 EffectList      = Ident { "," Ident } ;
 
-CostClause      = "cost" "≤" CostExpr ;
+CostClause      = "cost" "[" CostExpr "," CostExpr "," CostExpr "," CostExpr "]" ;
 CostExpr        = IntLiteral
                 | Ident                        (* parameter reference *)
                 | CostExpr "*" CostExpr
@@ -1186,7 +1187,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
 2. **`! ErrorTypes`** — The error set. A function with `! E1 | E2` may produce errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
 
-3. **`where T: Bound`** — Generic constraints. Multiple bounds use `+` syntax: `where T: Eq + Hash`. Each `where` clause is on its own line.
+3. **`where T: Bound, U: Bound`** — Generic constraints. The canonical form is a single `where` clause with comma-separated constraints. Spore does not use `+` multi-bound syntax.
 
 4. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
    - `uses []` → `pure`, `deterministic`, `total`
@@ -1196,7 +1197,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
    **Implication chain:** `pure` ⊃ `deterministic` — a pure function is necessarily deterministic (same inputs always produce same outputs). A deterministic function is not necessarily pure (it may perform IO that doesn't introduce non-determinism). `total` is orthogonal: a function can be total without being pure.
 
-5. **`cost ≤ N`** — An upper bound on the function's resource cost. Can reference parameters (e.g., `cost ≤ n * 10`).
+5. **`cost [c, a, i, p]`** — A four-slot cost vector (`compute`, `alloc`, `io`, `parallel`). Each slot may reference parameters or use the currently supported linear `O(n)` forms.
 
 6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as typechecked test metadata. When the enclosing function body is executable, `spore test` evaluates the `spec` block by calling the function by name. If the body still contains an unfilled hole, the `spec` block remains available to the compiler and HoleReport output, but executing it still reaches the hole and errors.
 
