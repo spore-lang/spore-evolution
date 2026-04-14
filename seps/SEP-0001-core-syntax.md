@@ -407,7 +407,7 @@ effect HttpClient = NetConnect | Clock
 effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
 ```
 
-Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. The settled outer handler grammar is `handle { ... } with { ... }`: the body is always a block, and the `with` block may contain inline effect arms and/or named handler installations via `use HandlerExpr`. SEP-0003 defines the effect algebra and handler semantics; this SEP fixes the corresponding surface syntax.
+Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. The settled handler grammar is `handler <Effect> as <HandlerName>(...) { ... }` for declarations and `handle { ... } with { ... }` for installation: the `with` block may contain inline effect arms via `on Effect.op(...) => ...` and/or named handler installations via `use HandlerName { ... }`. SEP-0003 defines the effect algebra and handler semantics; this SEP fixes the corresponding surface syntax.
 
 The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
 
@@ -834,7 +834,7 @@ t"Dear {customer}, order {id}"    // template string
 
 ### EBNF Grammar
 
-For effect handling, the settled outer grammar is `perform <expr>` together with `handle { ... } with { ... }`. Inline handler arms live inside the `with` block, and reusable named handlers are installed there with `use HandlerExpr`.
+For effect handling, the settled grammar is `perform <expr>`, top-level `handler <Effect> as <HandlerName>(...) { ... }`, and `handle { ... } with { ... }` where each item is either `use HandlerName { ... }` or `on Effect.op(...) => ...`.
 
 ```ebnf
 (* ═══════════════════════════════════════════════════ *)
@@ -914,15 +914,19 @@ EffectAlias     = Ident { "|" Ident } ;
 
 (* ─── Handler ─────────────────────────────────────── *)
 
-HandlerDecl     = "handler" Ident [ "(" ParamList ")" ] "for" Ident
+HandlerDecl     = "handler" Ident "as" Ident [ "(" ParamList ")" ]
                   "{" { FunctionDecl } "}" ;
 
 PerformExpr     = "perform" Expr ;
 
 HandleExpr      = "handle" Block "with" HandlerBlock ;
-HandlerBlock    = "{" { HandlerEntry } "}" ;
-HandlerEntry    = EffectArm | HandlerUse ;
-HandlerUse      = "use" Expr ;
+HandlerBlock    = "{" [ HandlerEntry { "," HandlerEntry } [ "," ] ] "}" ;
+HandlerEntry    = InlineHandlerBinding | NamedHandlerBinding ;
+NamedHandlerBinding
+                = "use" Ident "{" [ HandlerPayload { "," HandlerPayload } [ "," ] ] "}" ;
+HandlerPayload  = Ident ":" Expr ;
+InlineHandlerBinding
+                = "on" Ident "." Ident "(" [ Ident { "," Ident } ] ")" "=>" Expr ;
 
 (* ─── Impl (Trait Implementation) ─────────────────── *)
 

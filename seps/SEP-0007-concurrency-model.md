@@ -550,7 +550,7 @@ effect RateLimit {
     fn release_permit() -> ()
 }
 
-handler token_bucket_handler(rate: Int, per: Duration) for RateLimit {
+handler RateLimit as token_bucket_handler(rate: Int, per: Duration) {
     fn acquire_permit() -> () ! RateLimitExceeded {
         if self.tokens > 0 {
             self.tokens -= 1;
@@ -1221,7 +1221,7 @@ The concurrency model is introduced as a new language feature. There is no exist
 
 5. **Dynamic lane adjustment.** The current model uses static lane counts (`lanes: K`). Should the runtime be able to dynamically adjust the actual parallelism based on system load, and if so, how does this interact with compile-time cost verification?
 
-6. **Effect handler composition order.** When multiple handlers are stacked (`with handler_a with handler_b`), the composition order matters. The precise semantics of handler ordering for concurrency effects (especially when `Spawn` interacts with IO effects) need formal specification.
+6. **Effect handler composition order.** When multiple handlers appear in one binding block (for example `with { use handler_a {}, use handler_b {} }`), the composition order matters. The precise semantics of handler ordering for concurrency effects (especially when `Spawn` interacts with IO effects) need formal specification.
 
 7. **Distributed concurrency.** This SEP covers single-machine concurrency. Extending the model to distributed settings (multi-node `parallel_scope`, remote channels) is a future concern but should not be foreclosed by current design decisions.
 

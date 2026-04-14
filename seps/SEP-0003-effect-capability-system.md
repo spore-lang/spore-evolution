@@ -722,24 +722,24 @@ Effect handlers provide concrete implementations for effect operations, enabling
 #### Handler definition
 
 ```spore
-handler MockConsole for Console {
+handler Console as MockConsole(output: List[Str]) {
     fn println(msg: Str) -> () { self.output.push(msg) }
     fn read_line() -> Str ! IoError { "mock input" }
 }
 
-handler RealFileRead for FileRead {
+handler FileRead as RealFileRead(root: Str) {
     fn read_file(path: Str) -> Str ! IoError {
-        platform.fs.read(path)
+        platform.fs.read(self.root + "/" + path)
     }
     fn list_dir(path: Str) -> List[Str] ! IoError {
-        platform.fs.list(path)
+        platform.fs.list(self.root + "/" + path)
     }
 }
 ```
 
 #### Handler binding
 
-The canonical handler form is `handle { ... } with { ... }`. The `with` block may contain inline effect arms and/or named handler installations via `use HandlerExpr`.
+The canonical handler form is `handle { ... } with { ... }`. The `with` block may contain inline effect arms via `on Effect.op(...) => ...` and/or named handler installations via `use HandlerName { ... }`. The `use` payload initializes the handler instance fields declared in `handler <Effect> as <HandlerName>(...)`, and duplicate matches for the same `Effect.op` inside one `with` block are errors.
 
 ```spore
 // Bind a single named handler
@@ -753,7 +753,7 @@ handle {
 handle {
     app.run()
 } with {
-    use RealFileRead {}
+    use RealFileRead { root: "/srv/app" }
     use MockConsole { output: [] }
 }
 
@@ -761,7 +761,7 @@ handle {
 handle {
     perform Console.println("hello")
 } with {
-    Console.println(msg) => ()
+    on Console.println(msg) => {}
 }
 ```
 
@@ -774,10 +774,9 @@ effect RateLimit {
     fn check_limit(key: Str) -> Bool
 }
 
-handler TokenBucketLimiter(rate: Int, per: Duration) for RateLimit {
+handler RateLimit as FixedDecisionRateLimit(allowed: Bool) {
     fn check_limit(key: Str) -> Bool {
-        if self.tokens > 0 { self.tokens -= 1; true }
-        else { false }
+        self.allowed
     }
 }
 ```
