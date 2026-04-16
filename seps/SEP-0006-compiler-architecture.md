@@ -1360,11 +1360,11 @@ error[C0101]: undeclared capability
   --> src/report.sp:27:5
    |
 27 |     http.get(endpoint)
-   |     ^^^^^^^^^^^^^^^^^^ requires `NetRead`, not declared in `uses`
+   |     ^^^^^^^^^^^^^^^^^^ requires `NetConnect`, not declared in `uses`
    |
    = note: enclosing function `fetch_data` has `uses []`
-   = note: module ceiling for `report` allows [Compute, FileRead]
-help: add a `uses [NetRead]` clause to `fetch_data`
+   = note: module ceiling for `report` allows [FileRead]
+help: add a `uses [NetConnect]` clause to `fetch_data`
 ```
 
 **Cost violation:**

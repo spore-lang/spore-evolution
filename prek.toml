@@ -60,6 +60,7 @@ hooks = [
 [[repos]]
 repo = "local"
 hooks = [
+  { id = "terminology-consistency", name = "terminology-consistency", entry = "uv run scripts/check_terminology_consistency.py", language = "system", files = "^(GLOSSARY\\.md|seps/SEP-000[3468]-.*\\.md)$", pass_filenames = false },
   { id = "sep-index", name = "sep-index", entry = "uv run scripts/check_sep_index.py", language = "system", files = "^(drafts|seps)/.*\\.md$|^seps-index\\.json$", pass_filenames = false },
   { id = "sep-documents", name = "sep-documents", entry = "uv run scripts/validate_sep_documents.py", language = "system", files = "^(drafts|seps)/.*\\.md$", pass_filenames = true },
 ]
