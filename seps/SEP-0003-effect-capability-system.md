@@ -115,6 +115,10 @@ Spore ships with the following intent-oriented atomic effects. Each one answers:
 | `Random` | Non-deterministic computation | `random()`, `uuid()` |
 | `Exit` | Process lifecycle control | `exit()`, `abort()` |
 
+`Exit` authorizes explicit process termination. Startup contracts, runtime exit
+propagation, and host exit-code conversion are Platform/runtime concerns
+specified in SEP-0008 rather than in this effect SEP.
+
 ### Design rationale: intent-oriented built-in effects
 
 The guiding principle is: **each built-in effect answers "What does this code intend to do with the outside world?"** This leads to several deliberate design choices:
@@ -131,16 +135,19 @@ The guiding principle is: **each built-in effect answers "What does this code in
 
 ### Platform mapping: basic-cli
 
-The `basic-cli` platform maps standard library operations to built-in effects as follows:
+The `basic-cli` Platform currently maps its package modules to built-in effects as follows:
 
 | Operation | Required effect |
 |---|---|
-| `Stdout.println`, `Stderr.println` | `Console` |
-| `Stdin.read_line` | `Console` |
-| `File.read`, `Dir.list` | `FileRead` |
-| `File.write`, `Dir.create` | `FileWrite` |
-| `Env.get`, `Env.vars` | `Env` |
-| `Cmd.exec` | `Spawn` |
+| `basic_cli.stdout.print`, `basic_cli.stdout.println`, `basic_cli.stdout.eprint`, `basic_cli.stdout.eprintln` | `Console` |
+| `basic_cli.stdin.read_line` | `Console` |
+| `basic_cli.file.file_read`, `basic_cli.file.file_exists`, `basic_cli.file.file_stat` | `FileRead` |
+| `basic_cli.file.file_write` | `FileWrite` |
+| `basic_cli.dir.dir_list` | `FileRead` |
+| `basic_cli.dir.dir_mkdir` | `FileWrite` |
+| `basic_cli.env.env_get`, `basic_cli.env.env_set` | `Env` |
+| `basic_cli.cmd.process_run`, `basic_cli.cmd.process_run_status` | `Spawn` |
+| `basic_cli.cmd.exit` | `Exit` |
 
 ### Defining effect aliases
 
@@ -159,7 +166,12 @@ Aliases expand recursively and flatten:
 CLI → {Console, FileRead, FileWrite, Env, Spawn, Exit}
 ```
 
-Aliases are purely syntactic sugar. After expansion, only atomic effects remain.
+Aliases are purely syntactic sugar in `uses [...]`: after expansion, only atomic
+effects remain. The current implementation also ships a small builtin alias
+hierarchy for `IO`, `FileIO`, and `NetIO`, but **same-module declarations
+shadow those builtin names**. In other words, a local `effect IO = Console` or
+`effect IO { ... }` is treated as that local declaration, not as the builtin
+filesystem/network bundle.
 
 ### Using effects in practice
 
@@ -175,6 +187,11 @@ uses [HttpClient]
 ```
 
 After alias expansion this is equivalent to `uses [NetConnect, Clock]`.
+
+`perform` and inline `on Effect.op(...)` arms are stricter: they target
+**declared effect interfaces**, not aliases or undeclared pseudo-effect paths.
+`uses [Alias]` may cover `perform Console.println(...)` after alias expansion,
+but `perform Alias.println(...)` is not the canonical surface.
 
 ### Pure closures in higher-order functions
 
@@ -273,7 +290,7 @@ Running `sporec --fixes` auto-inserts the missing `uses` clause.
 
 ### No module-level `uses` declarations
 
-Spore does **not** have module-level `uses` ceilings or carriers. Source files declare no ambient effect budget. Effect checking happens at:
+Spore does **not** currently standardize module-level `uses` ceilings or carriers. Source files declare no ambient effect budget. Effect checking happens at:
 
 1. function signatures (`uses [...]`)
 2. project / Platform boundaries
@@ -384,9 +401,32 @@ In any `uses` declaration:
 
 $$\texttt{uses } [C] \equiv \texttt{uses } [A_1, A_2, \ldots, A_n]$$
 
-Expansion is **recursive**: if any $A_i$ is itself an alias, it is expanded until every element is an atomic effect. The result is always a flat set.
+Expansion is **recursive**: if any $A_i$ is itself an alias, it is expanded
+until every element is an atomic effect. The result is always a flat set.
+
+The shipped implementation also reserves builtin aliases `IO`, `FileIO`, and
+`NetIO` for convenience expansion, but those names are **not global keywords**:
+same-module declared effects and effect aliases with the same names shadow the
+builtin hierarchy.
 
 **No effect variables exist.** All effect sets must be fully determined at compile time. There is no `uses E` generic parameter and no effect polymorphism.
+
+### 3.1 Declared effects, imports, and `perform`
+
+The canonical checked path for `perform` is:
+
+1. the current capability set must contain the named effect after alias
+   expansion, and
+2. the effect name must resolve to a declared effect/interface with a known
+   operation signature.
+
+That rule applies equally to inline handler arms such as
+`on Console.println(msg) => ...`.
+
+Imported `pub effect` interfaces preserve their operation signatures across
+module boundaries, so cross-module `perform Effect.op(...)` is typechecked
+against the imported signature rather than against an untyped name stub.
+Ambiguous imported same-name effects with different signatures are rejected.
 
 ### 4. Function types and CapSet encoding
 

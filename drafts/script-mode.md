@@ -17,7 +17,7 @@ superseded_by: null
 
 # Draft SEP: Script Mode & Inline Script Metadata
 
-> **Executive Summary**: This proposal adds a first-class script workflow to `spore` without weakening the manifest-backed project model. Scripts use a dedicated file-header block comment with TOML-like metadata, and script mode is explicitly separated from project mode rather than borrowing nearby project configuration. The result is a reproducible single-file workflow that remains compatible with named project entries, one-project/one-Platform semantics, and future agent tooling.
+> **Executive Summary**: This proposal adds a first-class script workflow to `spore` without weakening the manifest-backed project model. Scripts use a dedicated file-header block comment with TOML-like metadata, and the target CLI shape separates script mode from project mode instead of borrowing nearby project configuration. Current shipped `spore run <file>` behavior still includes a compatibility path where files under a project's `src/` tree resolve as project-backed entries; this draft defines the stricter future split. The result is a reproducible single-file workflow that remains compatible with named project entries, one-project/one-Platform semantics, and future agent tooling.
 
 ## Summary
 
@@ -32,8 +32,8 @@ The proposal introduces:
   - `[platform]`
   - `[dependencies]`
 - a strict mode split:
-  - `spore run <file>` is script mode
-  - bare `spore run` and `spore run --entry <name>` are project mode
+  - **proposed**: `spore run <file>` is script mode
+  - **proposed**: bare `spore run` and `spore run --entry <name>` are project mode
 - explicit project-control flags:
   - `--project <path>`
   - `--no-project`
@@ -71,102 +71,109 @@ The goal is therefore **not** "just run any file somehow." The goal is:
 
 ### Two ways to run code
 
-After this SEP, `spore run` has two user-facing modes:
+Current implementations route **`spore run <file>`** through one of two runtime
+paths:
 
 1. **Project mode**
-   - `spore run`
-   - `spore run --entry api`
-   - `spore run --project ../apps/billing --entry api`
-   - Runs a named project entry from an attached project.
-2. **Script mode**
+   - `spore run src/main.sp` when that file lives under a manifest-backed
+     project's `src/` tree
+   - Attaches a project and derives the corresponding entry path from that file's
+     location under `src/`.
+2. **Standalone file mode**
    - `spore run tools/repro.sp`
-   - Runs one explicit source file as a script, independent of project config.
+   - Runs one explicit source file when it is **not** resolved as a project
+     entry under `src/`.
 
-An explicit `<file>` means script mode. `--entry <name>` means project mode.
-They are mutually exclusive.
+An explicit file path therefore does **not** always force standalone mode.
+Files inside a discovered project's `src/` tree are currently routed through
+project mode.
 
-### Example: standalone script
+### Example: standalone file
 
 ```spore
-/* spore-script
-requires-spore = ">=0.1.0"
-
-[platform]
-path = "../platforms/cli"
-
-[dependencies]
-json = { git = "https://github.com/spore-lang/json", sig = "sig:abcd1234" }
-*/
-
-fn main() -> () {
-    println("hello from script mode")
-    return
+fn main() -> I32 {
+    42
 }
 ```
 
-Running the file:
+Running the file today:
 
 ```bash
 spore run tools/hello.sp
+42
 ```
 
-The header makes the script self-describing: the tool can validate the required
-Spore version, choose the script's platform, and resolve its external
-dependencies even when no `spore.toml` exists nearby.
+Current standalone-file execution still permits `fn main() -> I32`. The
+returned value is printed by `spore run`; it does **not** become the host
+process exit status.
 
-### Example: script inside a project tree
+### Example: explicit file inside a project tree
 
 ```bash
 spore run tools/migrate.sp
 ```
 
 Even if `tools/migrate.sp` lives under a directory that also contains
-`spore.toml`, the command still stays in script mode. Nearby project manifests,
-entries, dependencies, and platforms are ignored. The script runs from its own
-header metadata plus script-mode defaults only.
+`spore.toml`, the command currently stays in standalone file mode because
+project auto-detection only maps files inside the project's `src/` tree to
+project entries.
 
-### Example: project mode with an explicit project root
+By contrast, `spore run src/main.sp` is currently resolved through project mode,
+because the file path can be mapped to a manifest-backed entry under `src/`.
+
+### Future example: project mode with an explicit project root
 
 ```bash
-spore run --project ../apps/billing
-spore run --project ../apps/billing --entry worker
+spore run .
+spore run ../apps/billing
 ```
 
-`--project <path>` belongs to project mode. It selects the project whose default
-entry or named entry should run.
+This is **proposed CLI surface**, not current shipped behavior. Today `spore run`
+expects a file path, not a project directory.
 
-### Example: run a project entry
+### Future example: run the discovered project entry
 
 ```bash
 spore run
-spore run --entry worker
-spore run --project ../apps/billing --entry worker
+spore run .
+spore run ../apps/billing
 ```
 
-Bare `spore run` is project mode: it finds a project from the current working
-directory and runs its default entry. `--entry <name>` selects a named manifest
-entry instead. `--project <path>` replaces cwd-based project discovery.
+This is also **proposed CLI surface**, not current shipped behavior. In the
+current implementation, project mode is only reached when the explicit file path
+passed to `spore run` resolves to a manifest-backed entry under `src/`. When
+that happens, the selected entry must satisfy both the Platform startup
+signature and the selected Platform package's `[platform].handles` capability
+contract.
 
-### Passing script or entry arguments
+### Future example: passing script or entry arguments
 
 ```bash
 spore run tools/repro.sp -- --verbose --limit 10
-spore run --entry worker -- --queue invoices
+spore run . -- --queue invoices
 ```
 
-`--` separates `spore run` flags from the arguments passed through to the script
-or selected entry.
+This argument-passthrough form is **proposed**, not current shipped behavior.
 
 ## Reference-level explanation
 
+The sections below include **future script-mode design space** (for example
+script headers and richer CLI flags) in addition to the current shipped mode
+resolution documented above.
+
 ### Terminology
 
-- **script mode**: `spore run <file>` with one explicit source file
-- **project mode**: `spore run` or `spore run --entry <name>`
-- **script header**: the dedicated file-header block comment recognized as
-  structured script metadata
+- **standalone file mode**: `spore run <file>` when the explicit file does not
+  resolve to a project entry under `src/`
+- **project-backed file resolution**: current shipped behavior where
+  `spore run <file>` attaches a manifest-backed project only when that explicit
+  file resolves to an entry under `src/`
+- **project mode**: proposed broader CLI surface such as `spore run`,
+  `spore run .`, or `spore run <project-dir>`
+- **script header**: a proposed dedicated file-header block comment recognized
+  as structured script metadata
 - **effective run configuration**: the final configuration after applying CLI
-  flags plus the metadata relevant to the active mode
+  inputs plus the metadata relevant to the active mode
 
 ### Script header format
 
@@ -201,7 +208,8 @@ error. It must not silently ignore malformed structured metadata.
 V1 script metadata contains:
 
 - `requires-spore = "<version-range>"`
-- `[platform]` using the same schema as manifest `[platform]`
+- `[platform]` carrying script-local platform selection metadata that parallels
+  manifest platform configuration, without requiring the exact same table shape
 - `[dependencies]` using the same dependency-entry shape as manifest
   `[dependencies]`
 
@@ -210,90 +218,86 @@ instead of inventing a parallel configuration language.
 
 ### CLI surface
 
-The intended `spore run` surface is:
+The current public `spore run` surface discussed in this draft is:
 
 ```text
-spore run [--project PATH] [--entry NAME] [-- ARGS...]
-spore run FILE [--no-project] [-- ARGS...]
+spore run FILE
 ```
 
-Rules:
+Rules today:
 
-- `FILE` and `--entry` are mutually exclusive
-- `FILE` and `--project` are mutually exclusive
-- bare `spore run` is valid only in project mode
-- `spore run <file>` is script mode
-- `--no-project` is allowed only in script mode; it is an explicit assertion,
-  not a request to detach from a project after project discovery
+- `FILE` may resolve as a project-backed entry only when it maps to a file under a
+  discovered project's `src/` tree
+- otherwise `spore run FILE` falls back to standalone file mode
+- bare `spore run`, `spore run .`, and `spore run <project-dir>` belong to the
+  proposed project-mode surface, not the shipped baseline described here
+- separate `--project`, `--entry`, and `--no-project` switches are future CLI
+  design, not the shipped surface described here
 
 ### Project discovery
 
-Project discovery exists only in project mode:
+Project discovery currently happens only when the explicit file path maps into a
+discovered project's `src/` tree:
 
-1. **If `--project <path>` is present**
-   - attach exactly that project
-2. **Else**
-   - discover a project by walking upward from the current working directory
+1. **`PATH` is a file under a discovered project's `src/` tree**
+   - walk upward from the file's directory
+   - attach that project and derive the entry path from the file's path under
+     `src/`
 
-Script mode performs no project discovery.
+If the explicit file path does not map into a discovered project's `src/` tree,
+the command falls back to standalone file mode.
 
 ### Project mode semantics
 
 In project mode:
 
-- the attached project is required
-- `--entry <name>` selects a named manifest entry
-- without `--entry`, the manifest's `default-entry` is used
+- the attached project is manifest-backed
+- a file path under `src/` maps to the corresponding project entry path
+- bare `spore run` or `spore run <dir>` remains proposed future CLI surface for
+  selecting the manifest's inferred/default entry
 - if no project can be found, the command fails with an explicit error
 
-Project mode is manifest-backed. It does not consult script headers because no
-explicit script file is being selected.
+Project mode is the path that uses Platform contracts such as `basic-cli`'s
+`main() -> ()` startup requirement.
 
 ### Script mode semantics
 
-In script mode:
+In standalone file mode:
 
-- the explicit `FILE` is the execution target
+- the explicit file is the execution target
 - the file does not need to be a named manifest entry
-- the file may live inside or outside a project tree
-- project manifests, project dependencies, project entries, project platforms,
-  and `default-entry` are ignored
-- the effective run configuration is derived only from:
-  - CLI script-mode flags
-  - the script header, if present
-  - script-mode defaults
+- files outside any project's `src/` tree run this way, even if they live
+  elsewhere under a project root (for example `tools/migrate.sp`)
+- standalone execution does **not** use a Platform contract module
+- `fn main() -> I32` is still accepted and its result is printed as a normal
+  value
+- standalone execution does **not** convert the return value into the host
+  process exit status
 
-If a file lives inside a project tree but is invoked as `spore run <file>`, it
-still remains script mode.
+The explicit `Exit` effect path is currently a project-mode Platform feature,
+not a standalone-file return convention.
 
 ### Effective configuration and precedence
 
-Project mode and script mode have different precedence rules.
+Current `spore run` precedence is simpler than the future CLI sketched earlier
+in this draft because it is still file-selected.
 
-#### Project mode
+#### Project-backed file resolution
 
-1. `--project <path>` if present
-2. cwd-based project discovery otherwise
-3. `--entry <name>` if present
-4. manifest `default-entry` otherwise
+1. start from the explicit file path
+2. walk upward from that file's directory looking for a manifest-backed project
+3. if the file lands under the discovered project's `src/` tree, derive the
+   entry path from that relative location
+4. otherwise stay in standalone file mode
 
-#### Script mode
+#### Standalone file mode
 
-1. script-mode CLI assertions such as `--no-project`
-2. script header metadata
-3. script-mode defaults
+1. the explicit file path
+2. no manifest-backed Platform contract
+3. no script-header metadata contract yet
 
-The resulting precedence is:
-
-| Concern | Highest precedence | Fallback |
-|---|---|---|
-| Entry selection | `--entry` | manifest `default-entry` |
-| Project root (project mode only) | `--project` | cwd discovery |
-| External dependencies (script mode) | script `[dependencies]` | script-mode defaults |
-| Platform (script mode) | script `[platform]` | script-mode defaults |
-| Spore version requirement (script mode) | script `requires-spore` | active tool defaults only |
-
-In particular, script mode never inherits project dependencies or platform.
+In particular, current standalone file mode does not inherit project Platform
+contracts just because the file lives somewhere under the same repository root.
 
 ### Relationship to named project entries
 
@@ -402,7 +406,9 @@ heavyweight.
 
 Rejected because script mode should stay independent from project mode. A file
 run as `spore run path/to/file.sp` should not silently inherit dependencies,
-entries, or platform choices from whichever project happens to contain it.
+entries, or platform choices from whichever project happens to contain it in the
+target CLI shape, even though the current shipped implementation still has a
+compatibility path for files discovered under a project's `src/` tree.
 
 ### Store script metadata in a sidecar file
 
@@ -411,9 +417,11 @@ and generate. The metadata should travel with the script.
 
 ### Treat explicit files as project-aware entry paths
 
-Rejected because explicit files are the script-mode surface in this design.
-Durable project execution should remain manifest-based through default entries
-and named entries.
+Rejected as the long-term default because explicit files are the script-mode
+surface in this design. Durable project execution should remain manifest-based
+through default entries and named entries, even though the current shipped
+implementation still accepts some explicit `src/...` file paths as
+project-backed entry resolution.
 
 ## Prior art
 

@@ -23,7 +23,7 @@ This SEP specifies the standard library that ships with every Spore implementati
 1. **Prelude** — types and functions available without import
 2. **Core modules** — standard modules available via `import std.*`
 3. **Error types** — a unified error hierarchy
-4. **Platform bindings** — how I/O functions connect to platform effect handlers
+4. **Platform bindings** — how I/O functions connect to selected Platform package modules
 5. **Cost contracts** — cost annotations for all stdlib functions
 
 The stdlib is deliberately small. Spore follows the principle that the standard library should provide exactly the types and functions needed to write idiomatic Spore code, with everything else available as packages.
@@ -67,28 +67,40 @@ Specialized modules require explicit imports:
 import std.math       // sqrt, sin, cos, abs, pow, ...
 import std.string     // split, trim, join, contains, ...
 import std.collections // Map, Set, sorted, grouped, ...
-import std.io         // Platform-provided I/O bindings
+// future: import std.io  // stabilized platform-neutral I/O facade
 import std.time       // DateTime, Duration, now(), ...
 import std.json       // parse_json, to_json
 ```
 
 ### How do I/O functions work?
 
-I/O functions are **not** ordinary Spore functions — they are `foreign fn` declarations provided by the platform (SEP-0008). The stdlib re-exports them with Spore-visible type signatures:
+The current implementation does **not** yet ship a stabilized `std.io`
+abstraction layer. Manifest-backed projects import the selected Platform
+package's modules directly, and those modules expose `foreign fn` declarations
+with explicit `uses [...]` requirements.
 
 ```spore
-// In std.io (provided by platform)
-foreign fn read_file(path: String) -> Result[String, IoError]
-    uses [FileRead]
+import basic_cli.stdout
+import basic_cli.cmd
 
-foreign fn write_file(path: String, content: String) -> Result[Unit, IoError]
-    uses [FileWrite]
-
-foreign fn http_get(url: String) -> Result[String, HttpError]
-    uses [NetRead]
+fn main() -> () uses [Console, Exit] {
+    println("hello")
+    exit(0)
+}
 ```
 
-The platform effect handler mechanism (SEP-0008) ensures these functions are only available when the ambient capability set includes the required capabilities.
+For `basic-cli`, the shipped surface currently lives in modules such as
+`basic_cli.stdout`, `basic_cli.stdin`, `basic_cli.file`, `basic_cli.env`, and
+`basic_cli.cmd`.
+A future `std.io` layer may wrap or re-export a common surface above those
+Platform packages, but that is not today's contract.
+
+There is also a narrower runtime path for declared effects in interpreter-style
+execution: `perform Effect.operation(...)` falls back through registered host
+handlers by the **qualified** `Effect.operation` key. Today that support is
+explicit rather than generic (for example, the CLI runtime supports
+`Console.print`, `Console.println`, and `Console.read_line`). Platform package
+modules remain the main shipped application-facing contract.
 
 ## Reference-level explanation
 
@@ -100,8 +112,8 @@ The prelude is implicitly imported into every module. It contains:
 
 | Type | Description | Default | Size |
 |------|-------------|---------|------|
-| `Int` | Arbitrary-precision integer | `0` | Variable |
-| `Float` | 64-bit IEEE 754 | `0.0` | 8 bytes |
+| `Int` | Canonical integer scalar (`I64` alias) | `0` | 8 bytes |
+| `Float` | Canonical floating-point scalar (`F64` alias) | `0.0` | 8 bytes |
 | `Bool` | Boolean | `false` | 1 byte |
 | `String` | Immutable UTF-8 string | `""` | Variable |
 | `Char` | Unicode scalar value | — | 4 bytes |
@@ -443,77 +455,29 @@ fn from_list[T](items: List[T]) -> Set[T]
     cost O(len(items))
 ```
 
-#### `std.io` (platform-provided)
+#### `std.io` (future standardization layer)
 
-```spore
-module std.io
+`std.io` is not yet the normative surface of the current implementation. Today,
+manifest-backed projects import Platform package modules directly. For
+`basic-cli`, the shipped modules are:
 
-// ── Filesystem ─────────────────────────────────────────────────────
+| Module | Example operations | Required effects |
+|---|---|---|
+| `basic_cli.stdout` | `print`, `println`, `eprint`, `eprintln` | `Console` |
+| `basic_cli.stdin` | `read_line` | `Console` |
+| `basic_cli.file` | `file_read`, `file_write`, `file_exists`, `file_stat` | `FileRead`, `FileWrite` |
+| `basic_cli.dir` | `dir_list`, `dir_mkdir` | `FileRead`, `FileWrite` |
+| `basic_cli.env` | `env_get`, `env_set` | `Env` |
+| `basic_cli.cmd` | `process_run`, `process_run_status`, `exit` | `Spawn`, `Exit` |
 
-foreign fn read_file(path: String) -> Result[String, IoError]
-    uses [FileRead]
-    cost O(file_size)
+`basic_cli.cmd.exit(code)` is the currently shipped explicit process-termination
+surface. In project mode it works together with SEP-0008's startup contract
+(`main() -> ()`), and the runtime converts the resulting structured outcome into
+a host exit status.
 
-foreign fn read_bytes(path: String) -> Result[List[Int], IoError]
-    uses [FileRead]
-    cost O(file_size)
-
-foreign fn write_file(path: String, content: String) -> Result[Unit, IoError]
-    uses [FileWrite]
-    cost O(len(content))
-
-foreign fn append_file(path: String, content: String) -> Result[Unit, IoError]
-    uses [FileWrite]
-    cost O(len(content))
-
-foreign fn list_dir(path: String) -> Result[List[String], IoError]
-    uses [FileRead]
-
-foreign fn create_dir(path: String) -> Result[Unit, IoError]
-    uses [FileWrite]
-
-foreign fn delete(path: String) -> Result[Unit, IoError]
-    uses [FileWrite]
-
-foreign fn file_exists(path: String) -> Result[Bool, IoError]
-    uses [FileRead]
-    cost O(1)
-
-// ── Network ────────────────────────────────────────────────────────
-
-foreign fn http_get(url: String) -> Result[String, HttpError]
-    uses [NetRead]
-
-foreign fn http_post(url: String, body: String) -> Result[String, HttpError]
-    uses [NetWrite]
-
-// ── Console ────────────────────────────────────────────────────────
-
-foreign fn print(msg: String) -> Unit
-    uses [StateWrite]
-    cost O(len(msg))
-
-foreign fn println(msg: String) -> Unit
-    uses [StateWrite]
-    cost O(len(msg))
-
-foreign fn read_line() -> Result[String, IoError]
-    uses [StateRead]
-
-// ── Process ────────────────────────────────────────────────────────
-
-foreign fn exit(code: Int) -> Never
-    uses [Exit]
-    cost O(1)
-
-foreign fn env_var(name: String) -> Option[String]
-    uses [StateRead]
-    cost O(1)
-
-foreign fn args() -> List[String]
-    uses [StateRead]
-    cost O(1)
-```
+A future `std.io` module may standardize a portable wrapper above these Platform
+packages. Until that lands, signatures in this section should be read as future
+design sketches rather than as the current contract.
 
 #### `std.time` (platform-provided)
 
@@ -661,36 +625,38 @@ These 13 traits have special compiler support (SEP-0002). The stdlib provides th
 
 ### 4.6 Platform binding architecture
 
-The stdlib I/O layer uses the platform effect handler mechanism from SEP-0008:
+The current runtime stack for platform-backed I/O looks like this:
 
 ```text
-┌─────────────────────────────────────────┐
-│  User Code                              │
-│  fn main() uses [FileRead] {            │
-│      let content = read_file("a.txt")   │
-│  }                                      │
-├─────────────────────────────────────────┤
-│  std.io (Spore signatures)              │
-│  foreign fn read_file(path) -> Result   │
-│      uses [FileRead]                    │
-├─────────────────────────────────────────┤
-│  Platform (effect handler)              │
-│  handle FileRead {                      │
-│      read_file(path) => rust_read(path) │
-│  }                                      │
-├─────────────────────────────────────────┤
-│  Native Runtime (Rust/C)                │
-│  fn rust_read(path: &str) -> ...        │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ User Code                                    │
+│ fn main() -> () uses [Console, Exit] {       │
+│   println("done")                            │
+│   exit(0)                                    │
+│ }                                            │
+├──────────────────────────────────────────────┤
+│ Platform package modules                     │
+│ basic_cli.stdout / basic_cli.stdin /         │
+│ basic_cli.file / basic_cli.env /             │
+│ basic_cli.cmd                                │
+├──────────────────────────────────────────────┤
+│ Selected Platform contract + metadata        │
+│ [project].platform = "basic-cli"             │
+│ startup-contract = "main"                    │
+│ adapter-function = "main_for_host"           │
+│ handles = [..., "Exit"]                      │
+├──────────────────────────────────────────────┤
+│ Native Runtime (Rust/C/host embedding)       │
+└──────────────────────────────────────────────┘
 ```
 
 Key properties:
 
-1. **User code** calls stdlib functions with normal Spore syntax
-2. **Stdlib** declares `foreign fn` with capability requirements
-3. **Platform** provides the actual implementation via effect handlers
-4. **Test platform** can mock any I/O function for deterministic testing
-5. **Capability isolation** — a package declaring `uses [Compute]` cannot call any `foreign fn` that requires I/O capabilities
+1. **User code** imports Platform package modules directly today.
+2. **Each foreign surface** declares explicit capability requirements.
+3. **The selected Platform package** owns startup contracts and handled-effect metadata.
+4. **Some operations** may propagate structured runtime outcomes before host conversion (for example `Exit` in project mode).
+5. **Future stdlib wrappers** may layer above this, but they are not required for the current implementation.
 
 ### 4.7 Cost expression helpers
 
@@ -788,7 +754,9 @@ Rejected. A large stdlib creates maintenance burden and version coupling. Spore'
 
 ### No foreign fn (pure Spore stdlib)
 
-Rejected. I/O operations cannot be expressed in pure Spore. The platform effect handler model is the designed mechanism for I/O (SEP-0008).
+Rejected. I/O operations cannot be expressed in pure Spore. The designed MVP
+mechanism is Platform-owned package modules plus the selected Platform contract
+boundary (SEP-0008).
 
 ## Prior art
 
