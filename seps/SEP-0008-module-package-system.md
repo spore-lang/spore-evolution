@@ -16,13 +16,13 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
-> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where platforms provide effect handlers via `foreign fn` declarations. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`), `spore.toml` for project configuration, and a two-layer capability ceiling (project + file level). Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through capability isolation — downloaded packages declaring `uses [Compute]` provably cannot access IO.
+> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where a selected Platform package declares its startup contract, host adapter, and handled effects via manifest metadata and package modules. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`) and `spore.toml` for project configuration. Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through explicit function-level effects plus Platform metadata. Broader project/file capability ceilings remain follow-up work rather than part of the current shipped contract.
 
 ## Summary
 
-This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, how IO is abstracted through the Platform system using effect handlers, and how a two-layer capability ceiling (project-wide in `spore.toml` + file-level `#![uses(...)]` pragma) secures the supply chain.
+This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, and how IO is abstracted through selected Platform packages and startup contracts. Additional project-wide or file-level capability ceilings remain reserved for later SEP work instead of being part of the current implementation-aligned contract.
 
-The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the two-layer capability ceiling, the import/alias separation, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
+The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the import/alias separation, reserved capability-ceiling design space, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
 
 ## Motivation
 
@@ -58,10 +58,10 @@ A human-readable `version` field remains available in `spore.toml` for documenta
 
 In traditional languages, IO operations are built into the standard library, making them impossible to substitute for testing, impossible to sandbox for security, and impossible to port across runtimes without rewriting application code. Spore's Platform system, inspired by Roc, makes IO a pluggable concern:
 
-- **Application code is pure**: Functions declare capability requirements (`uses [FileRead, NetWrite]`) but never perform IO directly.
-- **Platforms provide effect handlers**: A Platform maps abstract capabilities to concrete system calls.
-- **Test Platforms enable deterministic testing**: Mock handlers return predefined data, eliminating flaky tests.
-- **Supply-chain security**: A downloaded package declaring `uses [Compute]` is provably pure—it cannot access the filesystem, network, or any IO primitive.
+- **Application code declares capabilities explicitly**: Functions write `uses [...]` clauses and call platform-owned APIs; they do not issue raw host operations directly.
+- **Platform packages define the runtime boundary**: A Platform package publishes foreign-function modules, a startup contract, and a host adapter.
+- **Alternative Platforms can preserve the same application surface**: CLI, test, web, or embedded runtimes can supply different implementations for the same declared capabilities.
+- **Supply-chain security comes from explicit effects plus Platform metadata**: A package cannot manufacture filesystem, process, or network access unless the selected Platform exposes and handles those operations.
 
 ## Guide-level explanation
 
@@ -79,12 +79,10 @@ The canonical source extension in docs and manifests is `.sp`. Compatibility-onl
 | `src/utils.sp` | `utils` |
 | `src/main.sp` | `main` |
 
-There is no `module` keyword — the filesystem **is** the declaration. A file-level pragma may narrow the module's capability ceiling (see [Two-layer capability ceiling](#two-layer-capability-ceiling)):
+There is no `module` keyword — the filesystem **is** the declaration. Current implementations do not require or standardize an additional file-level `#![uses(...)]` ceiling; capability requirements remain attached to individual function signatures.
 
 ```spore
 // src/billing/invoice.sp
-#![uses(PaymentGateway, AuditLog)]
-
 import billing.types
 import billing.tax
 
@@ -111,7 +109,8 @@ Module names use **dot-separated** paths derived from the filesystem. There is n
 Spore uses **dot-separated** paths for module imports and for item selection:
 
 ```spore
-// Module import: makes all pub items accessible via qualified name
+// Module import: brings the module into scope; current implementations then
+// register its pub items as unqualified local names
 import billing.invoice
 
 // Module import with rename
@@ -122,7 +121,13 @@ alias gen = billing.invoice.generate_invoice
 alias Inv = billing.types.Invoice
 ```
 
-> **Note (D12):** Selective imports (`import billing.invoice.{calculate, Invoice}`) are not supported in v0.1. Use `import billing.invoice` and qualify names, or use `alias` for specific items.
+> **Note (D12):** Selective imports (`import billing.invoice.{calculate, Invoice}`) are not supported in v0.1. Use `import billing.invoice` and call the imported item by its current bare local name, or use `alias` for specific items.
+>
+> **Current implementation note:** `import mod as alias` is the locked surface
+> syntax, but imported items are still registered unqualified in the current
+> checker/runtime path. Alias-qualified member access (`inv.generate_invoice()`)
+> remains follow-up work; today the safe implementation-aligned path is to
+> import the module and call the imported item by its bare local name.
 
 Key rules:
 
@@ -130,6 +135,14 @@ Key rules:
 - `alias` operates on **items** only. You cannot alias a module (use `import ... as` instead).
 - No wildcard imports (`import billing.*` is not supported).
 - No implicit nested imports (`import billing` does not import `billing.invoice`).
+- Imported functions preserve the metadata needed for downstream checking:
+  parameter/return types, `uses [...]`, declared `!errors`, generic parameters,
+  and `where` bounds.
+- Imported `pub effect` / capability interfaces preserve operation signatures
+  across module boundaries, so `perform Effect.op(...)` keeps operation typing
+  after import.
+- Ambiguous imported same-name functions or effect interfaces with conflicting
+  signatures are rejected rather than silently overwritten.
 
 ### Visibility
 
@@ -150,7 +163,7 @@ pub(pkg) fn validate(order: Order) -> ValidatedOrder ! ValidationError { ... }
 fn compute_totals(order: ValidatedOrder) -> Invoice { ... }
 ```
 
-Visibility applies uniformly to functions, types, and aliases.
+Visibility applies uniformly to functions, types, effect interfaces, and aliases.
 
 ### Packages
 
@@ -187,23 +200,31 @@ manifest-backed packages and applications only.
 
 ### Platforms
 
-A Platform is the **only** code in a Spore application that can perform real IO. It provides effect handlers that interpret abstract capabilities at runtime:
+A Platform is the **only** package in a Spore application that bridges declared effects to the host runtime. In the current MVP it contributes:
+
+1. package modules that expose Platform-owned `foreign fn` surfaces,
+2. a contract module that defines the startup signature, and
+3. an adapter function that bridges application startup into the host runtime.
 
 ```spore
-// Application code: pure function, emits effects
-fn read_config() -> Config ! FileRead {
-    let content = File.read("config.toml")  // emits FileRead effect
-    parse_toml(content)
-}
+import basic_cli.stdout
+import basic_cli.cmd
 
-// Platform: provides the FileRead handler
-// Application code never sees this implementation
-handler FileReadHandler {
-    File.read(path) -> resume(os_read_file(path))
+fn main() -> () uses [Console, Exit] {
+    println("about to exit")
+    exit(7)
 }
 ```
 
-The same application code can run on different Platforms—CLI, Web, WASM, Embedded—without modification. For testing, a **Test Platform** replaces real IO with deterministic mock handlers.
+For `basic-cli`, project mode currently requires `main() -> ()`. Explicit process termination is modeled as a Platform API (`basic_cli.cmd.exit`) requiring `uses [Exit]`; the runtime carries that as a structured project outcome and the CLI converts that outcome to a host exit status at the process boundary.
+
+In the current implementation, project mode also validates the selected entry's
+startup capability requirements against the selected Platform package's
+`[platform].handles` manifest field. A manifest-backed application may only
+start if its entry function's required effects are listed in that Platform
+contract metadata.
+
+Standalone single-file execution is outside SEP-0008. Its legacy `main() -> I32` behavior is documented separately in `drafts/script-mode.md`.
 
 ## Reference-level explanation
 
@@ -513,19 +534,26 @@ alias invoice = billing.types.Invoice    // ERROR: 'invoice' conflicts with modu
 
 ### Platform abstraction
 
-#### IO via effect handlers
+#### IO via Platform boundary
 
-Application code is pure—it declares capability requirements but never performs IO directly. IO operations are expressed as effects that the Platform's handlers interpret at runtime:
+Application code declares capability requirements and crosses the runtime
+boundary through the selected Platform package. In the current MVP,
+manifest-backed project mode resolves those calls through Platform-owned modules
+plus the Platform's startup contract:
 
 ```spore
-// Application code: pure
-fn fetch_and_save(url: Url, dest: Path) -> Unit ! NetRead | FileWrite {
-    let data = Http.get(url)
-    File.write(dest, data)
+import basic_cli.file
+
+fn export_report(path: Str, content: Str) -> () ! IoError
+uses [FileWrite]
+{
+    file_write(path, content)
 }
 ```
 
-The type system tracks all effects. Effects propagate upward: if you call a function requiring capability `C`, your function must also declare `uses [C]`.
+The type system tracks all effects. Effects propagate upward: if you call an
+operation requiring capability `C`, your function must also declare
+`uses [C]`.
 
 #### Platform definition
 
@@ -550,7 +578,7 @@ type = "platform"
 contract-module = "platform_contract"
 startup-contract = "main"
 adapter-function = "main_for_host"
-handles = ["Console", "FileRead", "FileWrite", "Env", "Spawn"]
+handles = ["Console", "FileRead", "FileWrite", "Env", "Spawn", "Exit"]
 ```
 
 ```spore
@@ -567,9 +595,28 @@ pub fn main_for_host(app_main: () -> ()) -> () {
 
 The hole-backed startup function in the Platform contract module is the
 authoritative startup signature. Applications targeting that Platform must
-implement the same startup function name/signature in their entry module. Any
+implement the same startup function name plus the same parameter/return shape in
+their entry module. Current MVP capability requirements are checked separately:
+the selected startup entry's `uses [...]` set must fit within `[platform].handles`
+rather than being encoded into the adapter's callable Rust-facing shape. Any
 `spec` items attached to the Platform contract and the application
 implementation both apply.
+
+For `basic-cli` today, the startup contract remains `main() -> ()`. Applications
+do **not** return process exit codes from `main`; they call the Platform surface
+explicitly:
+
+```spore
+import basic_cli.cmd
+
+fn main() -> () uses [Exit] {
+    exit(7)
+}
+```
+
+The runtime propagates this as a structured project outcome. The current CLI
+boundary accepts exit codes in `0..=255`; unsupported values are reported as
+errors rather than silently truncated.
 
 Parser-level `platform { ... }` blocks remain future sugar over the same
 package-owned contract; the MVP does not require that syntax to land first.
@@ -590,7 +637,7 @@ path = "src/main.sp"
 
 The compiler verifies:
 
-- Every capability used by application code is handled by the selected Platform package's `[platform]` metadata.
+- The selected startup entry's required capabilities are listed in the selected Platform package's `[platform]` metadata.
 - The startup function in the selected entry module matches the Platform contract module's startup contract.
 - The selected Platform package exports the named adapter from its contract module.
 - Test and mock Platforms may be substituted during testing, but a project binds to one Platform at a time.
@@ -605,11 +652,13 @@ multiple Platforms.
 
 #### Test Platforms for deterministic testing
 
-Since application code is decoupled from IO implementations, a Test Platform can substitute mock handlers:
+Since application code is decoupled from IO implementations, a future Test
+Platform can substitute mock handlers. The syntax below is illustrative future
+sugar rather than the current package-backed MVP surface:
 
 ```spore
 platform TestPlatform {
-    handles [FileRead, FileWrite, NetRead, Clock]
+    handles [FileRead, FileWrite, NetConnect, Clock]
     startup: fn() -> TestResult
 }
 
@@ -646,10 +695,10 @@ Test result: ok. 3 passed; 0 failed
 
 #### Security model
 
-1. **Pure packages cannot perform IO**. They declare capability requirements but lack handlers.
-2. **Only Platforms hold `RawSyscall`**. No user package can access raw system calls.
+1. **Pure packages cannot perform IO**. They may declare capability requirements, but they do not carry Platform implementations.
+2. **Only Platform packages bridge to raw host operations**. No user package can invoke host operations without going through the selected Platform.
 3. **Capabilities are explicit**. An auditor can inspect any function's `uses` clause to know exactly what it can do.
-4. **Supply-chain safety**: A downloaded package declaring `uses [Compute]` is provably pure.
+4. **Supply-chain safety**: A downloaded package cannot gain hidden filesystem, process, or network access through an implicit stdlib shim; those surfaces must be provided by the selected Platform package.
 
 ```text
 $ spore audit billing-lib
@@ -664,132 +713,27 @@ Package: billing-lib
 
   ✓ No RawSyscall usage
   ✓ No undeclared capabilities
-  ✓ All capability requirements declared in spore.toml
+  ✓ Startup entry requirements fit the selected Platform metadata
 ```
 
 ### Module capabilities
 
-#### Two-layer capability ceiling
+#### Capability checking today
 
-Capabilities are constrained through a two-layer ceiling system:
+The current implementation-aligned model standardizes capability checking at two
+places:
 
-**Layer 1 — Project-wide ceiling (`spore.toml`):**
+1. function signatures (`uses [...]`)
+2. selected Platform boundaries and Platform metadata
 
-```toml
-[capabilities]
-allowed = ["IO", "FileRead", "FileWrite", "Net", "PaymentGateway", "AuditLog"]
-```
-
-This defines the maximum set of capabilities available to **any** file in the project. No module can exceed this ceiling.
-
-**Layer 2 — File-level narrowing (`#![uses(...)]` pragma):**
-
-Individual files can narrow the project ceiling to declare the maximum capabilities their functions may use:
-
-```spore
-// src/billing/invoice.sp
-#![uses(PaymentGateway, AuditLog)]
-```
-
-- Any function in the module can use a subset of these capabilities.
-- No function can use capabilities **not** in this set.
-- The file-level pragma must be a **subset** of `spore.toml`'s `[capabilities] allowed`.
-- Private functions are also bound by the ceiling.
-
-**Example — two layers in action:**
-
-`spore.toml` allows `IO`, `FileRead`, `FileWrite`, `Net`, `PaymentGateway`, `AuditLog`. But `src/billing/invoice.sp` only needs payment and audit:
-
-```spore
-// src/billing/invoice.sp
-#![uses(PaymentGateway, AuditLog)]
-
-import billing.types
-import billing.tax
-
-pub fn generate_invoice(order: Order) -> Invoice ! TaxError
-    uses [PaymentGateway, AuditLog]
-{ ... }
-```
-
-Meanwhile, `src/net/client.sp` needs only network capabilities:
-
-```spore
-// src/net/client.sp
-#![uses(Net)]
-
-pub fn fetch(url: Url) -> Result[Bytes, NetError]
-    uses [Net]
-{ ... }
-```
-
-If the `#![uses(...)]` pragma is omitted, the compiler **infers** the ceiling from the union of all `pub` functions' capabilities and emits an `[info]` diagnostic suggesting the explicit declaration.
+Additional project-wide or file-level ceilings such as `[capabilities] allowed`
+or `#![uses(...)]` remain reserved for follow-up design work. They are not part
+of the shipped MVP contract today, and tooling should not treat them as
+normative.
 
 #### Capability propagation
 
 Importing a module does **not** grant its capabilities. If you call a function that requires capability `C`, your function must also declare `uses [C]`. Capabilities propagate upward through the call graph.
-
-#### Private functions and the ceiling
-
-Private functions are **also** bound by the module's capability ceiling (if declared). However, they do **not** contribute to the inferred capability set:
-
-```spore
-// src/billing/invoice.sp
-#![uses(PaymentGateway, AuditLog)]
-
-pub fn generate_invoice(order: Order) -> Invoice ! TaxError
-    uses [PaymentGateway, AuditLog]
-{ ... }
-
-// Private function: OK — uses subset of module ceiling
-fn log_audit(action: String, id: InvoiceId) -> Unit
-    uses [AuditLog]
-{ ... }
-
-// Private function: ERROR — exceeds module ceiling
-fn send_email(to: Email, body: String) -> Unit ! SmtpError
-    uses [EmailService]    // not in module ceiling
-{ ... }
-```
-
-```text
-[error] capability ceiling violation at src/billing/invoice.sp:12
-  function send_email uses [EmailService]
-  module billing.invoice allows [PaymentGateway, AuditLog]
-  ─── EmailService is not in the module's capability set
-
-  help: either add EmailService to the file-level pragma:
-          #![uses(PaymentGateway, AuditLog, EmailService)]
-        or move this function to a module that allows EmailService
-```
-
-#### Capability violation error examples and remediation flow
-
-**Ceiling violation**: The error shown above.
-
-**Diagnostic hint**: When a module omits its capability pragma, the compiler infers it:
-
-```text
-$ spore check src/billing/invoice.sp
-
-[ok] billing.invoice
-  exports: generate_invoice, void_invoice
-
-  [info] inferred module capabilities: [PaymentGateway, AuditLog]
-    ─── derived from union of pub function capabilities
-    ─── consider adding: #![uses(PaymentGateway, AuditLog)]
-```
-
-**Full workflow**:
-
-```bash
-spore check src/billing/invoice.sp
-# add the suggested #![uses(...)] pragma manually or via editor tooling
-spore check src/billing/invoice.sp
-```
-
-The current public CLI reports the inferred capability pragma in diagnostics, but
-does not yet auto-apply it.
 
 ### Package management
 
@@ -804,10 +748,6 @@ description = "Invoice generation and tax calculation"
 license = "MIT"
 authors = ["Alice <alice@example.com>"]
 spore-version = ">=0.5.0"
-
-[capabilities]
-# Project-level capability ceiling — no file may exceed this set
-allowed = ["PaymentGateway", "AuditLog"]
 
 [dependencies]
 json-parser = {
@@ -825,7 +765,9 @@ test-framework = {
 }
 ```
 
-Dependencies are declared **per-project** in `spore.toml`, not per-file. The `[capabilities] allowed` list defines the project-wide ceiling; individual files narrow it with `#![uses(...)]`.
+Dependencies are declared **per-project** in `spore.toml`, not per-file.
+Additional project-wide capability ceilings remain future design work rather than
+part of the current normative MVP surface.
 
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
 
@@ -837,6 +779,12 @@ module's **startup function** against its **startup contract**. Under the MVP
 bridge, the selected Platform package manifest names the contract module and
 startup symbol, and that contract module owns the hole-backed startup
 definition whose `spec` items stack with the application's own implementation.
+
+Current CLI behavior also retains a compatibility path for explicit
+`spore run src/...` file execution: when the file lives under a discovered
+project's `src/` tree, the tool derives a project-backed entry path from that
+file location. Named manifest entries remain the canonical durable project
+surface even while that compatibility path exists.
 
 The default emitted executable or run target name is the selected entry name:
 
@@ -907,27 +855,17 @@ Content hashes ensure integrity regardless of source. Community registries provi
 
 #### Capability-based trust model
 
-Packages declare required capabilities in `spore.toml`. The `[capabilities] allowed` list defines the project-wide ceiling. Capabilities do **not** propagate automatically—the consuming package must explicitly grant them:
+Packages declare dependencies and Platform selection in `spore.toml`. Current
+implementation-aligned capability control does **not** add a separate
+project-wide `[capabilities] allowed` ceiling. Instead:
 
-```toml
-[capabilities]
-# Project-level ceiling
-allowed = ["IO", "FileRead", "FileWrite", "Net"]
+- libraries declare required effects on function signatures
+- the selected startup entry's required effects must be satisfied by the chosen
+  Platform package's `[platform].handles` metadata
+- tooling such as `spore audit` reports the resulting dependency/effect graph
 
-# Fine-grained grants for dependencies (future direction)
-grant = [
-    "http:network:listen:*",
-    "logger:filesystem:write:/var/log"
-]
-```
-
-At runtime, the capability ceiling is enforced:
-
-```bash
-spore run src/main.sp
-```
-
-The `spore audit` command reports the full capability graph, flagging any ungrantable or suspicious requirements.
+More granular dependency grants remain future design space rather than part of
+the current shipped MVP.
 
 #### Workspace support
 
@@ -944,7 +882,7 @@ members = [
 
 Alternatively, `path` dependencies provide lightweight monorepo support without requiring a workspace manifest.
 
-A workspace uses a **single `spore.lock`** at the workspace root. Individual members do NOT have their own lock files. This ensures:
+A workspace uses a **single `.spore-lock`** at the workspace root. Individual members do NOT have their own lock files. This ensures:
 
 - All members share the same dependency versions (no diamond dependency conflicts).
 - CI builds are reproducible from a single lock file.
@@ -1067,7 +1005,7 @@ impl = null                             # interface-only dependency
 }
 
 [capabilities]
-"http" = ["NetRead", "NetWrite"]
+"http" = ["NetConnect", "NetListen"]
 "io" = ["FileRead", "FileWrite"]
 
 [[platform-locks]]
@@ -1216,7 +1154,8 @@ spore hash
 
 Holes respect module boundaries:
 
-- A hole in module A can only be filled with code that respects A's capability ceiling.
+- A hole in module A can only be filled with code that respects A's explicit
+  effect requirements and the selected Platform boundary.
 - HoleReport candidates are filtered by visibility.
 - Partial modules (containing holes) are valid compilation units. They export `pub` items normally, but those items have `impl = None`.
 - A module calling a partial function becomes **transitively partial**.
@@ -1384,15 +1323,19 @@ Build: success (2 partial functions)
 | **Effect System** | Algebraic Effects | High | Medium | Koka, Eff |
 | **Spore Platform** | Effect Handlers + Platform | **Very high** | **Very high** | Roc, Spore |
 
-Spore and Roc share the same design philosophy: no built-in Platform; all Platforms are third-party packages.
+Spore and Roc share the same design philosophy: no built-in Platform; all
+Platforms are third-party packages.
+
+The examples below use illustrative future `platform { ... }` sugar. The
+current MVP surface remains package-backed manifests plus contract modules.
 
 #### Web Platform example
 
 ```spore
 platform WebPlatform {
     version: "1.0.0"
-    handles [HttpServer, NetRead, NetWrite, Clock, Spawn, DbQuery]
-    startup: fn(req: Request) -> Response ! HttpServer | DbQuery
+    handles [NetListen, Clock, Spawn, DbQuery]
+    startup: fn(req: Request) -> Response ! NetListen | DbQuery
 
     handler HttpServerHandler {
         Server.listen(port: U16, handler: fn(Request) -> Response) {
@@ -1407,7 +1350,7 @@ platform WebPlatform {
 ```spore
 platform LambdaPlatform {
     version: "1.0.0"
-    handles [NetRead, NetWrite, S3Read, S3Write, DynamoRead, DynamoWrite]
+    handles [NetConnect, S3Read, S3Write, DynamoRead, DynamoWrite]
     startup: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
 
     handler S3Handler {
@@ -1435,7 +1378,7 @@ handler DirectFfi {
 2. **Effect composition**: Handler translates high-level effects into lower-level ones.
 
 ```spore
-handler HttpClientHandler uses [NetRead, NetWrite] {
+handler HttpClientHandler uses [NetConnect] {
     Http.get(url: Url) -> Result[Response, HttpError] {
         let socket = TcpSocket.connect(url.host, url.port)?
         socket.write(format_http_request(url))?
@@ -1482,11 +1425,12 @@ pub extern "C" fn ffi_read_file(path: SporeBytes) -> FfiResult<SporeBytes> {
 
 #### Record/Replay testing mode
 
-For integration tests, a **RecordingPlatform** captures IO events during real execution:
+For integration tests, a future **RecordingPlatform** sugar could capture IO
+events during real execution:
 
 ```spore
 platform RecordingPlatform {
-    handles [FileRead, NetRead]
+    handles [FileRead, NetConnect]
 
     handler RecordingHandler {
         var log: List[IoEvent] = []
@@ -1500,11 +1444,12 @@ platform RecordingPlatform {
 }
 ```
 
-A **ReplayPlatform** then replays the recorded events deterministically:
+A future **ReplayPlatform** could then replay the recorded events
+deterministically:
 
 ```spore
 platform ReplayPlatform {
-    handles [FileRead, NetRead]
+    handles [FileRead, NetConnect]
 
     handler ReplayHandler {
         var log: List[IoEvent] = load_log("test_recording.log")
@@ -1584,36 +1529,44 @@ Platforms are content-addressed packages like any other, following the same `sig
 
 | Subsystem | Interaction |
 |---|---|
-| **Concurrency** | `Spawn` is an effect; the Platform provides the `SpawnHandler` (backed by a thread pool, tokio, etc.) |
+| **Concurrency** | `Spawn` is an effect surfaced by Platform-owned modules; runtimes may back it with a thread pool, tokio, or another scheduler |
 | **Package management** | Platforms are ordinary Spore packages, fetched and cached via the same content-addressed system |
-| **Capability system** | Platform defines the capability upper bound. `App.uses ⊆ Platform.handles` is verified at compile time |
+| **Capability system** | Platform defines the manifest-declared capability contract. Current implementations verify the selected startup entry's required effects against `Platform.handles`; broader whole-application enforcement remains follow-up work |
 | **Cost model** | Platform effects carry cost annotations: `File.read @cost(io=1)`. The compiler uses these for cost analysis |
-| **Compiler** | Generates an effect routing table mapping each effect to its handler Platform. Embedded in compiled output |
+| **Compiler** | Resolves Platform package metadata and contract modules into the compiled runtime boundary |
 
 #### Platform API reference
 
-**CLI Platform** (complete effect definitions):
+**CLI Platform** (current `basic-cli` package surface):
 
 ```spore
-effect FileRead {
-    fn read(path: Path) -> Result[Bytes, IoError]
-    fn read_to_string(path: Path) -> Result[Str, IoError]
-    fn exists(path: Path) -> Bool
-    fn list_dir(path: Path) -> Result[List[DirEntry], IoError]
-}
+// basic_cli.file
+pub foreign fn file_read(path: Str) -> Str ! IoError uses [FileRead]
+pub foreign fn file_write(path: Str, content: Str) -> () ! IoError uses [FileWrite]
+pub foreign fn file_exists(path: Str) -> Bool uses [FileRead]
+pub foreign fn file_stat(path: Str) -> Str ! IoError uses [FileRead]
 
-effect FileWrite {
-    fn write(path: Path, content: Bytes) -> Result[Unit, IoError]
-    fn append(path: Path, content: Bytes) -> Result[Unit, IoError]
-    fn delete(path: Path) -> Result[Unit, IoError]
-    fn create_dir(path: Path) -> Result[Unit, IoError]
-}
+// basic_cli.dir
+pub foreign fn dir_list(path: Str) -> List[Str] ! IoError uses [FileRead]
+pub foreign fn dir_mkdir(path: Str) -> () ! IoError uses [FileWrite]
 
-effect StdOut { fn println(s: Str) -> Unit; fn print(s: Str) -> Unit }
-effect StdErr { fn eprintln(s: Str) -> Unit }
-effect Clock  { fn now() -> Timestamp; fn sleep(duration: Duration) -> Unit }
-effect Spawn  { fn spawn[T](f: fn() -> T) -> Task[T]; fn await_task[T](task: Task[T]) -> T }
-effect Exit   { fn exit(code: I32) -> Never }
+// basic_cli.stdout
+pub foreign fn print(s: Str) -> () ! IoError uses [Console]
+pub foreign fn println(s: Str) -> () uses [Console]
+pub foreign fn eprint(s: Str) -> () ! IoError uses [Console]
+pub foreign fn eprintln(s: Str) -> () uses [Console]
+
+// basic_cli.stdin
+pub foreign fn read_line() -> Str ! IoError uses [Console]
+
+// basic_cli.env
+pub foreign fn env_get(key: Str) -> Option[Str] uses [Env]
+pub foreign fn env_set(key: Str, value: Str) -> () uses [Env]
+
+// basic_cli.cmd
+pub foreign fn process_run(cmd: Str, args: List[Str]) -> Str ! ExecError uses [Spawn]
+pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> Int ! ExecError uses [Spawn]
+pub foreign fn exit(code: Int) -> Never uses [Exit]
 ```
 
 **Comparison with Roc, Elm, and Koka**:
@@ -1798,12 +1751,12 @@ git push origin main --tags
 | **Named alias** | A human-readable identifier mapping to a specific set of content hashes |
 | **Dependency graph** | DAG of module/package import relationships |
 | **Capability** | A declared permission for a function to perform a specific category of operation |
-| **Capability ceiling** | The maximum set of capabilities a module's functions may use |
+| **Capability ceiling** | A reserved follow-up concept for module- or project-level capability caps; not part of the shipped MVP contract today |
 | **Lock file (`.spore-lock`)** | Machine-generated file recording the full resolved dependency graph with hashes |
 | **Diamond dependency** | When the same module is reached via multiple paths in the dependency graph |
 | **Reproducible build** | A build that produces identical output from identical inputs (ensured by `impl` hashes) |
-| **Platform** | A Spore package that provides effect handlers for IO capabilities |
-| **Effect handler** | Runtime implementation that interprets abstract effect operations |
+| **Platform** | A Spore package that declares startup metadata/contracts and exposes the host-facing modules used by an application |
+| **Effect handler** | A runtime host implementation detail that may sit behind Platform package surfaces; not the primary package contract model |
 | **Hole** | A placeholder (`?name`) in a function body, marking incomplete code |
 | **Partial function** | A function containing holes; has `impl = None` until all holes are filled |
 
@@ -1818,7 +1771,7 @@ git push origin main --tags
 
 ### Workflow ergonomics
 
-- **Structured diagnostics** surface inferred capability declarations for manual or editor-assisted application, lowering the barrier for new users.
+- **Structured diagnostics** surface missing or mismatched `uses [...]` requirements and related import/startup issues, lowering the barrier for new users.
 - **`spore --permit`** provides explicit acknowledgment of breaking changes, preventing accidental API breakage.
 - **No semver** means developers never debate whether a change is "major" or "minor". The compiler decides mechanically.
 
@@ -1828,7 +1781,7 @@ The dual-hash model is more conceptually complex than semver. However, the tooli
 
 ### Error messages
 
-Visibility violations, circular dependencies, capability ceiling breaches, and missing effect handlers all produce structured, actionable diagnostics with `help:` suggestions.
+Visibility violations, circular dependencies, startup-capability mismatches, and missing Platform bindings all produce structured, actionable diagnostics with `help:` suggestions.
 
 ## Agent experience impact
 
@@ -1877,16 +1830,19 @@ impl = "7b8d4f2a1e9c3d5b"
 }
 
 [capabilities]
-"http" = ["network:listen", "network:connect"]
+"http" = ["NetListen", "NetConnect"]
 ```
 
 ### Module interface files (`.spore-sig`)
 
 For interface-only dependencies, the compiler can produce `.spore-sig` files containing only the canonicalized public API. These are sufficient for type-checking without the full implementation.
 
-### Platform capability routing tables
+### Platform binding records
 
-The compiler generates a capability routing table mapping each effect to its handler Platform. This table is embedded in the compiled output and enforced at runtime.
+The compiler resolves the selected Platform package's metadata, startup contract,
+and imported host-facing modules into the compiled output. Current MVP behavior
+centers startup-contract validation plus the selected Platform package boundary;
+broader whole-program capability routing remains follow-up work.
 
 ## Diagnostics impact
 
@@ -1896,12 +1852,12 @@ The compiler generates a capability routing table mapping each effect to its han
 |---|---|---|
 | `E3001` | Visibility violation | Accessing a private function from another module |
 | `E3002` | Circular dependency | Module A → B → A |
-| `E3003` | Capability ceiling breach | Function uses capability not in module ceiling |
+| `E3003` | Capability declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
 | `E3004` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
 | `E3005` | Alias chain | `pub alias` pointing to another alias |
 | `E3006` | Shadowing conflict | Import alias conflicts with module name |
 | `E4201` | Platform binding conflict | Project declares more than one Platform binding |
-| `E4202` | Missing effect handler | No Platform handles a required effect |
+| `E4202` | Unsupported startup capability | Selected startup entry requires a capability not listed in the Platform's `[platform].handles` metadata |
 | `E4203` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
 
 ### Diagnostic structure
@@ -2036,7 +1992,7 @@ New fields added to `.spore-lock` are ignored by older tools (forward-compatible
 
 The module system does not require wholesale adoption:
 
-- Packages can start with inferred capabilities (no `#![uses(...)]` pragma) and add explicit declarations later once diagnostics show the inferred set.
+- Packages can adopt explicit `uses [...]` signatures incrementally at function boundaries; broader file- or project-level ceilings remain future work.
 - Dependencies can mix Git, local path, and registry sources.
 - The `version` field in `spore.toml` remains available for human communication during the transition from semver.
 
@@ -2046,7 +2002,7 @@ The module system does not require wholesale adoption:
 
 2. **~~Cross-package `pub(pkg)` boundaries in workspaces~~**: Resolved — `pub(pkg)` restricts visibility to the current package (member) only. Items must be promoted to `pub` for cross-member access.
 
-3. **Capability granularity**: The current design uses coarse-grained capability names (e.g., `FileRead`, `NetWrite`). Should fine-grained capabilities (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
+3. **Capability granularity**: The current design uses coarse-grained capability names (e.g., `FileRead`, `NetConnect`). Should fine-grained capabilities (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
 
 4. **Platform versioning**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
 
@@ -2067,8 +2023,6 @@ The module system does not require wholesale adoption:
 ## Appendix A: Grammar summary
 
 ```text
-// File-level capability pragma (replaces module header)
-file_pragma    ::= '#![uses(' capability (',' capability)* ')]'
 cap_list       ::= '[' capability (',' capability)* ']'
 capability     ::= UPPER_IDENT
 
@@ -2116,7 +2070,6 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 // spore.toml (TOML subset)
 // [package]       name, version, type, description, license, authors, spore-version, default-entry
-// [capabilities]  allowed
 // [dependencies]  <name> = { git|path|alias, sig, impl?, optional?, branch?, tag?, rev? }
 // [dev-dependencies]
 // [features]      <name> = [deps/features]
