@@ -91,8 +91,9 @@ project mode.
 ### Example: standalone file
 
 ```spore
-fn main() -> I32 {
-    42
+fn main() -> () {
+    println("hello")
+    return
 }
 ```
 
@@ -100,12 +101,13 @@ Running the file today:
 
 ```bash
 spore run tools/hello.sp
-42
+hello
 ```
 
-Current standalone-file execution still permits `fn main() -> I32`. The
-returned value is printed by `spore run`; it does **not** become the host
-process exit status.
+Current standalone-file execution still permits compatibility cases like
+`fn main() -> I32`, but `spore run` no longer gives the completion value any
+default host meaning. It is not printed automatically, and it does **not**
+become the host process exit status.
 
 ### Example: explicit file inside a project tree
 
@@ -269,9 +271,9 @@ In standalone file mode:
 - files outside any project's `src/` tree run this way, even if they live
   elsewhere under a project root (for example `tools/migrate.sp`)
 - standalone execution does **not** use a Platform contract module
-- `fn main() -> I32` is still accepted and its result is printed as a normal
-  value
-- standalone execution does **not** convert the return value into the host
+- compatibility forms like `fn main() -> I32` are still accepted, but
+  standalone execution does **not** print completion values automatically
+- standalone execution does **not** convert return values into the host
   process exit status
 
 The explicit `Exit` effect path is currently a project-mode Platform feature,
