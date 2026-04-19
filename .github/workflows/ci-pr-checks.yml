@@ -37,8 +37,7 @@ jobs:
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
-          MERGE_BASE=$(git merge-base "$BASE" "$HEAD" 2>/dev/null || echo "$BASE")
-          CHANGED=$(git diff --name-only "$MERGE_BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
           if echo "$CHANGED" | grep -qE '^(seps|drafts)/'; then
             echo "is_sep=true" >> "$GITHUB_OUTPUT"
           else
