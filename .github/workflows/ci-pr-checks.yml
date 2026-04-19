@@ -28,7 +28,24 @@ jobs:
     name: PR body
     runs-on: ubuntu-latest
     steps:
-      - name: Validate PR body checklist
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          if echo "$CHANGED" | grep -qE '^(seps|drafts)/'; then
+            echo "is_sep=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_sep=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate PR body checklist (SEP PRs only)
+        if: steps.changes.outputs.is_sep == 'true'
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
@@ -57,3 +74,7 @@ jobs:
 
           print("Pull request body checklist looks good.")
           PY
+
+      - name: PR body OK (non-SEP PR)
+        if: steps.changes.outputs.is_sep == 'false'
+        run: echo "Non-SEP PR — body checklist not required."
