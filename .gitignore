@@ -1,2 +1,7 @@
 __pycache__/
 *.py[cod]
+
+# Editor
+.cursor/
+.vscode/
+.idea/
