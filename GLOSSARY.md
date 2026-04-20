@@ -4,7 +4,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## A
 
-**Atomic capability** (SEP-0003): One of the 11 indivisible capabilities in Spore's effect system: Compute, FileRead, FileWrite, NetRead, NetWrite, StateRead, StateWrite, Spawn, Clock, Random, Exit.
+**Atomic capability** (SEP-0003): One of the 10 built-in intent-oriented atomic effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit. In compiler/tooling contexts, these effect names make up the checked capability set.
 
 **`Add`** (SEP-0002): Compiler-known trait for the `+` operator, enabling operator overloading on user-defined types.
 
@@ -22,13 +22,11 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Capability** (SEP-0003): A named permission that a function must hold to perform certain effects. Also serves as a trait on execution context (SEP-0002).
 
-**Capability ceiling** (SEP-0003): The maximum set of capabilities available in a module, declared via `uses [...]` at module level.
+**Capability ceiling** (SEP-0003, SEP-0008): The maximum set of capabilities available to a scope. Function-level `uses [...]` clauses are standardized today; broader module/project ceilings remain reserved follow-up design space.
 
 **Capability narrowing** (SEP-0003): Restricting the available capability set when entering a nested scope, ensuring inner code cannot exceed outer permissions.
 
 **Capability set (CapSet)** (SEP-0003): An unordered collection of capabilities associated with a function or scope, written as `uses [Cap1, Cap2]`.
-
-**Capability alias** (SEP-0003): A named shorthand for a set of capabilities, e.g., `capability FileIO = [FileRead, FileWrite]`.
 
 **`Clone`** (SEP-0002): Compiler-known trait for explicitly duplicating a value.
 
@@ -71,6 +69,8 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 **`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
 
 **Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the capability system.
+
+**Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written as `effect FileIO = FileRead | FileWrite`.
 
 **Effect handler** (SEP-0008): Platform-provided implementation of a capability's operations, connecting `foreign fn` declarations to native code.
 

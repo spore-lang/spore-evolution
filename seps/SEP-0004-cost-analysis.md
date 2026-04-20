@@ -1055,7 +1055,7 @@ WARNING [unbounded-cost] fibonacci's cost cannot be statically determined.
 
 ### Cross-validation with capabilities
 
-The cost system and capability system form a cross-validation network. If a function declares `uses []` (pure, no capabilities) but cost analysis discovers W > 0 (I/O operations), the compiler emits `cost-capability-conflict`. Conversely, a function declared `uses [NetRead]` must have W ≥ 1 in at least one code path.
+The cost system and capability system form a cross-validation network. If a function declares `uses []` (pure, no capabilities) but cost analysis discovers W > 0 (I/O operations), the compiler emits `cost-capability-conflict`. Conversely, a function declared `uses [NetConnect]` must have W ≥ 1 in at least one code path.
 
 ---
 
