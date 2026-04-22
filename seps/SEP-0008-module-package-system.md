@@ -16,13 +16,13 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
-> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where a selected Platform package declares its startup contract, host adapter, and handled effects via manifest metadata and package modules. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`) and `spore.toml` for project configuration. Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through explicit function-level effects plus Platform metadata. Broader project/file capability ceilings remain follow-up work rather than part of the current shipped contract.
+> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where a selected Platform package declares its startup contract, host adapter, and handled effects via manifest metadata and package modules. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`) and `spore.toml` for project configuration. Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through explicit function-level effects plus Platform metadata. Broader project/file effect ceilings remain follow-up work rather than part of the current shipped contract.
 
 ## Summary
 
-This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, and how IO is abstracted through selected Platform packages and startup contracts. Additional project-wide or file-level capability ceilings remain reserved for later SEP work instead of being part of the current implementation-aligned contract.
+This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, and how IO is abstracted through selected Platform packages and startup contracts. Additional project-wide or file-level effect ceilings remain reserved for later SEP work instead of being part of the current implementation-aligned contract.
 
-The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the import/alias separation, reserved capability-ceiling design space, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
+The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the import/alias separation, reserved effect-ceiling design space, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
 
 ## Motivation
 
@@ -36,7 +36,7 @@ Traditional package ecosystems rely on semantic versioning (semver) to communica
 
 Spore eliminates these problems by giving every function two content hashes computed via BLAKE3:
 
-1. **Signature hash (`sig`)**: Covers the function's public contract—parameter names, parameter types, return type, error types, effects, cost bound, capabilities, and generic constraints. This hash changes **only** when the API changes.
+1. **Signature hash (`sig`)**: Covers the function's public contract—parameter names, parameter types, return type, error types, effects, cost bound, effects, and generic constraints. This hash changes **only** when the API changes.
 2. **Implementation AST hash (`impl`)**: Covers the compiled AST of the function body. This hash changes whenever the implementation changes. Partial functions (those containing holes) have `impl = None`.
 
 This dual-hash scheme provides two independent guarantees:
@@ -58,9 +58,9 @@ A human-readable `version` field remains available in `spore.toml` for documenta
 
 In traditional languages, IO operations are built into the standard library, making them impossible to substitute for testing, impossible to sandbox for security, and impossible to port across runtimes without rewriting application code. Spore's Platform system, inspired by Roc, makes IO a pluggable concern:
 
-- **Application code declares capabilities explicitly**: Functions write `uses [...]` clauses and call platform-owned APIs; they do not issue raw host operations directly.
+- **Application code declares effects explicitly**: Functions write `uses [...]` clauses and call platform-owned APIs; they do not issue raw host operations directly.
 - **Platform packages define the runtime boundary**: A Platform package publishes foreign-function modules, a startup contract, and a host adapter.
-- **Alternative Platforms can preserve the same application surface**: CLI, test, web, or embedded runtimes can supply different implementations for the same declared capabilities.
+- **Alternative Platforms can preserve the same application surface**: CLI, test, web, or embedded runtimes can supply different implementations for the same declared effects.
 - **Supply-chain security comes from explicit effects plus Platform metadata**: A package cannot manufacture filesystem, process, or network access unless the selected Platform exposes and handles those operations.
 
 ## Guide-level explanation
@@ -79,7 +79,7 @@ The canonical source extension in docs and manifests is `.sp`. Compatibility-onl
 | `src/utils.sp` | `utils` |
 | `src/main.sp` | `main` |
 
-There is no `module` keyword — the filesystem **is** the declaration. Current implementations do not require or standardize an additional file-level `#![uses(...)]` ceiling; capability requirements remain attached to individual function signatures.
+There is no `module` keyword — the filesystem **is** the declaration. Current implementations do not require or standardize an additional file-level `#![uses(...)]` ceiling; effect requirements remain attached to individual function signatures.
 
 ```spore
 // src/billing/invoice.sp
@@ -138,7 +138,7 @@ Key rules:
 - Imported functions preserve the metadata needed for downstream checking:
   parameter/return types, `uses [...]`, declared `!errors`, generic parameters,
   and `where` bounds.
-- Imported `pub effect` / capability interfaces preserve operation signatures
+- Imported `pub effect` / effect interfaces preserve operation signatures
   across module boundaries, so `perform Effect.op(...)` keeps operation typing
   after import.
 - Ambiguous imported same-name functions or effect interfaces with conflicting
@@ -187,7 +187,7 @@ Three package types exist:
 
 | Type | Has Platform? | Can do IO? | Use Case |
 |---|---|---|---|
-| `package` | No | No (declares capability requirements) | Libraries, reusable components |
+| `package` | No | No (declares effect requirements) | Libraries, reusable components |
 | `application` | Yes | Yes (via Platform) | Executables, services |
 | `platform` | Is the Platform | Yes (raw syscalls) | Runtime providers |
 
@@ -219,8 +219,8 @@ fn main() -> () uses [Console, Exit] {
 For `basic-cli`, project mode currently requires `main() -> ()`. Explicit process termination is modeled as a Platform API (`basic_cli.cmd.exit`) requiring `uses [Exit]`; the runtime carries that as a structured project outcome and the CLI converts that outcome to a host exit status at the process boundary.
 
 In the current implementation, project mode also validates the selected entry's
-startup capability requirements against the selected Platform package's
-`[platform].handles` manifest field. A manifest-backed application may only
+startup effect requirements against the selected Platform package's
+`[platform].handled-effects` manifest field. A manifest-backed application may only
 start if its entry function's required effects are listed in that Platform
 contract metadata.
 
@@ -247,7 +247,7 @@ convention, not by special module semantics.
 
 #### Empty modules
 
-An empty `.sp` file is a valid module. It compiles successfully, exports nothing, and has no capabilities:
+An empty `.sp` file is a valid module. It compiles successfully, exports nothing, and has no effects:
 
 ```spore
 // src/billing/future.sp
@@ -259,7 +259,7 @@ $ spore check src/billing/future.sp
 
 [ok] billing.future
   exports: (none)
-  capabilities: []
+  effects: []
 ```
 
 Use cases include namespace placeholders, future feature stubs, and organizational markers within a package directory.
@@ -340,7 +340,7 @@ sig = BLAKE3(canonicalize(
     error_types,
     effect_annotations,
     cost_bound,
-    capability_requirements,
+    required_effects,
     generic_constraints
 ))
 ```
@@ -365,7 +365,7 @@ For partial functions (those containing holes), `impl = None`. When a hole is fi
 | Error type set: Add `[ValidationError]` | **Yes** | **Yes** |
 | Effects: `pure` → `deterministic` | **Yes** | **Yes** |
 | Cost bound: `≤ 3000` → `≤ 5000` | **Yes** | **Yes** |
-| Capabilities: Add `AuditLog` | **Yes** | **Yes** |
+| Effects: Add `AuditLog` | **Yes** | **Yes** |
 | Generic constraints: `T: Eq` → `T: Eq + Hash` | **Yes** | **Yes** |
 | Function body: Refactor internals | **No** | **Yes** |
 | Hole filling: Replace `?logic` with code | **No** | `None` → concrete |
@@ -536,7 +536,7 @@ alias invoice = billing.types.Invoice    // ERROR: 'invoice' conflicts with modu
 
 #### IO via Platform boundary
 
-Application code declares capability requirements and crosses the runtime
+Application code declares effect requirements and crosses the runtime
 boundary through the selected Platform package. In the current MVP,
 manifest-backed project mode resolves those calls through Platform-owned modules
 plus the Platform's startup contract:
@@ -552,14 +552,14 @@ uses [FileWrite]
 ```
 
 The type system tracks all effects. Effects propagate upward: if you call an
-operation requiring capability `C`, your function must also declare
+operation requiring effect `C`, your function must also declare
 `uses [C]`.
 
 #### Platform definition
 
 A Platform declares three things:
 
-1. **Capability set**: Which IO capabilities it handles.
+1. **Effect set**: Which IO effects it handles.
 2. **Startup contract**: The function contract that the selected module's
    startup function must satisfy.
 3. **Host adapter surface**: The package-owned adapter that bridges the
@@ -578,7 +578,7 @@ type = "platform"
 contract-module = "platform_contract"
 startup-contract = "main"
 adapter-function = "main_for_host"
-handles = ["Console", "FileRead", "FileWrite", "Env", "Spawn", "Exit"]
+handled-effects = ["Console", "FileRead", "FileWrite", "Env", "Spawn", "Exit"]
 ```
 
 ```spore
@@ -596,8 +596,8 @@ pub fn main_for_host(app_main: () -> ()) -> () {
 The hole-backed startup function in the Platform contract module is the
 authoritative startup signature. Applications targeting that Platform must
 implement the same startup function name plus the same parameter/return shape in
-their entry module. Current MVP capability requirements are checked separately:
-the selected startup entry's `uses [...]` set must fit within `[platform].handles`
+their entry module. Current MVP effect requirements are checked separately:
+the selected startup entry's `uses [...]` set must fit within `[platform].handled-effects`
 rather than being encoded into the adapter's callable Rust-facing shape. Any
 `spec` items attached to the Platform contract and the application
 implementation both apply.
@@ -637,7 +637,7 @@ path = "src/main.sp"
 
 The compiler verifies:
 
-- The selected startup entry's required capabilities are listed in the selected Platform package's `[platform]` metadata.
+- The selected startup entry's required effects are listed in the selected Platform package's `[platform]` metadata.
 - The startup function in the selected entry module matches the Platform contract module's startup contract.
 - The selected Platform package exports the named adapter from its contract module.
 - Test and mock Platforms may be substituted during testing, but a project binds to one Platform at a time.
@@ -695,45 +695,45 @@ Test result: ok. 3 passed; 0 failed
 
 #### Security model
 
-1. **Pure packages cannot perform IO**. They may declare capability requirements, but they do not carry Platform implementations.
+1. **Pure packages cannot perform IO**. They may declare effect requirements, but they do not carry Platform implementations.
 2. **Only Platform packages bridge to raw host operations**. No user package can invoke host operations without going through the selected Platform.
-3. **Capabilities are explicit**. An auditor can inspect any function's `uses` clause to know exactly what it can do.
+3. **Effects are explicit**. An auditor can inspect any function's `uses` clause to know exactly what it can do.
 4. **Supply-chain safety**: A downloaded package cannot gain hidden filesystem, process, or network access through an implicit stdlib shim; those surfaces must be provided by the selected Platform package.
 
 ```text
 $ spore audit billing-lib
 
 Package: billing-lib
-  required capabilities: [PaymentGateway, AuditLog]
+  required effects: [PaymentGateway, AuditLog]
 
-  Module capability breakdown:
+  Module effect breakdown:
     billing.invoice:  [PaymentGateway, AuditLog]
     billing.tax:      []  (pure)
     billing.types:    []  (pure)
 
   ✓ No RawSyscall usage
-  ✓ No undeclared capabilities
+  ✓ No undeclared effects
   ✓ Startup entry requirements fit the selected Platform metadata
 ```
 
-### Module capabilities
+### Module effects
 
-#### Capability checking today
+#### Effect checking today
 
-The current implementation-aligned model standardizes capability checking at two
+The current implementation-aligned model standardizes effect checking at two
 places:
 
 1. function signatures (`uses [...]`)
 2. selected Platform boundaries and Platform metadata
 
-Additional project-wide or file-level ceilings such as `[capabilities] allowed`
+Additional project-wide or file-level ceilings such as `[effects].declared`
 or `#![uses(...)]` remain reserved for follow-up design work. They are not part
 of the shipped MVP contract today, and tooling should not treat them as
 normative.
 
-#### Capability propagation
+#### Effect propagation
 
-Importing a module does **not** grant its capabilities. If you call a function that requires capability `C`, your function must also declare `uses [C]`. Capabilities propagate upward through the call graph.
+Importing a module does **not** grant its effects. If you call a function that requires effect `C`, your function must also declare `uses [C]`. Effects propagate upward through the call graph.
 
 ### Package management
 
@@ -766,7 +766,7 @@ test-framework = {
 ```
 
 Dependencies are declared **per-project** in `spore.toml`, not per-file.
-Additional project-wide capability ceilings remain future design work rather than
+Additional project-wide effect ceilings remain future design work rather than
 part of the current normative MVP surface.
 
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
@@ -853,15 +853,15 @@ Spore has **no central registry**. Packages are fetched from:
 
 Content hashes ensure integrity regardless of source. Community registries provide searchability but store only metadata—not code.
 
-#### Capability-based trust model
+#### Effect-based trust model
 
 Packages declare dependencies and Platform selection in `spore.toml`. Current
-implementation-aligned capability control does **not** add a separate
-project-wide `[capabilities] allowed` ceiling. Instead:
+implementation-aligned effect control does **not** add a separate
+project-wide `[effects].declared` ceiling. Instead:
 
 - libraries declare required effects on function signatures
 - the selected startup entry's required effects must be satisfied by the chosen
-  Platform package's `[platform].handles` metadata
+  Platform package's `[platform].handled-effects` metadata
 - tooling such as `spore audit` reports the resulting dependency/effect graph
 
 More granular dependency grants remain future design space rather than part of
@@ -1004,7 +1004,7 @@ impl = null                             # interface-only dependency
     verified-at = "2024-01-15T10:30:05Z"
 }
 
-[capabilities]
+[effects]
 "http" = ["NetConnect", "NetListen"]
 "io" = ["FileRead", "FileWrite"]
 
@@ -1084,9 +1084,9 @@ spore gc --all         # remove all cached entries
 
 GC algorithm: (1) scan all `.spore-lock` files in known project directories, (2) mark all referenced hashes, (3) delete unmarked entries from `.spore-store/`.
 
-### Fine-grained capabilities (design direction)
+### Fine-grained effects (design direction)
 
-For v0.1, Spore uses **coarse-grained** capability names in the language-level type system:
+For v0.1, Spore uses **coarse-grained** effect names in the language-level type system:
 
 ```spore
 fn read_config() -> Config ! IoError
@@ -1094,10 +1094,10 @@ fn read_config() -> Config ! IoError
 { ... }
 ```
 
-A future direction introduces **path-style fine-grained capabilities** in `spore.toml`:
+A future direction introduces **path-style fine-grained effects** in `spore.toml`:
 
 ```toml
-[capabilities]
+[effects]
 require = [
     "network:listen:8080",
     "filesystem:read:/data",
@@ -1106,7 +1106,7 @@ require = [
 ]
 ```
 
-The fine-grained capability tree:
+The fine-grained effect tree:
 
 ```text
 network:          filesystem:        env:            process:
@@ -1118,7 +1118,7 @@ network:          filesystem:        env:            process:
                                       monotonic       fast
 ```
 
-For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained capabilities into the type system is reserved for a future SEP.
+For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained effects into the type system is reserved for a future SEP.
 
 ### Publish and discovery flow
 
@@ -1168,7 +1168,7 @@ Holes by module:
   billing.invoice (partial)
     ?invoice_logic at line 12
       type: Invoice ! TaxError
-      capabilities: [PaymentGateway, AuditLog]
+      effects: [PaymentGateway, AuditLog]
       budget remaining: 2400 ops
 
   api.handler (partial — depends on partial billing.invoice)
@@ -1240,7 +1240,7 @@ $ spore check src/billing/types.sp
 
 [ok] billing.types
   exports: Invoice, InvoiceStatus, LineItem
-  capabilities: []
+  effects: []
   cost: 0 (types only)
 ```
 
@@ -1531,7 +1531,7 @@ Platforms are content-addressed packages like any other, following the same `sig
 |---|---|
 | **Concurrency** | `Spawn` is an effect surfaced by Platform-owned modules; runtimes may back it with a thread pool, tokio, or another scheduler |
 | **Package management** | Platforms are ordinary Spore packages, fetched and cached via the same content-addressed system |
-| **Capability system** | Platform defines the manifest-declared capability contract. Current implementations verify the selected startup entry's required effects against `Platform.handles`; broader whole-application enforcement remains follow-up work |
+| **Effect system** | Platform defines the manifest-declared effect contract. Current implementations verify the selected startup entry's required effects against `[platform].handled-effects`; broader whole-application enforcement remains follow-up work |
 | **Cost model** | Platform effects carry cost annotations: `File.read @cost(io=1)`. The compiler uses these for cost analysis |
 | **Compiler** | Resolves Platform package metadata and contract modules into the compiled runtime boundary |
 
@@ -1635,8 +1635,8 @@ spore lock --verify           Verify .spore-lock integrity
 #### Audit and inspection commands
 
 ```text
-spore audit [package]         Audit package capability usage
-spore audit --all             Full audit (capabilities, hashes, cycles, unused)
+spore audit [package]         Audit package effect usage
+spore audit --all             Full audit (effects, hashes, cycles, unused)
 spore deps [module]           Show dependency tree
 spore deps --reverse <mod>    Show what depends on a module
 spore deps --depth <N>        Limit tree depth
@@ -1695,7 +1695,7 @@ spore run src/main.sp
 spore deps                      # view current dependency tree
 spore update http               # update to latest commit
 spore test tests/http_test.sp   # verify tests still pass
-spore audit                     # check for capability changes
+spore audit                     # check for effect changes
 git add .spore-lock spore.toml
 git commit -m "Update http to latest"
 ```
@@ -1746,12 +1746,12 @@ git push origin main --tags
 | Term | Definition |
 |---|---|
 | **Content-addressed** | Identifying resources by the hash of their content rather than by name or location |
-| **Signature hash (`sig`)** | BLAKE3 hash of a function's public contract (params, return type, errors, capabilities, cost) |
+| **Signature hash (`sig`)** | BLAKE3 hash of a function's public contract (params, return type, errors, effects, cost) |
 | **Implementation hash (`impl`)** | BLAKE3 hash of a function's compiled AST; `None` for partial functions |
 | **Named alias** | A human-readable identifier mapping to a specific set of content hashes |
 | **Dependency graph** | DAG of module/package import relationships |
-| **Capability** | A declared permission for a function to perform a specific category of operation |
-| **Capability ceiling** | A reserved follow-up concept for module- or project-level capability caps; not part of the shipped MVP contract today |
+| **Effect** | A declared permission for a function to perform a specific category of operation |
+| **Effect ceiling** | A reserved follow-up concept for module- or project-level effect caps; not part of the shipped MVP contract today |
 | **Lock file (`.spore-lock`)** | Machine-generated file recording the full resolved dependency graph with hashes |
 | **Diamond dependency** | When the same module is reached via multiple paths in the dependency graph |
 | **Reproducible build** | A build that produces identical output from identical inputs (ensured by `impl` hashes) |
@@ -1781,7 +1781,7 @@ The dual-hash model is more conceptually complex than semver. However, the tooli
 
 ### Error messages
 
-Visibility violations, circular dependencies, startup-capability mismatches, and missing Platform bindings all produce structured, actionable diagnostics with `help:` suggestions.
+Visibility violations, circular dependencies, startup-effect mismatches, and missing Platform bindings all produce structured, actionable diagnostics with `help:` suggestions.
 
 ## Agent experience impact
 
@@ -1792,7 +1792,7 @@ The module system is designed for agent-friendly navigation:
 - Module names are deterministically derived from file paths.
 - Dependency graphs are acyclic DAGs, trivially traversable.
 - Visibility rules are encoded in the AST—an agent can enumerate a module's public API without human guidance.
-- Capability requirements are explicit in `uses [...]` clauses.
+- Effect requirements are explicit in `uses [...]` clauses.
 
 ### Content addressing for agents
 
@@ -1804,13 +1804,13 @@ Dual hashes give agents precise anchors:
 
 ### Structured diagnostics
 
-All compiler diagnostics (visibility violations, cycle detection, capability mismatches) are emitted in both human-readable and JSON formats, enabling agent tooling to parse and act on errors programmatically.
+All compiler diagnostics (visibility violations, cycle detection, effect mismatches) are emitted in both human-readable and JSON formats, enabling agent tooling to parse and act on errors programmatically.
 
 ## Structured representation / protocol impact
 
 ### `.spore-lock` as the canonical dependency record
 
-The `.spore-lock` file is a TOML document that encodes the full dependency graph with both `sig` and `impl` hashes, source locations, capability records, and verification timestamps:
+The `.spore-lock` file is a TOML document that encodes the full dependency graph with both `sig` and `impl` hashes, source locations, effect records, and verification timestamps:
 
 ```toml
 [[package]]
@@ -1829,7 +1829,7 @@ impl = "7b8d4f2a1e9c3d5b"
     verified-at = "2024-01-15T10:30:05Z"
 }
 
-[capabilities]
+[effects]
 "http" = ["NetListen", "NetConnect"]
 ```
 
@@ -1842,7 +1842,7 @@ For interface-only dependencies, the compiler can produce `.spore-sig` files con
 The compiler resolves the selected Platform package's metadata, startup contract,
 and imported host-facing modules into the compiled output. Current MVP behavior
 centers startup-contract validation plus the selected Platform package boundary;
-broader whole-program capability routing remains follow-up work.
+broader whole-program effect routing remains follow-up work.
 
 ## Diagnostics impact
 
@@ -1852,12 +1852,12 @@ broader whole-program capability routing remains follow-up work.
 |---|---|---|
 | `E3001` | Visibility violation | Accessing a private function from another module |
 | `E3002` | Circular dependency | Module A → B → A |
-| `E3003` | Capability declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
+| `E3003` | Effect declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
 | `E3004` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
 | `E3005` | Alias chain | `pub alias` pointing to another alias |
 | `E3006` | Shadowing conflict | Import alias conflicts with module name |
 | `E4201` | Platform binding conflict | Project declares more than one Platform binding |
-| `E4202` | Unsupported startup capability | Selected startup entry requires a capability not listed in the Platform's `[platform].handles` metadata |
+| `E4202` | Unsupported startup effect | Selected startup entry requires an effect not listed in the Platform's `[platform].handled-effects` metadata |
 | `E4203` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
 
 ### Diagnostic structure
@@ -1886,7 +1886,7 @@ Diagnostics are available in both human-readable (terminal) and machine-readable
 
 5. **No circular dependencies**: Occasionally forces extraction of shared types into third modules, adding structural overhead. In practice, the Elm and Go communities have found this constraint beneficial.
 
-6. **No functors or parameterized modules**: Some patterns natural with OCaml/SML functors require more boilerplate with generics and capabilities. The trade-off is reduced conceptual surface area.
+6. **No functors or parameterized modules**: Some patterns natural with OCaml/SML functors require more boilerplate with generics and effects. The trade-off is reduced conceptual surface area.
 
 7. **Decentralized discovery**: Without a central registry, finding packages relies on community indices, search engines, and "awesome lists". This is a discoverability trade-off for resilience.
 
@@ -1918,7 +1918,7 @@ Fine-grained visibility like `pub(in path)` is rarely used and adds cognitive lo
 
 ### Functors / parameterized modules (OCaml-style)
 
-OCaml/SML functors are the most powerful module system in any language, but they add a separate "module language" that doubles the conceptual surface area. Spore's combination of generics (`where T: Constraint`) and capabilities (`uses [...]`) covers the same use cases with less overhead.
+OCaml/SML functors are the most powerful module system in any language, but they add a separate "module language" that doubles the conceptual surface area. Spore's combination of generics (`where T: Constraint`) and effects (`uses [...]`) covers the same use cases with less overhead.
 
 ### Built-in Platform (standard library IO)
 
@@ -1948,7 +1948,7 @@ Rust's `pub(crate)` visibility level and Cargo's `Cargo.lock` file informed Spor
 
 ### Koka
 
-Koka's algebraic effect system inspired Spore's integration of effects with module capabilities. Koka demonstrates that effects and modules should be designed together. Spore adds the Platform concept on top of Koka-style effects.
+Koka's algebraic effect system inspired Spore's integration of effects with module effects. Koka demonstrates that effects and modules should be designed together. Spore adds the Platform concept on top of Koka-style effects.
 
 ### Nix
 
@@ -2002,7 +2002,7 @@ The module system does not require wholesale adoption:
 
 2. **~~Cross-package `pub(pkg)` boundaries in workspaces~~**: Resolved — `pub(pkg)` restricts visibility to the current package (member) only. Items must be promoted to `pub` for cross-member access.
 
-3. **Capability granularity**: The current design uses coarse-grained capability names (e.g., `FileRead`, `NetConnect`). Should fine-grained capabilities (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
+3. **Effect granularity**: The current design uses coarse-grained effect names (e.g., `FileRead`, `NetConnect`). Should fine-grained effects (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
 
 4. **Platform versioning**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
 
@@ -2012,7 +2012,7 @@ The module system does not require wholesale adoption:
 
 7. **Diamond dependencies with different `impl` hashes**: When two transitive dependencies require the same module with the same `sig` but different `impl` hashes, the current design allows both to coexist. Should the linker deduplicate? Should the developer be warned? What are the binary size implications?
 
-8. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are capability requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
+8. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are effect requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
 
 9. **Conditional compilation**: The `[features]` mechanism in `spore.toml` enables optional dependencies, but the interaction between features and content hashes is underspecified. Does enabling a feature change the `sig` hash?
 
@@ -2023,8 +2023,8 @@ The module system does not require wholesale adoption:
 ## Appendix A: Grammar summary
 
 ```text
-cap_list       ::= '[' capability (',' capability)* ']'
-capability     ::= UPPER_IDENT
+cap_list       ::= '[' effect (',' effect)* ']'
+effect     ::= UPPER_IDENT
 
 // Imports and aliases
 import_decl    ::= 'import' module_path ('as' IDENT)?
@@ -2122,7 +2122,7 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 | Command | Description |
 |---|---|
-| `spore audit` | Audit package capabilities, hashes, cycles |
+| `spore audit` | Audit package effects, hashes, cycles |
 | `spore deps` | Show dependency tree |
 | `spore deps --reverse <m>` | Show reverse dependencies |
 | `spore gc` | Clean unused cache entries |

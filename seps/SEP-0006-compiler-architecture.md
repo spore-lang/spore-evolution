@@ -19,7 +19,7 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
-> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (capability violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
+> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (effect violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
 
 ## Summary
 
@@ -65,7 +65,7 @@ needs a compiler whose architecture is:
 Existing compiler architectures either carry unnecessary complexity (Rust's MIR
 for borrow checking, Zig's ZIR for comptime) or are too simplistic for Spore's
 needs (Gleam's two-layer AST lacks a desugared IR). This SEP defines a pipeline
-tuned precisely to Spore's feature set: algebraic types, capabilities, cost
+tuned precisely to Spore's feature set: algebraic types, effects, cost
 models, holes, and content-addressed modules.
 
 ---
@@ -205,15 +205,15 @@ Source Text (.sp files)
     ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Pass 4: TYPECHECK + CAPCHECK + COSTCHECK                               │
-│  HIR → TypedHIR (fully typed, capability-verified, cost-verified)       │
+│  HIR → TypedHIR (fully typed, effect-verified, cost-verified)       │
 │  ─ Bidirectional type inference (signatures annotated, bodies inferred)  │
-│  ─ Trait / Capability resolution (Capability = Trait)                    │
+│  ─ Trait / Effect resolution (Effect = Trait)                    │
 │  ─ Associated types + GAT instantiation                                 │
 │  ─ Const generics evaluation                                            │
 │  ─ Exhaustiveness checking (match expressions)                          │
 │  ─ Error set propagation and consistency (! Errors)                   │
 │  ─ Refinement types: L0 decidable predicates + L1 abstract propagation  │
-│  ─ Capability check: body uses ⊆ declared uses, module ceiling check    │
+│  ─ Effect check: body uses ⊆ declared uses, module ceiling check    │
 │  ─ Cost check: abstract interpretation of 4D cost vector                 │
 │  ─ Hole report generation with full context                             │
 │  ─ ** impl hash computed here **                                        │
@@ -294,7 +294,7 @@ Spanned<T> { node: T, span: Span }
 Span { file: FileId, start: u32, end: u32 }
 
 Module { items: Vec<Spanned<Item>> }
-Item = FnDef | StructDef | TypeDef | CapabilityDef | Import | ...
+Item = FnDef | StructDef | TypeDef | TraitDef | Import | ...
 FnDef {
     name, params, return_type, error_set,
     where_clause, cost_clause, uses_clause,
@@ -331,7 +331,7 @@ The Desugar pass (merged into Resolve) canonicalizes all syntactic sugar:
 
 - Function name, parameter types, return type
 - Error set declarations
-- Effect / capability declarations
+- Effect / effect declarations
 - Cost declarations
 
 It does **not** cover function bodies. When sig hash is unchanged, downstream
@@ -339,7 +339,7 @@ dependent modules skip resolve and type-check entirely.
 
 #### Layer 3: TypedHIR (Typed High-level IR)
 
-**Purpose:** Fully type-checked, capability-verified, cost-verified IR. This is
+**Purpose:** Fully type-checked, effect-verified, cost-verified IR. This is
 the input to codegen.
 
 The unified TypeCheck pass performs:
@@ -347,17 +347,17 @@ The unified TypeCheck pass performs:
 | Sub-pass | Responsibility |
 |----------|---------------|
 | **Type inference** | Bidirectional: signatures fully annotated, function bodies inferred |
-| **Trait resolution** | Trait/Capability resolution, associated types, GAT instantiation |
+| **Trait resolution** | Trait/Effect resolution, associated types, GAT instantiation |
 | **Const generics** | Evaluation of compile-time constant generic parameters |
 | **Exhaustiveness** | Verify match expressions cover all variants |
 | **Error sets** | Propagation and consistency of `! ErrorType` declarations |
 | **Refinement types** | L0 decidable predicates + L1 abstract interpretation propagation |
-| **CapCheck** | Function body capability usage ⊆ declared `uses` set; module ceiling check |
+| **CapCheck** | Function body effect usage ⊆ declared `uses` set; module ceiling check |
 | **CostCheck** | Abstract interpretation of 4D cost vector: `compute(op) + alloc(cell) + io(call) + parallel(lane)`; verify ≤ declared bound |
-| **Hole reports** | Generate full context: type, available bindings, capability set, cost budget, candidate functions |
+| **Hole reports** | Generate full context: type, available bindings, effect set, cost budget, candidate functions |
 
-Capability checking is merged into TypeCheck because `Capability = Trait` in
-Spore — capability resolution shares the same infrastructure as trait resolution.
+Effect checking is merged into TypeCheck because `Effect = Trait` in
+Spore — effect resolution shares the same infrastructure as trait resolution.
 
 Cost checking is merged into TypeCheck because cost analysis depends on resolved
 types and call-graph information already computed during type checking.
@@ -461,7 +461,7 @@ The incremental compilation strategy relies on two content-addressed hashes:
                                                 recheck (direct deps)
 ```
 
-**sig hash** covers: exported type/function signatures, capability requirements,
+**sig hash** covers: exported type/function signatures, effect requirements,
 cost annotations. It does *not* cover: function bodies, private definitions,
 comments, internal hole states.
 
@@ -583,7 +583,7 @@ $ spore watch src/main.sp
 
   Warnings:
     src/net/http.sp:23:5  unused import: `Timeout`        [W0102]
-    src/db/query.sp:45:12 unused capability: `FileSystem`  [W0105]
+    src/db/query.sp:45:12 unused effect: `FileSystem`  [W0105]
 
   Holes (5):
     ◯ src/auth/login.sp:30   authenticate     : User -> Token
@@ -673,7 +673,7 @@ type ModuleInfo:
     path: Path
     impl_hash: Hash
     sig_hash: Hash
-    capabilities: Set Capability
+    effects: Set Effect
     cost_annotation: CostBound
     holes: List Hole
 ```
@@ -697,23 +697,23 @@ fn update_dep_graph(module_id: ModuleId, old_deps: Set<ModuleId>, new_deps: Set<
         emit_error("circular dependency", module_id)
 ```
 
-#### Capability propagation watch output
+#### Effect propagation watch output
 
 ```text
-[watch] sig hash changed (capability set changed)
-[watch] Capability change: HttpClient: {Network} → {Network, FileSystem}
-[watch] Checking project capability ceiling...
+[watch] sig hash changed (effect set changed)
+[watch] Effect change: HttpClient: {Network} → {Network, FileSystem}
+[watch] Checking project effect ceiling...
          ceiling allows: {Network, FileSystem, Clock} → ✓ within bounds
-[watch] Downstream capability compatibility:
+[watch] Downstream effect compatibility:
          ├─ src/api/client.sp → OK
          └─ src/app.sp → propagation stops
-[watch] ✓ 3 modules recompiled, 0 errors, 1 capability warning
+[watch] ✓ 3 modules recompiled, 0 errors, 1 effect warning
 ```
 
 When the ceiling is exceeded:
 
 ```text
-[watch] ✗ Error: HttpClient added capability `Crypto`
+[watch] ✗ Error: HttpClient added effect `Crypto`
          Project ceiling: {Network, FileSystem, Clock}
          `Crypto` not in ceiling — update ceiling or remove usage
 ```
@@ -823,7 +823,7 @@ Appends additional analysis blocks after each diagnostic:
 - **Inference chain:** step-by-step type derivation
 - **Candidates considered:** possible conversions, overloads, alternative
   functions
-- **Capability context:** which capabilities are in scope at the error site
+- **Effect context:** which effects are in scope at the error site
 - **Cost context:** cost used so far vs. budget
 
 Example:
@@ -846,7 +846,7 @@ help: try `Money.from_string("fifty dollars")`
     String -> Money via Money.from_string  ✓ (exact match)
     String -> Money via Money.parse        ✓ (may raise ParseError)
 
-  capability context: [PaymentGateway]
+  effect context: [PaymentGateway]
   cost at this point: 120 / budget 500
 ```
 
@@ -891,7 +891,7 @@ make richer analysis payloads an explicit later layer.
 ```
 
 The base IR deliberately excludes richer fields such as inference chains,
-candidate rankings, capability/cost context blobs, and machine-edit payloads.
+candidate rankings, effect/cost context blobs, and machine-edit payloads.
 Those may be layered later as extension data or adjacent protocols, but they are
 not part of the minimal stable contract.
 
@@ -966,7 +966,7 @@ All diagnostics carry categorized codes:
 |--------|----------|----------|
 | `E0xxx` | Type errors | type mismatch, missing field, arity error |
 | `W0xxx` | Warnings | unused variable, redundant pattern, shadowing |
-| `C0xxx` | Capability violations | undeclared capability, exceeding ceiling |
+| `C0xxx` | Effect violations | undeclared effect, exceeding ceiling |
 | `K0xxx` | Cost violations | budget exceeded, unbounded call |
 | `H0xxx` | Hole diagnostics | hole report, partial function, type conflict |
 | `M0xxx` | Module errors | circular dependency, visibility violation |
@@ -1009,7 +1009,7 @@ Target latencies (aspirational, not hard guarantees):
 
 | Operation | Target | Notes |
 |-----------|--------|-------|
-| Single module recompilation | < 100ms | Type check + capability + cost |
+| Single module recompilation | < 100ms | Type check + effect + cost |
 | Dependency graph traversal | < 10ms | Topological sort of module DAG |
 | Hash computation (single module) | < 5ms | blake3 of module content |
 | Full project initial analysis (~100 modules) | < 5s | Cold start, parallel compilation |
@@ -1040,14 +1040,14 @@ analyses in one pass:
 
 ```text
 Source → Parse → Name Resolution → Type Inference
-                                    ├── Capability Check (inline)
+                                    ├── Effect Check (inline)
                                     ├── Cost Analysis (post-typecheck)
                                     └── Lint Pass (post-typecheck)
 ```
 
 All diagnostics are collected into a single `Vec<Diagnostic>` and sorted by file
 position. This ensures the developer sees **all** issues in one invocation rather
-than fixing types first, then capabilities, then costs.
+than fixing types first, then effects, then costs.
 
 **Cost violations** are emitted as **warnings** (severity = Warning, code prefix
 `K`), not errors. They do not cause a non-zero exit code unless `--deny-warnings`
@@ -1117,7 +1117,7 @@ error) and visually structured with Rust-style gutters and underlines, making
 
 - Real-time error/warning diagnostics on file save
 - Hole progress tracking (total holes, filled this cycle, ready to fill, blocked)
-- Capability and cost propagation alerts when signatures change
+- Effect and cost propagation alerts when signatures change
 
 The watch output is designed to be "glanceable" — a developer can look at the
 terminal and immediately know whether the codebase is healthy.
@@ -1353,10 +1353,10 @@ error[E0301]: type mismatch
 help: try `Money.from_string("fifty dollars")`
 ```
 
-**Capability violation:**
+**Effect violation:**
 
 ```text
-error[C0101]: undeclared capability
+error[C0101]: undeclared effect
   --> src/report.sp:27:5
    |
 27 |     http.get(endpoint)
@@ -1391,7 +1391,7 @@ note[H0101]: hole `tax_logic` requires filling
    |     ^^^^^^^^^^ expected type: `Money`, remaining cost budget: 400 op
    |
    = note: available bindings: income: Money, region: Region
-   = note: available capabilities: [TaxTable]
+   = note: available effects: [TaxTable]
    = note: candidate: `tax_table.lookup(region, income) -> Money`
 help: run `sporec query-hole src/tax.sp ?tax_logic` for full HoleReport
 ```
@@ -1463,24 +1463,24 @@ All diagnostics carry a categorized code. Every code is queryable: `sporec expla
 | `W0102` | unused-import | Module import never referenced |
 | `W0103` | unused-function | Private function never called |
 | `W0104` | unused-type | Private type never referenced |
-| `W0105` | unused-capability | Declared capability never exercised |
+| `W0105` | unused-effect | Declared effect never exercised |
 | `W0201` | redundant-pattern | Match arm unreachable due to prior arm |
 | `W0202` | redundant-constraint | Generic constraint implied by another |
 | `W0203` | redundant-parentheses | Unnecessary parentheses around expression |
 | `W0301` | shadowing | Variable shadows binding in outer scope |
 | `W0302` | implicit-discard | Expression result discarded without explicit `_` |
 
-#### C0xxx — Capability Violations
+#### C0xxx — Effect Violations
 
 | Code | Name | Description |
 |------|------|-------------|
-| `C0101` | undeclared-capability | Function uses capability not in `uses` |
+| `C0101` | undeclared-effect | Function uses effect not in `uses` |
 | `C0102` | exceeds-ceiling | Function `uses` exceeds module ceiling |
-| `C0103` | callee-capability-leak | Calling function whose `uses` exceeds caller's |
-| `C0104` | transitive-capability | Transitive callee introduces undeclared capability |
-| `C0201` | platform-capability-denied | Package requests capability Platform does not grant |
-| `C0202` | platform-missing | No Platform provides required capability |
-| `C0301` | capability-purity-conflict | `uses []` (pure) function calls impure code |
+| `C0103` | callee-effect-leak | Calling function whose `uses` exceeds caller's |
+| `C0104` | transitive-effect | Transitive callee introduces undeclared effect |
+| `C0201` | platform-effect-denied | Package requests effect Platform does not grant |
+| `C0202` | platform-missing | No Platform provides required effect |
+| `C0301` | effect-purity-conflict | `uses []` (pure) function calls impure code |
 
 #### K0xxx — Cost Violations
 
@@ -1543,15 +1543,15 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 - richer cost-breakdown payloads can be layered later as verbose or extension
   data; they are not part of the minimal frozen IR
 
-#### Capability System integration
+#### Effect System integration
 
 Three enforcement levels:
 
 1. **Function level** (`C0101`): body uses operations beyond declared `uses`
 2. **Module level** (`C0102`): function `uses` exceeds module ceiling
-3. **Platform level** (`C0201`): package requests capabilities Platform does not grant
+3. **Platform level** (`C0201`): package requests effects Platform does not grant
 
-Capability context may be rendered in notes or future verbose/extension data, but
+Effect context may be rendered in notes or future verbose/extension data, but
 it is not a required field in the minimal frozen IR.
 
 #### Snapshot System integration
@@ -1652,10 +1652,10 @@ The 100ms debounce window after save still provides near-instant feedback.
 
 ### 6. Separate passes for CapCheck and CostCheck
 
-We considered making capability checking and cost checking independent passes
+We considered making effect checking and cost checking independent passes
 after type checking.
 
-**Rejected because:** `Capability = Trait` in Spore, so capability resolution
+**Rejected because:** `Effect = Trait` in Spore, so effect resolution
 shares trait resolution infrastructure. Cost checking depends on fully resolved
 types and call graphs. Merging all three into a unified TypeCheck pass avoids
 redundant tree traversals and simplifies the impl hash boundary.
@@ -1693,7 +1693,7 @@ The prefix convention (E/W/C/K/H/M) maps directly to Spore's major subsystems.
 **Rationale:** DX is the highest-ROI investment; content-addressing naturally supports incremental compilation.
 **Consequence:** No runtime module replacement protocol; single-machine development scenarios only.
 
-#### ADR-002: Three capabilities
+#### ADR-002: Three effects
 
 **Decision:** "Program-as-Service" manifests as incremental compilation + real-time diagnostics + hole status tracking.
 **Rationale:** These cover the core feedback needs during coding: correctness, problem location, progress tracking.
@@ -1845,7 +1845,7 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
    enabling offline analysis tools to process the history?
 
 10. **Tree-walking interpreter scope.** How much of the language should the
-    PoC interpreter support? Full semantics (including capabilities and cost
+    PoC interpreter support? Full semantics (including effects and cost
     tracking at runtime) or a minimal subset for early testing? This affects
     the PoC timeline and determines how much behavior can be validated before
     Cranelift codegen is ready.
@@ -1877,8 +1877,8 @@ Suppression is limited to **warnings only** — errors and notes cannot be suppr
 | **impl hash** | Hash of module implementation content; determines whether to recompile this module |
 | **sig hash** | Hash of module public interface; determines whether downstream dependents need rechecking |
 | **hole** | Source-code placeholder (`?name`) for unfinished implementation, carrying type information |
-| **capability** | A declared system permission (e.g., `Network`, `FileSystem`) required to perform certain operations |
-| **capability ceiling** | Project-level maximum capability set; no module may exceed it |
+| **effect** | A declared system permission (e.g., `Network`, `FileSystem`) required to perform certain operations |
+| **effect ceiling** | Project-level maximum effect set; no module may exceed it |
 | **cost annotation** | A declared upper bound on a function's computational cost (`cost ≤ K`) |
 | **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
 | **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |

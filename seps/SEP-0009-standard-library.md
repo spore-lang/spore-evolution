@@ -12,7 +12,7 @@ pr: null
 superseded_by: null
 ---
 
-> **Executive Summary**: Defines the standard library surface for Spore — the set of built-in types, functions, traits, and error types that every Spore program can rely on. Organizes the stdlib into a layered prelude (always-available primitives), core modules (opt-in via import), and platform-provided I/O bindings. Every function carries capability requirements and cost annotations per SEP-0003 and SEP-0004.
+> **Executive Summary**: Defines the standard library surface for Spore — the set of built-in types, functions, traits, and error types that every Spore program can rely on. Organizes the stdlib into a layered prelude (always-available primitives), core modules (opt-in via import), and platform-provided I/O bindings. Every function carries effect requirements and cost annotations per SEP-0003 and SEP-0004.
 
 # SEP-0009: Standard Library Surface
 
@@ -644,7 +644,7 @@ The current runtime stack for platform-backed I/O looks like this:
 │ [project].platform = "basic-cli"             │
 │ startup-contract = "main"                    │
 │ adapter-function = "main_for_host"           │
-│ handles = [..., "Exit"]                      │
+│ handled-effects = [..., "Exit"]              │
 ├──────────────────────────────────────────────┤
 │ Native Runtime (Rust/C/host embedding)       │
 └──────────────────────────────────────────────┘
@@ -653,7 +653,7 @@ The current runtime stack for platform-backed I/O looks like this:
 Key properties:
 
 1. **User code** imports Platform package modules directly today.
-2. **Each foreign surface** declares explicit capability requirements.
+2. **Each foreign surface** declares explicit effect requirements.
 3. **The selected Platform package** owns startup contracts and handled-effect metadata.
 4. **Some operations** may propagate structured runtime outcomes before host conversion (for example `Exit` in project mode).
 5. **Future stdlib wrappers** may layer above this, but they are not required for the current implementation.
@@ -682,7 +682,7 @@ The stdlib is designed for progressive discovery:
 2. **Module names are predictable**: `std.math`, `std.string`, `std.collections` follow standard conventions
 3. **Cost annotations are readable**: `cost O(len(list))` reads naturally
 4. **Error types are descriptive**: Enum variants like `NotFound(String)` carry context
-5. **No hidden effects**: Every I/O function explicitly declares its capability requirements
+5. **No hidden effects**: Every I/O function explicitly declares its effect requirements
 
 ## Agent experience impact
 
@@ -690,7 +690,7 @@ Agents benefit from:
 
 1. **Complete enumeration**: All stdlib functions are listed with signatures, enabling auto-completion
 2. **Cost contracts**: Agents can reason about algorithmic complexity when filling holes
-3. **Capability requirements**: Agents can verify that generated code satisfies capability constraints
+3. **Effect requirements**: Agents can verify that generated code satisfies effect constraints
 4. **Structured errors**: Error type hierarchy enables pattern-matching on failure modes
 5. **JSON protocol**: `std.json` provides the serialization layer for hole protocol (SEP-0005)
 
@@ -708,7 +708,7 @@ The stdlib is represented in the module system as:
       "params": [{"name": "list", "type": "List[A]"}, {"name": "f", "type": "(A) -> B"}],
       "return_type": "List[B]",
       "cost": "len(list) * cost(f) + O(len(list))",
-      "capabilities": []
+      "effects": []
     }
   ],
   "types": [
@@ -788,6 +788,6 @@ This is a new specification — no backward compatibility concerns. However:
 
 5. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
 
-6. **Error recovery**: How should `PanicError` interact with the capability system? Should `panic` require a capability?
+6. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
 
 7. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `Int` → `i64` or `BigInt`?)

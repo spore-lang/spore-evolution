@@ -28,7 +28,7 @@ Ty ::= Int | Float | Bool | Str | Char | Unit | Never
       | Named(name)
       | App(name, [Ty])
       | Record([(name, Ty)])
-      | Fn([Ty], Ty, CapSet)
+      | Fn([Ty], Ty, EffectSet)
       | Var(u32)
       | Hole(name)
       | Error
@@ -37,7 +37,7 @@ Ty ::= Int | Float | Bool | Str | Char | Unit | Never
 Key design decisions:
 
 - **Signatures are gravity centers** — function signatures must be richly typed and fully explicit; bodies are inferred.
-- **CapSet = BTreeSet\<String\>** is encoded directly in function types, making effect tracking a first-class part of the type.
+- **EffectSet = BTreeSet\<String\>** is encoded directly in function types, making effect tracking a first-class part of the type.
 - **Bidirectional type inference** — top-down checking from signatures, bottom-up synthesis from expressions.
 - **Two-pass module checking** — `register_item` (collect all signatures) then `check_fn` (verify bodies).
 - **Generics via square-bracket application** — `List[Int]`, `Result[T, E]`.
@@ -205,7 +205,7 @@ summarize(data: { count: named.count, total: named.total })   // OK
 
 ### 3.5 Function types with effects
 
-Function types carry a **CapSet** — the set of effects the function requires:
+Function types carry a **EffectSet** — the set of effects the function requires:
 
 ```spore
 type Logger = Fn(msg: String) -> () uses [FileWrite]
@@ -998,7 +998,7 @@ Where:
 
 - `n` ranges over identifiers (strings).
 - `id` ranges over `u32` (unique unification variable IDs).
-- `C` is a **CapSet** = `BTreeSet<String>`, the set of effect names the function requires.
+- `C` is a **EffectSet** = `BTreeSet<String>`, the set of effect names the function requires.
 - `f` ranges over field names (strings) in anonymous records.
 
 **Never type.** `Ty::Never` is the bottom type — a subtype of all types. It is produced by diverging expressions (`panic`, non-terminating recursion). During unification, `unify(τ, Never) = ok` for all `τ`.
@@ -1009,24 +1009,24 @@ Where:
 
 **Hole type.** `Ty::Hole(name)` represents an unfilled hole. During unification, holes are compatible with anything — the checker records the expected type for diagnostic purposes without blocking further checking.
 
-### 4.2 Effect sets (CapSet)
+### 4.2 Effect sets (EffectSet)
 
 ```rust
-pub type CapSet = BTreeSet<String>;
+pub type EffectSet = BTreeSet<String>;
 ```
 
-A `CapSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`:
+A `EffectSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`:
 
 ```text
 Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 ```
 
-**CapSet rules:**
+**EffectSet rules:**
 
-1. A function may only call another function whose CapSet is a **subset** of its own.
-2. A pure function has `CapSet = ∅`.
-3. CapSets propagate through higher-order calls: passing a `Fn(...) uses [NetConnect]` to a higher-order function requires the caller to declare `NetConnect`.
-4. `uses [Cap1, Cap2]` in source syntax maps directly to `CapSet = {"Cap1", "Cap2"}`.
+1. A function may only call another function whose EffectSet is a **subset** of its own.
+2. A pure function has `EffectSet = ∅`.
+3. EffectSets propagate through higher-order calls: passing a `Fn(...) uses [NetConnect]` to a higher-order function requires the caller to declare `NetConnect`.
+4. `uses [Effect1, Effect2]` in source syntax maps directly to `EffectSet = {"Effect1", "Effect2"}`.
 
 **Formal effect checking rule:**
 
@@ -1297,7 +1297,7 @@ apply_subst(Record(fields))       = Record([(f, apply_subst(τ)) for (f, τ) in 
 apply_subst(τ)                    = τ                  for all other τ
 ```
 
-Note that `CapSet` is **not** subject to substitution — effects are always concrete strings, never type variables.
+Note that `EffectSet` is **not** subject to substitution — effects are always concrete strings, never type variables.
 
 #### Unification algorithm
 
@@ -1346,14 +1346,14 @@ pub fn check_module(&mut self, module: &Module) {
 
 **Pass 1 — `register_item`:** Iterates over all top-level items (functions, structs, type definitions) and registers their signatures in the `TypeRegistry`:
 
-- **Functions:** Parameter types are resolved, return type is resolved (default `Unit`), CapSet is extracted from `uses` clause, and type parameters from `where` clause are recorded.
+- **Functions:** Parameter types are resolved, return type is resolved (default `Unit`), EffectSet is extracted from `uses` clause, and type parameters from `where` clause are recorded.
 - **Structs:** Field names and types are resolved and stored.
 - **Type defs (enums):** Variant names and field types are resolved and stored.
 - **Effects and imports:** Deferred (no registration needed).
 
 **Pass 2 — `check_fn`:** For each function with a body:
 
-1. Set the current CapSet from the function's `uses` clause.
+1. Set the current EffectSet from the function's `uses` clause.
 2. Push a new scope in the environment.
 3. Bind each parameter to its declared type.
 4. Synthesize the body type via `check_expr`.
@@ -1415,7 +1415,7 @@ Record(fields₁) <: Record(fields₂)
 
 ### 4.8 Function types
 
-Function types are `Ty::Fn(params, ret, CapSet)`:
+Function types are `Ty::Fn(params, ret, EffectSet)`:
 
 ```text
 Fn([σ₁, …, σₙ], τᵣ, C)
@@ -1561,7 +1561,7 @@ Traits are registered in a `TraitRegistry` alongside the `TypeRegistry`. Each tr
 
 - Trait name
 - Supertrait requirements (e.g., `Ord: Eq`)
-- Method signatures (name, parameter types, return type, CapSet)
+- Method signatures (name, parameter types, return type, EffectSet)
 - Associated type declarations
 - Default method implementations (if any)
 
@@ -1713,7 +1713,7 @@ Rich type signatures give Agents strong guidance for code generation:
 
 - Parameter types constrain what values are available.
 - Return types constrain what the body must produce.
-- CapSet constrains which side-effectful functions may be called.
+- EffectSet constrains which side-effectful functions may be called.
 - Hole types (`Ty::Hole`) tell the Agent exactly what type to produce.
 
 ### Structured type information
@@ -1760,7 +1760,7 @@ All types implement `Display` with a canonical format:
 
 ### Snapshot hashes
 
-Function signatures (parameter types, return type, error set, CapSet, cost bound, generic constraints) are included in snapshot hashes. Body changes and `@allows` annotations are excluded. This ensures:
+Function signatures (parameter types, return type, error set, EffectSet, cost bound, generic constraints) are included in snapshot hashes. Body changes and `@allows` annotations are excluded. This ensures:
 
 - API-breaking changes require explicit `--permit`.
 - Implementation refactoring does not break downstream consumers.
@@ -1823,7 +1823,7 @@ Hole ?h1 in function `example`:
 
 1. **Nominal rigidity.** The nominal-primary design means newtypes require explicit wrap/unwrap. This adds verbosity for simple delegation patterns. Anonymous records provide a structural escape hatch, but they cannot implement traits.
 
-2. **CapSet as BTreeSet\<String\>.** String-based effect names lack static verification at the `Ty` level — a misspelled effect name is only caught when matching against registered effects, not during type construction.
+2. **EffectSet as BTreeSet\<String\>.** String-based effect names lack static verification at the `Ty` level — a misspelled effect name is only caught when matching against registered effects, not during type construction.
 
 3. **No higher-kinded types.** GATs + associated types cover most use cases, but abstracting over container kinds generically (functor-map over any container) requires either code generation or per-container implementations.
 
@@ -1882,7 +1882,7 @@ Hole ?h1 in function `example`:
 
 ### Alternative 6: Row-polymorphic effect sets
 
-**Considered for future.** Making CapSets row-polymorphic would allow:
+**Considered for future.** Making EffectSets row-polymorphic would allow:
 
 ```spore
 fn apply[C](f: Fn(x: Int) -> Int uses C, x: Int) -> Int uses C
@@ -1941,7 +1941,7 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 
 1. **Ty enum stability.** The variants `Int`, `Float`, `Bool`, `Str`, `Char`, `Unit`, `Never`, `Named`, `App`, `Record`, `Fn`, `Var`, `Hole`, `Error` are stable. New variants may be added but existing variants will not be removed or renamed without a new SEP.
 
-2. **CapSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce effect variables for row-polymorphic effects, but the concrete string-based API will remain supported.
+2. **EffectSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce effect variables for row-polymorphic effects, but the concrete string-based API will remain supported.
 
 3. **Two-pass checking.** The `register_item` → `check_fn` architecture is stable. Future passes (e.g., trait resolution, cost checking) will be added after these two, not replace them.
 
@@ -1953,11 +1953,11 @@ Since this is the first formal type system specification (v0.1 → SEP), there i
 |---|---|
 | Refinement types (L0) | Add `Ty::Refined(Box<Ty>, Predicate)` variant; extend `resolve_type` |
 | Const generics | Add `Ty::Const(value)` variant; extend `App` to accept const args |
-| Row-polymorphic effects | Extend CapSet with effect variables alongside concrete strings |
+| Row-polymorphic effects | Extend EffectSet with effect variables alongside concrete strings |
 
 ## Unresolved questions
 
-1. **CapSet in unification.** Currently, function type unification ignores CapSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should CapSets participate in unification, or remain checked separately? Separate checking is simpler but could miss effect mismatches in higher-order function arguments.
+1. **EffectSet in unification.** Currently, function type unification ignores EffectSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should EffectSets participate in unification, or remain checked separately? Separate checking is simpler but could miss effect mismatches in higher-order function arguments.
 
 2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[Int]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
 
@@ -1980,4 +1980,4 @@ The following questions from earlier drafts are now resolved by this specificati
 
 2. **Never type semantics.** ✅ Resolved — `unify(τ, Never) = ok` for all `τ` (§4.16). Never is handled as a bottom type directly within the unifier.
 
-3. **Error type representation.** ✅ Resolved — error sets are a component of `Ty::Fn`, making it `Fn(params, ret, CapSet, ErrorSet)` (§4.15). Error set unions are computed during `?` propagation.
+3. **Error type representation.** ✅ Resolved — error sets are a component of `Ty::Fn`, making it `Fn(params, ret, EffectSet, ErrorSet)` (§4.15). Error set unions are computed during `?` propagation.

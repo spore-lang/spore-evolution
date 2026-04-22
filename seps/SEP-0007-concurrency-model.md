@@ -41,7 +41,7 @@ The design unifies five properties that no existing language achieves simultaneo
 |----------|---------|-------------|
 | **Colorless functions** | Concurrency does not introduce `async`/`await` syntax bifurcation | All developers |
 | **Structured lifetimes** | Child tasks cannot escape the parent scope | Resource management, debugging |
-| **Explicit capabilities** | Concurrent tasks may only use declared capabilities | Security audits |
+| **Explicit effects** | Concurrent tasks may only use declared effects | Security audits |
 | **Bounded cost** | Compiler statically verifies `cost ≤ N` and `parallel(lane)` | Performance predictability |
 | **Simulatable execution** | Handlers are replaceable—same code compiles to simulation / deterministic test / production parallel | Agents, CI |
 
@@ -601,7 +601,7 @@ effect ChanRecv[T] {
 }
 ```
 
-Functions using channels must declare the corresponding capabilities:
+Functions using channels must declare the corresponding effects:
 
 ```spore
 fn producer(tx: Sender[Int]) -> Unit ! ChannelClosed

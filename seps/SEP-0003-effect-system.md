@@ -15,13 +15,13 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines Spore's effect system as a flat capability-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The canonical surface syntax uses explicit `effect` declarations, `perform Effect.op(...)`, top-level `handler`, and `handle { ... } with { ... }`, while semantic checking remains a subset test over capability sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
+> **Executive Summary**: Defines Spore's effect system as a flat effect-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The canonical surface syntax uses explicit `effect` declarations, `perform Effect.op(...)`, top-level `handler`, and `handle { ... } with { ... }`, while semantic checking remains a subset test over effect sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
 
 ## Summary
 
 This SEP introduces Spore's **effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic effects* it requires. The compiler verifies that a function body never exercises an effect absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and effect narrowing.
 
-The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the capability set used for subset checks, platform ceilings, and machine-readable fields such as `capabilities`.
+The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the effect set used for subset checks, platform ceilings, and machine-readable fields such as `effects`.
 
 The design is intentionally **flat and monomorphic**: effect sets are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`effect X = A | B`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
 
@@ -54,7 +54,7 @@ Modern programs interleave pure computation with diverse side effects — file I
 | Composable aliases | `effect` keyword for named groups and aliases |
 | Sound subtyping | Set inclusion on effect sets |
 | Auto-inferred properties | `pure`, `deterministic`, `total` derived from `uses` |
-| Agent integration | Capability set emitted in `HoleReport` JSON |
+| Agent integration | `available_effects` emitted in `HoleReport` JSON |
 
 ---
 
@@ -268,7 +268,7 @@ fn save_data(data: Data) -> Unit {
 ```
 
 ```text
-error[cap-violation]: function body uses undeclared effect
+error[effect-violation]: function body uses undeclared effect
   --> src/storage.sp:1:1
    |
  1 | fn save_data(data: Data) -> Unit {
@@ -319,13 +319,13 @@ A representative machine-readable view is:
     {
       "name": "validate",
       "type_match": 1.0,
-      "capability_fit": 1.0,
+      "required_effects_fit": 1.0,
       "overall": 1.0
     },
     {
       "name": "sanitize",
       "type_match": 1.0,
-      "capability_fit": 1.0,
+      "required_effects_fit": 1.0,
       "overall": 1.0
     }
   ]
@@ -415,7 +415,7 @@ builtin hierarchy.
 
 The canonical checked path for `perform` is:
 
-1. the current capability set must contain the named effect after alias
+1. the current effect set must contain the named effect after alias
    expansion, and
 2. the effect name must resolve to a declared effect/interface with a known
    operation signature.
@@ -428,7 +428,7 @@ module boundaries, so cross-module `perform Effect.op(...)` is typechecked
 against the imported signature rather than against an untyped name stub.
 Ambiguous imported same-name effects with different signatures are rejected.
 
-### 4. Function types and CapSet encoding
+### 4. Function types and EffectSet encoding
 
 #### 4.1 Complete function type
 
@@ -440,7 +440,7 @@ where:
 
 - `T₁ … Tₙ` — parameter types
 - `R` — return type
-- `S` — effect set (CapSet)
+- `S` — effect set (EffectSet)
 - `[E₁ …]` — error type set
 
 #### 4.2 Internal representation
@@ -448,10 +448,10 @@ where:
 In the compiler's type IR the function type is represented as:
 
 ```rust
-Ty::Fn(Vec<Ty>, Box<Ty>, CapSet)
+Ty::Fn(Vec<Ty>, Box<Ty>, EffectSet)
 ```
 
-where `CapSet = BTreeSet<String>`. A `BTreeSet` is chosen over `HashSet` for deterministic ordering in diagnostics and serialisation.
+where `EffectSet = BTreeSet<String>`. A `BTreeSet` is chosen over `HashSet` for deterministic ordering in diagnostics and serialisation.
 
 #### 4.3 Shorthand
 
@@ -618,7 +618,7 @@ The compiler performs effect checking during type-checking as a single pass:
 
 $$S_{\text{body}} \subseteq S_{\text{declared}}$$
 
-If the check fails, the compiler emits a `cap-violation` diagnostic listing the excess effects.
+If the check fails, the compiler emits a `effect-violation` diagnostic listing the excess effects.
 
 4. **Closure inference.** For closures, the compiler infers the minimal effect set from the closure body. This inferred set is used for subtype checking when the closure is passed to a higher-order function.
 
@@ -642,7 +642,7 @@ uses [FileRead, NetConnect]
 
 ### 11. Interaction with the Hole system
 
-When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object includes the capability set available at that program point under the field name `capabilities`:
+When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object includes the effect set available at that program point under the field name `available_effects`:
 
 ```json
 {
@@ -653,7 +653,7 @@ When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object i
     "url": "Url",
     "timeout": "Duration"
   },
-  "capabilities": ["NetConnect"],
+  "effects": ["NetConnect"],
   "cost_budget": {
     "budget_total": 5000,
     "cost_before_hole": 0,
@@ -663,7 +663,7 @@ When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object i
     {
       "name": "http.get",
       "type_match": 1.0,
-      "capability_fit": 1.0,
+      "required_effects_fit": 1.0,
       "overall": 1.0
     }
   ]
@@ -681,15 +681,15 @@ The Hole system filters candidate functions so that only those whose `uses S` sa
 When an agent or developer fills a Hole with code that exceeds the available set, the compiler emits a detailed diagnostic:
 
 ```text
-ERROR [cap-violation] Hole ?fetch_logic filled code uses unauthorised effects:
+ERROR [effect-violation] Hole ?fetch_logic filled code uses unauthorised effects:
   --> src/service.sp:15:5
    |
 15 |     ?fetch_logic    // filled with: fetch_and_save(url)
    |     ^^^^^^^^^^^^ hole fill exceeds available effects
    |
-   = available capabilities: [NetConnect]
+   = available effects: [NetConnect]
    = fill code requires:     [NetConnect, FileWrite]
-   = excess capabilities:    [FileWrite]
+   = excess effects:    [FileWrite]
    = help: either add FileWrite to the enclosing function's `uses` clause,
      or choose a candidate that only requires [NetConnect]
 ```
@@ -852,7 +852,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Structured effect information in HoleReport
 
-LLM-based agents filling Holes receive the `capabilities` field in the shared SEP-0005 hole object. This enables agents to:
+LLM-based agents filling Holes receive the `effects` field in the shared SEP-0005 hole object. This enables agents to:
 
 1. **Constrain code generation.** The agent knows which operations are permissible and avoids generating code that would fail effect checks.
 2. **Filter candidate functions.** Only functions whose `uses S` satisfies S ⊆ S_available are presented as candidates.
@@ -872,14 +872,14 @@ The explicit effect set narrows the space of valid completions, reducing the lik
 
 ### Function type serialisation
 
-The canonical serialised form of a function type includes the CapSet:
+The canonical serialised form of a function type includes the EffectSet:
 
 ```json
 {
   "kind": "Fn",
   "params": ["Int", "Int"],
   "return": "Int",
-  "capabilities": [],
+  "effects": [],
   "errors": []
 }
 ```
@@ -889,7 +889,7 @@ The canonical serialised form of a function type includes the CapSet:
   "kind": "Fn",
   "params": ["Url"],
   "return": "Response",
-  "capabilities": ["NetConnect"],
+  "effects": ["NetConnect"],
   "errors": ["NetworkError"]
 }
 ```
@@ -925,7 +925,7 @@ The language server protocol integration should expose effect information throug
 
 | Code | Severity | Message template |
 |---|---|---|
-| `cap-violation` | Error | Function body uses effect `{cap}` not declared in `uses` clause. Declared: `{declared}`. Required: `{required}`. Excess: `{excess}`. |
+| `effect-violation` | Error | Function body uses effect `{cap}` not declared in `uses` clause. Declared: `{declared}`. Required: `{required}`. Excess: `{excess}`. |
 | `cap-closure-violation` | Error | Closure passed to `{fn_name}` must be pure (`uses []`), but it uses `{caps}`. |
 | `cap-spawn-missing` | Error | `spawn` expression requires `Spawn` effect, but current scope declares `uses {scope_caps}`. |
 | `cap-narrowing-violation` | Error | Spawn body uses `{child_caps}` which is not a subset of parent scope `{parent_caps}`. Excess: `{excess}`. |
@@ -942,7 +942,7 @@ The language server protocol integration should expose effect information throug
 Example diagnostic:
 
 ```text
-error[cap-violation]: function body uses undeclared effect
+error[effect-violation]: function body uses undeclared effect
   --> src/app.sp:12:5
    |
 10 | fn process(data: Data) -> Result
@@ -974,7 +974,7 @@ error[cap-violation]: function body uses undeclared effect
 
 5. **Alias is expansion only.** Effect aliases do not create new abstract effects. This prevents hiding implementation details behind an alias boundary — the caller always sees the expanded set.
 
-6. **String-based CapSet.** Using `BTreeSet<String>` for the internal representation is simple but offers no compile-time interning or efficient bitset operations. This may need revisiting for large-scale codebases with many effects.
+6. **String-based EffectSet.** Using `BTreeSet<String>` for the internal representation is simple but offers no compile-time interning or efficient bitset operations. This may need revisiting for large-scale codebases with many effects.
 
 ---
 
@@ -1037,7 +1037,7 @@ Encoding effects in the type system via monads (e.g., `IO a`, `State s a`).
 | **Scala (ZIO)** | Environment type `R` in `ZIO[R, E, A]` | Similar in spirit; ZIO's `R` is an intersection type, Spore uses a flat set |
 | **Unison** | Ability types (algebraic effects) | Close conceptual ancestor; Spore simplifies by removing polymorphism |
 | **Android Manifest** | Permission declarations | Same "declare what you need" philosophy at the OS level |
-| **Wasm Component Model** | Import/export capabilities | Static effect declaration before instantiation |
+| **Wasm Component Model** | Import/export effects | Static effect declaration before instantiation |
 | **Java (checked exceptions)** | `throws` clause | Spore's `uses` is analogous but tracks effects rather than error types |
 
 ---
@@ -1050,14 +1050,14 @@ Spore is a new language and this SEP defines a core feature of its type system. 
 
 ### Interaction with SEP-0002
 
-This SEP depends on SEP-0002 (Type System). The `CapSet` is integrated into the function type representation defined there:
+This SEP depends on SEP-0002 (Type System). The `EffectSet` is integrated into the function type representation defined there:
 
 ```rust
 enum Ty {
     Int,
     Bool,
     String,
-    Fn(Vec<Ty>, Box<Ty>, CapSet),  // params, return, effects
+    Fn(Vec<Ty>, Box<Ty>, EffectSet),  // params, return, effects
     // ...
 }
 ```
@@ -1093,7 +1093,7 @@ Can third-party libraries define new atomic effects? If so, how are they scoped 
 
 Is `FileRead` / `FileWrite` the right granularity, or should effects be path-scoped (e.g., `FileRead("/etc/config")`)? Path-scoping adds expressiveness but complicates the set algebra.
 
-### 5. Granularity of `Console` capability
+### 5. Granularity of `Console` effect
 
 Should `Console` be split further (e.g., `ConsoleRead` for stdin vs `ConsoleWrite` for stdout/stderr)? A single `Console` is simpler and covers the common case where terminal I/O is bidirectional, but finer granularity may be useful for sandboxing scenarios where a program should print output but not read input.
 

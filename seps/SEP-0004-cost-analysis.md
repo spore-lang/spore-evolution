@@ -45,7 +45,7 @@ Spore's language design creates a unique opportunity for compile-time cost analy
 1. **No loops.** All iteration is expressed through recursion and higher-order functions (`map`, `fold`, `filter`). This means cost analysis reduces entirely to recursion analysis — there is no separate "loop analysis" pass.
 2. **Algebraic data types.** The vast majority of recursive functions naturally follow the structure of their data (structural recursion), which is automatically detectable and provably terminating.
 3. **Pure functions.** In the absence of side effects, a function's cost is determined entirely by its parameters, enabling symbolic cost propagation.
-4. **Capability system.** The `uses [...]` declarations cross-validate with cost dimensions — a function declared `uses []` (pure) must have zero io(call) cost.
+4. **Effect system.** The `uses [...]` declarations cross-validate with cost dimensions — a function declared `uses []` (pure) must have zero io(call) cost.
 
 ### Design goals
 
@@ -803,7 +803,7 @@ Source Code
   ↓
 [1] Parse to AST
   ↓
-[2] Type Check + Capability Check
+[2] Type Check + Effect Check
   ↓
 [3] Abstract Interpretation (Cost Inference)
     ├── Build control flow graph (CFG)
@@ -1022,7 +1022,7 @@ The Language Server Protocol exposes:
 | `unbounded-function` | Warning | Function marked `@unbounded` |
 | `unbounded-in-bounded-context` | Error | `@unbounded` function called from `cost ≤ K` context without `with_cost_limit` |
 | `unverified-cost-bound` | Warning | `cost ≤ expr` declared but compiler cannot verify it |
-| `cost-capability-conflict` | Error | `uses []` (pure) declared but W > 0 inferred |
+| `cost-effect-conflict` | Error | `uses []` (pure) declared but W > 0 inferred |
 
 ### Example diagnostics
 
@@ -1053,9 +1053,9 @@ WARNING [unbounded-cost] fibonacci's cost cannot be statically determined.
   (c) Rewrite using structural recursion or tail recursion + iteration bound
 ```
 
-### Cross-validation with capabilities
+### Cross-validation with effects
 
-The cost system and capability system form a cross-validation network. If a function declares `uses []` (pure, no capabilities) but cost analysis discovers W > 0 (I/O operations), the compiler emits `cost-capability-conflict`. Conversely, a function declared `uses [NetConnect]` must have W ≥ 1 in at least one code path.
+The cost system and effect system form a cross-validation network. If a function declares `uses []` (pure, no effects) but cost analysis discovers W > 0 (I/O operations), the compiler emits `cost-effect-conflict`. Conversely, a function declared `uses [NetConnect]` must have W ≥ 1 in at least one code path.
 
 ---
 
@@ -1167,7 +1167,7 @@ Sized types annotate data types with size information (e.g., `List[T, max: n]`) 
 
 ### This is a new feature
 
-Cost analysis is introduced as a new compiler capability. No existing Spore code is broken by this SEP.
+Cost analysis is introduced as a new compiler effect. No existing Spore code is broken by this SEP.
 
 ### Migration path
 

@@ -49,7 +49,7 @@
       "superseded_by": null
     },
     {
-      "path": "seps/SEP-0003-effect-capability-system.md",
+      "path": "seps/SEP-0003-effect-system.md",
       "sep": 3,
       "title": "SEP-0003: Effect System",
       "status": "Draft",
