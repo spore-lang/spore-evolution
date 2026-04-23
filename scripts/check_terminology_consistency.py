@@ -10,7 +10,7 @@ from sep_common import ROOT
 
 TARGETS = (
     ROOT / "GLOSSARY.md",
-    ROOT / "seps" / "SEP-0003-effect-capability-system.md",
+    ROOT / "seps" / "SEP-0003-effect-system.md",
     ROOT / "seps" / "SEP-0004-cost-analysis.md",
     ROOT / "seps" / "SEP-0006-compiler-architecture.md",
     ROOT / "seps" / "SEP-0008-module-package-system.md",
@@ -27,11 +27,11 @@ FORBIDDEN_PATTERNS = (
     ),
     (
         re.compile(r"\bStateRead\b"),
-        "retired term `StateRead`; mutable state is no longer a built-in external capability",
+        "retired term `StateRead`; mutable state is no longer a built-in external effect",
     ),
     (
         re.compile(r"\bStateWrite\b"),
-        "retired term `StateWrite`; mutable state is no longer a built-in external capability",
+        "retired term `StateWrite`; mutable state is no longer a built-in external effect",
     ),
     (
         re.compile(r"cost\s*<="),
@@ -40,7 +40,7 @@ FORBIDDEN_PATTERNS = (
 )
 
 ALLOWED_LINE_SNIPPETS = {
-    ROOT / "seps" / "SEP-0003-effect-capability-system.md": (
+    ROOT / "seps" / "SEP-0003-effect-system.md": (
         "No `StateRead`/`StateWrite`.",
         "`NetConnect`/`NetListen` instead of `NetRead`/`NetWrite`.",
     ),
