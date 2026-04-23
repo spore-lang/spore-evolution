@@ -23,7 +23,7 @@ superseded_by: null
 
 This SEP specifies Spore's **Hole System** — a first-class language mechanism that treats unfinished code as a structured, typed, compiler-mediated collaboration interface between humans and AI Agents.
 
-A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `effects`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`.
+A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`.
 
 Multiple holes still form a **Hole Dependency Graph** (DAG), enabling topological ordering and parallel filling by multiple Agents. The long-term **Agent Protocol** defines a five-state machine (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous filling workflows. Today, however, `spore watch --json` remains a thinner transport: it emits per-cycle `compile_result` plus a summary `hole_graph_update`, while richer per-hole watch events remain the target architecture rather than the stable contract.
 
@@ -253,7 +253,7 @@ HoleReport v0.3 is a **superset** of v0.2. The schema version advances from `"sp
 | `type.expected` | The type this hole must produce, including error variants |
 | `type.inferred_from` | Human-readable explanation of why this type is expected |
 | `bindings` | Variables in scope with name, type, and simulated value (`symbolic` or `computed`) |
-| `effects` | The `uses` list from the enclosing function |
+| `available_effects` | The `uses` list available at the hole site |
 | `errors_to_handle` | Error types not yet handled before the hole |
 | `cost.budget_total` | The `cost ≤ N` from the enclosing function |
 | `cost.cost_before_hole` | Cumulative cost of statements before the hole |
@@ -976,7 +976,7 @@ A HoleReport v0.3 is **self-contained**. An Agent reading a report needs zero ad
 
 1. **What to produce**: `type.expected` with `type.inferred_from` explaining why
 2. **What is available**: `bindings` with types, simulated values, and `binding_dependencies` showing data-flow
-3. **What is permitted**: `effects` (what the fill can call), `cost.budget_remaining` (how expensive it can be)
+3. **What is permitted**: `available_effects` (what the fill can call), `cost.budget_remaining` (how expensive it can be)
 4. **What errors to handle**: `errors_to_handle` flat list plus `error_clusters` with per-source grouping and handling suggestions
 5. **What functions might work**: `candidates` with multi-dimensional `scores`, `overall` ranking, and `adjustments`
 6. **How confident the compiler is**: `confidence.type_inference` and `confidence.candidate_ranking`
@@ -1148,7 +1148,7 @@ All hole-related commands support `--json` for machine consumption.
         "order": [],
         "validated": ["order"]
       },
-      "effects": ["Inventory", "PaymentGateway"],
+      "available_effects": ["Inventory", "PaymentGateway"],
       "errors_to_handle": ["PaymentFailed"],
       "cost_budget": {
         "budget_total": 5000,

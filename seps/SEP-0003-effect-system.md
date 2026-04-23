@@ -653,7 +653,7 @@ When the compiler encounters a Hole (`?name`), the shared SEP-0005 hole object i
     "url": "Url",
     "timeout": "Duration"
   },
-  "effects": ["NetConnect"],
+  "available_effects": ["NetConnect"],
   "cost_budget": {
     "budget_total": 5000,
     "cost_before_hole": 0,
@@ -852,7 +852,7 @@ The `uses` clause makes a function's external interactions visible at a glance. 
 
 ### Structured effect information in HoleReport
 
-LLM-based agents filling Holes receive the `effects` field in the shared SEP-0005 hole object. This enables agents to:
+LLM-based agents filling Holes receive the `available_effects` field in the shared SEP-0005 hole object. This enables agents to:
 
 1. **Constrain code generation.** The agent knows which operations are permissible and avoids generating code that would fail effect checks.
 2. **Filter candidate functions.** Only functions whose `uses S` satisfies S ⊆ S_available are presented as candidates.
