@@ -6,7 +6,7 @@ Spore is a compiled, general-purpose programming language where **intent is a fi
 
 ### 1. Signatures are gravity centers
 
-A function signature is a complete specification: input/output types, error sets, cost budget, and required capabilities. All downstream analysis flows from the signature. The body can be empty — the intent is already fully expressed.
+A function signature is a complete specification: input/output types, error sets, cost budget, and required effects. All downstream analysis flows from the signature. The body can be empty — the intent is already fully expressed.
 
 ### 2. Holes are collaboration points, not errors
 
@@ -20,9 +20,9 @@ The recommended workflow is top-down: define signatures and types, verify the sk
 
 Every compiler output — diagnostics, hole reports, incremental events, dependency graphs — is available in both human-readable and machine-readable form. Humans see clear error messages with repair hints; Agents see structured JSON suitable for automated reasoning.
 
-### 5. Explicit capability and cost models
+### 5. Explicit effect and cost models
 
-Every side effect requires a declared capability. Every computational cost can be bounded and verified at compile time. A function's impact is fully assessable from its signature alone.
+Every side effect must be covered by declared effects. Every computational cost can be bounded and verified at compile time. A function's impact is fully assessable from its signature alone.
 
 ### 6. Content-addressed, not version-numbered
 

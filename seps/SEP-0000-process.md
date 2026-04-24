@@ -29,7 +29,7 @@ Spore is attempting to design a language and toolchain around a fairly ambitious
 - intent-first APIs
 - structured collaboration between humans and Agents
 - holes as first-class collaboration points
-- explicit capability and cost models
+- explicit effect and cost models
 - machine-readable diagnostics and language protocols
 
 These changes have broad, long-term consequences. Normal implementation pull requests are not enough to capture:
@@ -78,7 +78,7 @@ An SEP is expected for substantial changes to any of the following:
 
 - language syntax
 - language semantics or typing rules
-- module, package, content-addressing, effect, capability, or cost systems
+- module, package, content-addressing, effect, or cost systems
 - standard library or core tooling surface
 - compiler output and machine-readable protocol design
 - hole protocol, diagnostics protocol, or other human/Agent interface contracts

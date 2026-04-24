@@ -17,13 +17,13 @@ superseded_by: null
 
 # SEP-0005: Hole System & Agent Protocol
 
-> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, capability, and cost context. The current stable machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP also keeps the richer long-term agent/watch protocol — dependency-aware fill ordering, cross-hole coordination, and the `DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT` workflow — while documenting that today's `spore watch --json` still emits `compile_result` plus a summary-style `hole_graph_update`, not the full target graph payload.
+> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, effect, and cost context. The current stable machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP also keeps the richer long-term agent/watch protocol — dependency-aware fill ordering, cross-hole coordination, and the `DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT` workflow — while documenting that today's `spore watch --json` still emits `compile_result` plus a summary-style `hole_graph_update`, not the full target graph payload.
 
 ## Summary
 
 This SEP specifies Spore's **Hole System** — a first-class language mechanism that treats unfinished code as a structured, typed, compiler-mediated collaboration interface between humans and AI Agents.
 
-A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `capabilities`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`.
+A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`.
 
 Multiple holes still form a **Hole Dependency Graph** (DAG), enabling topological ordering and parallel filling by multiple Agents. The long-term **Agent Protocol** defines a five-state machine (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous filling workflows. Today, however, `spore watch --json` remains a thinner transport: it emits per-cycle `compile_result` plus a summary `hole_graph_update`, while richer per-hole watch events remain the target architecture rather than the stable contract.
 
@@ -45,7 +45,7 @@ Traditional languages treat unfinished code as an error — `todo!()`, `unimplem
 
 This creates two problems:
 
-1. **For humans**: Developers cannot express partial intent. They know the function's contract (signature, error types, cost bound, capability requirements) but haven't decided on the implementation yet. Traditional languages offer no way to say "this part is intentionally unfinished, here is what I need" in a way the compiler understands.
+1. **For humans**: Developers cannot express partial intent. They know the function's contract (signature, error types, cost bound, effect requirements) but haven't decided on the implementation yet. Traditional languages offer no way to say "this part is intentionally unfinished, here is what I need" in a way the compiler understands.
 
 2. **For AI Agents**: Without structured information about what is missing, Agents must reverse-engineer context from error messages, heuristically guess types, and operate without compiler guidance. The quality ceiling is low and the failure rate is high.
 
@@ -253,7 +253,7 @@ HoleReport v0.3 is a **superset** of v0.2. The schema version advances from `"sp
 | `type.expected` | The type this hole must produce, including error variants |
 | `type.inferred_from` | Human-readable explanation of why this type is expected |
 | `bindings` | Variables in scope with name, type, and simulated value (`symbolic` or `computed`) |
-| `capabilities` | The `uses` list from the enclosing function |
+| `available_effects` | The `uses` list available at the hole site |
 | `errors_to_handle` | Error types not yet handled before the hole |
 | `cost.budget_total` | The `cost ≤ N` from the enclosing function |
 | `cost.cost_before_hole` | Cumulative cost of statements before the hole |
@@ -300,7 +300,7 @@ Replaces the coarse `match_quality: "exact" | "partial"` string with a four-dime
 |---|---|---|---|
 | Type match | `type_match` | `[0, 1]` | Return type + parameter type match degree |
 | Cost fit | `cost_fit` | `[0, 1]` | Estimated cost vs. remaining budget fit |
-| Capability fit | `capability_fit` | `{0, 1}` | All required capabilities available (boolean) |
+| Effect fit | `required_effects_fit` | `{0, 1}` | All required effects available (boolean) |
 | Error coverage | `error_coverage` | `[0, 1]` | Fraction of candidate's declared errors covered by context |
 
 **Type match formula:**
@@ -326,7 +326,7 @@ cost_fit(candidate, hole) =
 **Overall score:**
 
 ```text
-overall = 0.40 × type_match + 0.20 × cost_fit + 0.25 × capability_fit + 0.15 × error_coverage
+overall = 0.40 × type_match + 0.20 × cost_fit + 0.25 × required_effects_fit + 0.15 × error_coverage
 ```
 
 Weights are hard-coded in the compiler. Candidates are sorted by `overall` descending, with `type_match` as tiebreaker, then `cost_fit`, then lexicographic name for stability.
@@ -909,7 +909,7 @@ The `origin` field distinguishes closure parameters from captured bindings, enab
 
 A hole in a function inferred as `pure` (i.e., `uses []`) is itself pure by definition — it does nothing. The compiler does not flag a purity violation for the hole's presence. However, the **filling** must satisfy the purity constraint:
 
-**Formal rule:** If function `f` has `uses []` (and is therefore inferred as `pure`), any expression that replaces a hole `?h` in `f`'s body must also be pure — it may not call functions requiring IO or State capabilities.
+**Formal rule:** If function `f` has `uses []` (and is therefore inferred as `pure`), any expression that replaces a hole `?h` in `f`'s body must also be pure — it may not call functions requiring IO or State effects.
 
 ```spore
 fn pure_fn(x: Int) -> Int
@@ -922,7 +922,7 @@ If the Agent fills with an impure expression:
 
 ```text
 [error] pure_fn is inferred as pure (uses []) but the filling of ?must_be_pure
-        calls print() which requires capability: IO
+        calls print() which requires effect: IO
 ```
 
 ---
@@ -976,7 +976,7 @@ A HoleReport v0.3 is **self-contained**. An Agent reading a report needs zero ad
 
 1. **What to produce**: `type.expected` with `type.inferred_from` explaining why
 2. **What is available**: `bindings` with types, simulated values, and `binding_dependencies` showing data-flow
-3. **What is permitted**: `capabilities` (what the fill can call), `cost.budget_remaining` (how expensive it can be)
+3. **What is permitted**: `available_effects` (what the fill can call), `cost.budget_remaining` (how expensive it can be)
 4. **What errors to handle**: `errors_to_handle` flat list plus `error_clusters` with per-source grouping and handling suggestions
 5. **What functions might work**: `candidates` with multi-dimensional `scores`, `overall` ranking, and `adjustments`
 6. **How confident the compiler is**: `confidence.type_inference` and `confidence.candidate_ranking`
@@ -986,14 +986,14 @@ This design eliminates the "context gathering" phase that plagues current AI cod
 
 ### Scoring Vectors Enable Principled Selection
 
-The four-dimensional scoring vector (`type_match`, `cost_fit`, `capability_fit`, `error_coverage`) enables Agents to make decisions based on numeric comparison rather than string parsing. An Agent's selection logic becomes:
+The four-dimensional scoring vector (`type_match`, `cost_fit`, `required_effects_fit`, `error_coverage`) enables Agents to make decisions based on numeric comparison rather than string parsing. An Agent's selection logic becomes:
 
 ```text
 if confidence.candidate_ranking == "unique_best":
     select candidates[0]
 elif confidence.candidate_ranking == "ambiguous":
     for each candidate in candidates:
-        if candidate.scores.capability_fit == 0:
+        if candidate.scores.required_effects_fit == 0:
             skip  # hard constraint
         weight type_match and cost_fit by task priority
     select best by adjusted score
@@ -1034,7 +1034,7 @@ Today, the stable implementation approximates this by combining the shared batch
 
 ### Failure Recovery
 
-On REJECT, the Agent receives structured diagnostics with `root_cause` classification (`type_mismatch`, `cost_exceeded`, `capability_violation`, `error_unhandled`) and `fix_hints`. This is richer than typical compiler errors:
+On REJECT, the Agent receives structured diagnostics with `root_cause` classification (`type_mismatch`, `cost_exceeded`, `effect_violation`, `error_unhandled`) and `fix_hints`. This is richer than typical compiler errors:
 
 - `root_cause` categorization lets the Agent choose a recovery strategy without natural-language parsing
 - `fix_hints` provide specific, actionable suggestions
@@ -1148,7 +1148,7 @@ All hole-related commands support `--json` for machine consumption.
         "order": [],
         "validated": ["order"]
       },
-      "capabilities": ["Inventory", "PaymentGateway"],
+      "available_effects": ["Inventory", "PaymentGateway"],
       "errors_to_handle": ["PaymentFailed"],
       "cost_budget": {
         "budget_total": 5000,
@@ -1160,7 +1160,7 @@ All hole-related commands support `--json` for machine consumption.
           "name": "gateway_charge",
           "type_match": 1.0,
           "cost_fit": 0.92,
-          "capability_fit": 1.0,
+          "required_effects_fit": 1.0,
           "error_coverage": 1.0,
           "overall": 0.97
         }
@@ -1309,7 +1309,7 @@ Rejected. RETRY adds state machine complexity without new information — REJECT
 Agda's holes (written `?` or `{! !}`) are the closest precedent. Agda provides typed holes with goal type, context bindings, and refinement commands. Key differences from Spore:
 
 - Agda holes are interactive (Emacs/VS Code mode); Spore holes are CLI/JSON-first
-- Agda has no cost system, capability system, or scoring vectors
+- Agda has no cost system, effect system, or scoring vectors
 - Agda has no concept of parallel Agent filling
 - Agda holes can appear in type positions; Spore separates type holes from value holes
 
@@ -1333,8 +1333,8 @@ GHC's `_` syntax produces type error messages listing the expected type and bind
 
 Lean 4's `sorry` and `_` produce goal states with the expected type and local context. Lean's tactic mode allows interactive proof construction. Differences:
 
-- Lean is proof-oriented; Spore is software-engineering-oriented (cost, capabilities, errors)
-- Lean has no cost budget or capability constraints on holes
+- Lean is proof-oriented; Spore is software-engineering-oriented (cost, effects, errors)
+- Lean has no cost budget or effect constraints on holes
 - Lean has no parallel fill protocol
 
 ### Rust `todo!()` / TypeScript `// TODO`

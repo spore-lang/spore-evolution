@@ -145,7 +145,7 @@ This is also **proposed CLI surface**, not current shipped behavior. In the
 current implementation, project mode is only reached when the explicit file path
 passed to `spore run` resolves to a manifest-backed entry under `src/`. When
 that happens, the selected entry must satisfy both the Platform startup
-signature and the selected Platform package's `[platform].handles` capability
+signature and the selected Platform package's `[platform].handled-effects` effect
 contract.
 
 ### Future example: passing script or entry arguments
@@ -437,7 +437,7 @@ project-backed entry resolution.
   - show the value of copyable, low-ceremony scripts
 
 Spore differs by combining these ideas with a stronger project model,
-capability-gated Platform execution, and agent-oriented reproducibility.
+effect-gated Platform execution, and agent-oriented reproducibility.
 
 ## Backward compatibility and migration
 

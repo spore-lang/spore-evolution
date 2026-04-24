@@ -4,7 +4,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## A
 
-**Atomic capability** (SEP-0003): One of the 10 built-in intent-oriented atomic effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit. In compiler/tooling contexts, these effect names make up the checked capability set.
+**Atomic effect** (SEP-0003): One of the 10 built-in intent-oriented atomic effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit. In compiler/tooling contexts, these effect names form the checked effect set.
 
 **`Add`** (SEP-0002): Compiler-known trait for the `+` operator, enabling operator overloading on user-defined types.
 
@@ -20,13 +20,13 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## C
 
-**Capability** (SEP-0003): A named permission that a function must hold to perform certain effects. Also serves as a trait on execution context (SEP-0002).
+**Declared effects** (SEP-0003): The effect names explicitly written on a function, module, or manifest surface.
 
-**Capability ceiling** (SEP-0003, SEP-0008): The maximum set of capabilities available to a scope. Function-level `uses [...]` clauses are standardized today; broader module/project ceilings remain reserved follow-up design space.
+**Effect ceiling** (SEP-0003, SEP-0008): The maximum set of effects available to a scope. Function-level `uses [...]` clauses are standardized today; broader module/project ceilings remain reserved follow-up design space.
 
-**Capability narrowing** (SEP-0003): Restricting the available capability set when entering a nested scope, ensuring inner code cannot exceed outer permissions.
+**Effect narrowing** (SEP-0003): Restricting the available effect set when entering a nested scope, ensuring inner code cannot exceed outer permissions.
 
-**Capability set (CapSet)** (SEP-0003): An unordered collection of capabilities associated with a function or scope, written as `uses [Cap1, Cap2]`.
+**Effect set (EffectSet)** (SEP-0003): An unordered collection of effects associated with a function or scope, written as `uses [Effect1, Effect2]`.
 
 **`Clone`** (SEP-0002): Compiler-known trait for explicitly duplicating a value.
 
@@ -56,7 +56,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Div`** (SEP-0002): Compiler-known trait for the `/` operator, enabling operator overloading on user-defined types.
 
-**Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (capability), K (cost), M (module), W (warning).
+**Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (effect), K (cost), M (module), W (warning).
 
 **Default entry** (SEP-0008): The manifest-selected entry used when project commands omit an explicit entry name.
 
@@ -68,11 +68,11 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
 
-**Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the capability system.
+**Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the effect system.
 
 **Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written as `effect FileIO = FileRead | FileWrite`.
 
-**Effect handler** (SEP-0008): Platform-provided implementation of a capability's operations, connecting `foreign fn` declarations to native code.
+**Effect handler** (SEP-0008): Platform-provided implementation of an effect's operations, connecting `foreign fn` declarations to native code.
 
 **Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant1(T), Variant2 }`.
 
@@ -88,11 +88,11 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Hash`** (SEP-0002): Compiler-known trait for computing hash values, often required alongside `Eq` for use in hash-based collections.
 
-**Hole** (SEP-0005): A typed placeholder in source code written as `?name`, representing incomplete code that carries type, capability, and cost context for agent-assisted completion.
+**Hole** (SEP-0005): A typed placeholder in source code written as `?name`, representing incomplete code that carries type, effect, and cost context for agent-assisted completion.
 
-**Hole context** (SEP-0005): The full type environment, capability set, cost budget, and dependency information associated with a typed hole.
+**Hole context** (SEP-0005): The full type environment, effect set, cost budget, and dependency information associated with a typed hole.
 
-**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, capability, and cost dependencies for parallel fill scheduling.
+**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, effect, and cost dependencies for parallel fill scheduling.
 
 **Hole state machine** (SEP-0005): Lifecycle of a hole: Open → Filling → Filled → Accepted.
 
@@ -110,7 +110,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Mul`** (SEP-0002): Compiler-known trait for the `*` operator, enabling operator overloading on user-defined types.
 
-**Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and capability requirements.
+**Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and effect requirements.
 
 ## N
 
@@ -146,9 +146,9 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to Spore, following a structured review process.
 
-**Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, capabilities), used for dependency tracking — a change in sig hash invalidates all callers.
+**Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, required effects), used for dependency tracking — a change in sig hash invalidates all callers.
 
-**`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` capability.
+**`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` effect.
 
 **`Sub`** (SEP-0002): Compiler-known trait for the `-` operator, enabling operator overloading on user-defined types.
 
@@ -172,7 +172,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## U
 
-**`uses` clause** (SEP-0003): Annotation on a function or module declaring required capabilities, written as `uses [Cap1, Cap2]`.
+**`uses` clause** (SEP-0003): Annotation on a function or module declaring required effects, written as `uses [Effect1, Effect2]`.
 
 ## V
 

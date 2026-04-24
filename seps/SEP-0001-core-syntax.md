@@ -324,7 +324,7 @@ The full signature order is:
 ```text
 fn name[T](params) -> ReturnType ! ErrorSet
 where T: Bound
-uses [effects]
+uses [Effect1, Effect2]
 cost ≤ N
 spec {
     example "...": ...
@@ -1358,7 +1358,7 @@ At minimum, the shared hole object includes:
 - `expected_type` / `type_inferred_from`
 - `function` / `enclosing_signature`
 - `bindings` / `binding_dependencies`
-- `capabilities`, `errors_to_handle`, `cost_budget`
+- `effects`, `errors_to_handle`, `cost_budget`
 - `candidates`, `dependent_holes`, `confidence`, `error_clusters`
 
 When a function has both a `spec` block and a hole body, that shared hole object may surface the `spec` items as additional behavioral context for tooling. The authoritative transport and evolution rules remain in SEP-0005 so SEP-0001 does not accidentally freeze a stale field layout.
@@ -1936,7 +1936,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 12. **Error type subtyping**: If function `f` declares `! NetworkError` and function `g` declares `! NetworkError | ParseError`, can `g` call `f` directly? How does error set subtyping work?
 
-13. **`property` with `uses`**: If a property calls a function that has side effects, what capability scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
+13. **`property` with `uses`**: If a property calls a function that has side effects, what effect scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
 
 14. **Future trait-level behavioral contracts**: Should a later SEP allow `spec` blocks on trait methods, and if so how should implementations inherit or refine them? This amendment leaves trait-level `spec` syntax and semantics unspecified.
 
