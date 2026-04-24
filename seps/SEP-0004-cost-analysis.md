@@ -828,7 +828,6 @@ Bounded types provide compile-time size information for cost verification:
 ```spore
 fn process_batch(items: List[Order, max: 500]) -> BatchResult ! TooLarge
     cost ≤ 25000
-    uses [Compute]
 {
     items |> map(|order| validate(order)) |> fold(BatchResult.empty(), merge)
 }
@@ -848,13 +847,11 @@ Foreign functions have no Spore body for the compiler to analyse. They **must** 
 
 ```spore
 extern fn c_sort[T](data: List[T]) -> List[T]
-    uses [Compute]
     cost ≤ n * log(n)    // declared, not computed; n = len(data)
 ```
 
 ```spore
 extern fn openssl_encrypt(data: Bytes, key: Key) -> Bytes ! CryptoError
-    uses [Compute]
     cost ≤ len(data) * 3 + 500
 ```
 
