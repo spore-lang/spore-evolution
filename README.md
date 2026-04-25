@@ -9,7 +9,7 @@ This repository is the long-lived home for major language, tooling, and process 
 - `drafts/` — unnumbered proposal drafts under active discussion
 - `seps/` — numbered SEP documents and historical process records
 - `templates/` — authoring templates for new proposals
-- `schemas/` — machine-readable rules for SEP metadata
+- `schemas/` — machine-readable rules for SEP metadata and shared machine contracts
 - `scripts/` — repository validation and automation helpers
 
 ## Current entry points
