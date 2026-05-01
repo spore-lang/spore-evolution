@@ -46,6 +46,18 @@ def require_int(entry: dict[str, object], key: str, errors: list[str], scope: st
     return None
 
 
+def resolve_schema_path(file_name: str) -> tuple[Path | None, str | None]:
+    contracts_root = CONTRACTS_ROOT.resolve()
+    schema_path = (CONTRACTS_ROOT / file_name).resolve()
+
+    try:
+        schema_path.relative_to(contracts_root)
+    except ValueError:
+        return None, f"`file` must stay within `{CONTRACTS_ROOT}`: {file_name}"
+
+    return schema_path, None
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -102,7 +114,11 @@ def main() -> int:
         if file_name is None:
             continue
 
-        schema_path = CONTRACTS_ROOT / file_name
+        schema_path, path_error = resolve_schema_path(file_name)
+        if path_error is not None:
+            errors.append(f"{scope}: {path_error}")
+            continue
+
         if not schema_path.exists():
             errors.append(f"{scope}: schema file does not exist: {schema_path}")
             continue
