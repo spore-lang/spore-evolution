@@ -4,6 +4,25 @@ Proposal repository for the Spore programming project.
 
 This repository is the long-lived home for major language, tooling, and process proposals that affect Spore as a whole.
 
+## Release-safety notice
+
+The SEPs in this repository are design records and proposal texts. They are not,
+by themselves, the current implementation truth, a compatibility guarantee, or a
+public release contract for Spore.
+
+All numbered SEPs are currently `Draft`. During this bootstrap phase, readers
+should expect some examples and terminology to lag behind the implementation.
+For current release behavior, installation guidance, supported syntax, and
+implementation status, use the implementation repository first:
+
+- [`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md)
+- [`spore/docs/DESIGN.md`](https://github.com/spore-lang/spore/blob/main/docs/DESIGN.md)
+
+In particular, older SEP examples may use historical spellings such as
+`String`/`Unit`/`Int`/`Float` or scalar cost forms such as `cost ≤ expr` and
+`@cost`. Current implementation-facing docs use the active primitive spellings
+and the four-slot `cost [compute, alloc, io, parallel]` form where applicable.
+
 ## What lives here
 
 - `drafts/` — unnumbered proposal drafts under active discussion

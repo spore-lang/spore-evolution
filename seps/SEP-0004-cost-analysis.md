@@ -22,6 +22,14 @@ superseded_by: null
 
 This SEP specifies Spore's compile-time cost analysis system — a three-tier mechanism that statically determines or verifies upper bounds on resource consumption for every function. The system operates along four cost dimensions — **compute(op)**, **alloc(cell)**, **io(call)**, **parallel(lane)** — and leverages the fact that Spore has **no loops** (all iteration is expressed via recursion and higher-order functions) to make cost analysis equivalent to recursion analysis.
 
+> **Release-safety note**: This is a `Draft` design record, not the current
+> implementation contract. Some examples below intentionally preserve older
+> proposal syntax such as `cost ≤ expr` and `@unbounded`. For current release
+> behavior and active cost syntax, start with
+> [`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md),
+> which documents the four-slot `cost [compute, alloc, io, parallel]` form used
+> by implementation-facing examples.
+
 The three tiers are:
 
 1. **Tier 1 — Automatic structural recursion detection** (~70% of functions): the compiler detects that one argument strictly decreases along a well-founded relation on every recursive call and automatically infers a cost bound.

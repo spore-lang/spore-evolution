@@ -214,6 +214,14 @@ Maintainers may still add merge-summary comments when useful, but Spore does not
 
 SEP status should describe the **decision state of the proposal**, not the rollout or maturity state of its implementation.
 
+SEPs are design records for language, tooling, and process discussion. They are
+not, by themselves, the current implementation truth, a compatibility guarantee,
+or a public release contract. Public readers who need current release behavior
+should start with the implementation repository, especially
+[`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md)
+and
+[`spore/docs/DESIGN.md`](https://github.com/spore-lang/spore/blob/main/docs/DESIGN.md).
+
 In particular:
 
 - `Accepted` means the design direction is approved
@@ -235,9 +243,10 @@ This separation keeps SEP status focused on design governance rather than releas
 
 During Spore's bootstrap phase, maintainers may keep repository-defining SEPs in `Draft`
 while the process, terminology, and review mechanics are still settling. In this phase,
-`Draft` means "still revisable as process text," not "non-authoritative." Repository
-planning, templates, and follow-on SEPs may still treat these draft SEPs as the current
-design baseline until they are explicitly superseded or replaced.
+`Draft` means "still revisable as process text," not "released behavior." Repository
+planning, templates, and follow-on SEPs may still treat these draft SEPs as the working
+design baseline until they are explicitly superseded or replaced, but external release
+expectations should come from implementation docs, release notes, and shipped artifacts.
 
 ## Roles and responsibilities
 
