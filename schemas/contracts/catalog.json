@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "catalog": "https://github.com/spore-lang/spore-evolution/schemas/contracts/catalog.json",
+  "owner": {
+    "repository": "spore-lang/spore-evolution",
+    "path": "schemas/contracts"
+  },
+  "schemas": [
+    {
+      "name": "spore-registry-index-config",
+      "title": "Spore registry sparse index config",
+      "version": 1,
+      "status": "active",
+      "file": "spore-registry-index-config.v1.schema.json",
+      "schema_id": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json",
+      "instances": [
+        {
+          "producer": "spore-registry",
+          "route": "/api/v1/index/config.json"
+        }
+      ]
+    }
+  ]
+}

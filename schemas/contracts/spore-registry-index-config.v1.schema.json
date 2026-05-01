@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json",
+  "title": "Spore registry sparse index config",
+  "description": "Versioned sparse index configuration published by spore-registry and owned canonically by spore-evolution/schemas/contracts.",
+  "type": "object",
+  "required": [
+    "version",
+    "schema",
+    "schema_catalog",
+    "dl",
+    "api",
+    "protocol",
+    "hash_algorithm",
+    "auth_required"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "schema": {
+      "type": "string",
+      "const": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json"
+    },
+    "schema_catalog": {
+      "type": "string",
+      "const": "https://github.com/spore-lang/spore-evolution/schemas/contracts/catalog.json"
+    },
+    "dl": {
+      "type": "string",
+      "format": "uri"
+    },
+    "api": {
+      "type": "string",
+      "format": "uri"
+    },
+    "protocol": {
+      "type": "string",
+      "const": "sparse"
+    },
+    "hash_algorithm": {
+      "type": "string",
+      "minLength": 1
+    },
+    "auth_required": {
+      "type": "boolean"
+    }
+  }
+}
