@@ -13,10 +13,8 @@ public release contract for Spore.
 All numbered SEPs are currently `Draft`. During this bootstrap phase, readers
 should expect some examples and terminology to lag behind the implementation.
 For current release behavior, installation guidance, supported syntax, and
-implementation status, use the implementation repository first:
-
-- [`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md)
-- [`spore/docs/DESIGN.md`](https://github.com/spore-lang/spore/blob/main/docs/DESIGN.md)
+implementation status, use the implementation repository first: `spore/README.md`
+and `spore/docs/DESIGN.md`.
 
 In particular, older SEP examples may use historical spellings such as
 `String`/`Unit`/`Int`/`Float` or scalar cost forms such as `cost ≤ expr` and

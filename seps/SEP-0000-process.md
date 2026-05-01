@@ -217,10 +217,8 @@ SEP status should describe the **decision state of the proposal**, not the rollo
 SEPs are design records for language, tooling, and process discussion. They are
 not, by themselves, the current implementation truth, a compatibility guarantee,
 or a public release contract. Public readers who need current release behavior
-should start with the implementation repository, especially
-[`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md)
-and
-[`spore/docs/DESIGN.md`](https://github.com/spore-lang/spore/blob/main/docs/DESIGN.md).
+should start with the implementation repository, especially `spore/README.md`
+and `spore/docs/DESIGN.md`.
 
 In particular:
 

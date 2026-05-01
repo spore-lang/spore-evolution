@@ -25,10 +25,10 @@ This SEP specifies Spore's compile-time cost analysis system — a three-tier me
 > **Release-safety note**: This is a `Draft` design record, not the current
 > implementation contract. Some examples below intentionally preserve older
 > proposal syntax such as `cost ≤ expr` and `@unbounded`. For current release
-> behavior and active cost syntax, start with
-> [`spore/README.md`](https://github.com/spore-lang/spore/blob/main/README.md),
-> which documents the four-slot `cost [compute, alloc, io, parallel]` form used
-> by implementation-facing examples.
+> behavior and active cost syntax, start with the implementation repository's
+> `spore/README.md`, which documents the four-slot
+> `cost [compute, alloc, io, parallel]` form used by implementation-facing
+> examples.
 
 The three tiers are:
 
