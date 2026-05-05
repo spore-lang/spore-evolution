@@ -28,7 +28,9 @@ This SEP specifies Spore's compile-time cost analysis system — a three-tier me
 > behavior and active cost syntax, start with the implementation repository's
 > `spore/README.md`, which documents the four-slot
 > `cost [compute, alloc, io, parallel]` form used by implementation-facing
-> examples.
+> examples. The checked-residual-budgeting rules added in this SEP describe the
+> target behavior of the current wave without adding any new user-facing
+> subtraction syntax.
 
 The three tiers are:
 
@@ -185,6 +187,21 @@ $ sporec --query-cost merge_sort
 }
 ```
 
+### Checked residual budgeting (target behavior of this wave)
+
+Users declare a **total** budget for a function. The checker then reasons about
+how much of that budget remains at each program point.
+
+- Source-level declarations stay aggregate: `cost [compute, alloc, io, parallel]`
+- The compiler internally tracks a **residual budget** after each checked prefix
+- Residuals may be surfaced in diagnostics, HoleReport payloads, or debugging
+  tools, but they are **not** a new source-language arithmetic feature
+
+In other words, the language does **not** expose user-facing budget subtraction
+such as `cost [n - 1, ...]` or `remaining_cost(...)`. Residual budgeting is a
+checker concept used to explain whether a call, handler installation, or hole
+still fits within the enclosing declaration.
+
 ### Summary of the three tiers
 
 ```text
@@ -273,6 +290,37 @@ Every system call (file read/write, network request, stdio, random number genera
 | Parallel `parallel { A, B }` | C, A, W: `max(cost(A), cost(B)) + sync_overhead`; P: `sum(P(A), P(B))` |
 
 > **Concurrent sync overhead.** The `sync_overhead` is a configurable constant (default: 0) representing the synchronisation cost of joining parallel branches. It can be set in `spore.toml` as `[cost] sync_overhead = 10`. When set to 0 (the default), the parallel cost reduces to a simple `max`. Projects requiring precise modelling of fork/join overhead should configure this parameter.
+
+#### Checked residual budgeting
+
+Let `C_declared` be the function's declared cost vector and `K_prefix(p)` be the
+cost accumulated by the checker before program point `p`. A subexpression `e`
+checked at `p` is valid iff:
+
+```text
+K_prefix(p) ⊕ K(e) ≤ C_declared
+```
+
+The checker may report a residual vector `R(p)` satisfying:
+
+```text
+K_prefix(p) ⊕ R(p) ≤ C_declared
+```
+
+and use the greatest such pointwise vector as the displayed "remaining budget."
+This is equivalent to internal pointwise subtraction over already-known costs,
+but that subtraction remains an implementation detail rather than a source
+construct.
+
+Consequences:
+
+1. **Holes** inherit a residual budget from the enclosing prefix, which is why
+   SEP-0005 can expose per-hole remaining cost without inventing new syntax.
+2. **Handlers** are checked the same way: the enclosing scope must have enough
+   residual budget for both the handled body and any handler implementation
+   obligations that escape via discharge (see SEP-0003).
+3. **Diagnostics stay canonical**: the user sees a declared total budget plus a
+   reported residual, not a requirement to write explicit budget arithmetic.
 
 ### Formal cost judgments
 
@@ -391,6 +439,11 @@ Var      ::= [a-z][a-z0-9_]*                       (* Lowercase identifier *)
 | Variable exponents `n^m` | Pushes comparison into the exponential polynomial domain, losing polynomial decidability |
 
 > **Note on subtraction discrepancy.** The cost-model spec (§6) includes subtraction in its symbolic cost operators (e.g., `(len(list) - 1) × cost(f)` for `reduce`). However, the decidability analysis forbids subtraction in CostExpr to maintain monotonicity and non-negativity. This SEP follows the decidability spec: **subtraction is not a valid CostExpr operator**. Where subtraction appears naturally (e.g., `n - 1`), the compiler uses the conservative upper bound (e.g., `n` instead of `n - 1`). Cost formulas in the HOF table that use subtraction (e.g., `reduce`) are computed internally by the compiler but are presented to the CostExpr verifier in their upper-bound form.
+
+Residual budgeting does not weaken this rule: the checker may compute
+"remaining budget" internally, but that is not a user-authored `CostExpr`
+surface and therefore does not reintroduce subtraction into the source
+language.
 
 #### Implementation (Rust)
 

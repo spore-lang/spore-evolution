@@ -17,7 +17,7 @@ superseded_by: null
 
 # SEP-0005: Hole System & Agent Protocol
 
-> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, effect, and cost context. The current stable machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP also keeps the richer long-term agent/watch protocol — dependency-aware fill ordering, cross-hole coordination, and the `DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT` workflow — while documenting that today's `spore watch --json` still emits `compile_result` plus a summary-style `hole_graph_update`, not the full target graph payload.
+> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, effect, and cost context. The current stable machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP keeps HoleReport on the current `v0.x` lineage, documents additive target extensions such as richer effect context, residual context, and rejection reasons, and preserves the richer long-term agent/watch protocol — dependency-aware fill ordering, cross-hole coordination, and the `DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT` workflow — while documenting that today's `spore watch --json` still emits `compile_result` plus a summary-style `hole_graph_update`, not the full target graph payload.
 
 ## Summary
 
@@ -30,7 +30,7 @@ Multiple holes still form a **Hole Dependency Graph** (DAG), enabling topologica
 Key components formalized in this SEP:
 
 - **Hole syntax and semantics** (`?name`, `?name: Type`, partial functions)
-- **HoleReport v0.3** with four extensions: (A) candidate scoring vector, (B) binding dependency graph, (C) confidence & ambiguity, (D) error clusters
+- **HoleReport v0.x lineage**, with v0.3 target extensions for: (A) candidate scoring vector, (B) binding dependency graph, (C) confidence & ambiguity, (D) error clusters
 - **Hole Dependency Graph** with layered topological sort and parallel fill scheduling
 - **Agent state machine protocol** for autonomous hole filling
 - **JSON output protocol** via `--json` flag and NDJSON event stream
@@ -56,13 +56,13 @@ Making holes a first-class language construct enables:
 - **Compiler-mediated collaboration**: The compiler produces HoleReports that are *information-self-sufficient* — an Agent reading a report needs zero additional context to attempt a fill.
 - **Incremental development**: Functions transition smoothly from `partial` to `complete`. Downstream callers are not invalidated because holes are body-only — they never affect signature hashes.
 - **Dependency-ordered filling**: The compiler can analyze data-flow between holes, build a DAG, and recommend an optimal filling order.
-- **Cost-bounded filling**: Each hole carries a remaining cost budget inherited from the enclosing function's `cost ≤ N` clause.
+- **Cost-bounded filling**: Each hole carries a remaining cost budget inherited from the enclosing function's declared checked budget.
 
 ### Why the Agent Protocol Matters
 
 AI Agents are not humans reading error messages. They are stateless processes that parse structured output. Spore's hole system is designed with Agents as a *primary* consumer:
 
-- **HoleReport v0.3** replaces human-readable strings (e.g., `match_quality: "partial"`) with machine-comparable scoring vectors.
+- **HoleReport v0.x** keeps evolving by additive fields rather than by a major naming reset; the current target v0.3 additions replace human-readable strings (e.g., `match_quality: "partial"`) with machine-comparable scoring vectors.
 - **Binding dependency graphs** let Agents understand data-flow without re-analyzing source code.
 - **Confidence indicators** tell Agents when to auto-fill vs. when to request human guidance.
 - **NDJSON event streams** allow Agents to consume compiler output in real-time, reacting to each incremental compilation result.
@@ -239,9 +239,14 @@ pub struct HoleInfo {
 
 The `HoleReport` aggregates all holes in a module, with `to_json()` for machine consumption. Hand-rolled JSON serialization is used in v0.1 to minimize dependencies; serde migration is tracked as future work (see Unresolved Questions §10).
 
-### HoleReport v0.3
+### HoleReport v0.3 (within the v0.x lineage)
 
-HoleReport v0.3 is a **superset** of v0.2. The schema version advances from `"spore/hole-report/v1"` to `"spore/hole-report/v2"`. All v0.2 fields are preserved; four new extensions are added.
+HoleReport v0.3 is a **superset** of v0.2 on the same `v0.x` line. The
+project should not rename this family to a detached `v3`/`v1`/`v2` scheme just
+because additive fields land. Current implementation payloads are effectively
+unversioned shared objects; if/when an explicit schema tag is emitted, it
+should remain on a `spore/hole-report/v0.x` identifier. All v0.2 fields are
+preserved; four new extensions are added.
 
 #### Base Fields (v0.2)
 
@@ -332,6 +337,22 @@ overall = 0.40 × type_match + 0.20 × cost_fit + 0.25 × required_effects_fit +
 Weights are hard-coded in the compiler. Candidates are sorted by `overall` descending, with `type_match` as tiebreaker, then `cost_fit`, then lexicographic name for stability.
 
 Each candidate also includes an `adjustments` array of human-readable notes (e.g., `"needs type conversion: Option[Card] → Card"`, `"cost near budget limit"`).
+
+#### Prospective additive extensions (not yet stable output)
+
+The next HoleReport additions should remain on the same `v0.x` lineage and are
+expected to be **additive** rather than schema-breaking:
+
+1. **`effect_context`** — active handler stack, already-discharged effects, and
+   the visible effect aliases / interfaces at the hole site.
+2. **`residual_context`** — remaining checked budgets after the current prefix,
+   including residual cost and any still-unhandled effect / error obligations.
+3. **`rejection_reasons`** — structured VERIFY/REJECT feedback explaining why a
+   proposed fill failed (for example: `type_mismatch`, `effect_leak`,
+   `budget_exceeded`, `duplicate_handler_match`).
+
+These fields are target behavior for a future v0.x slice. Today's stable output
+remains the shared hole object described above.
 
 #### Extension B: Binding Dependency Graph
 
@@ -753,7 +774,7 @@ Current watch output is compile-result oriented; richer transport states such as
 
 **ACCEPT**: Compilation succeeded. The hole is marked `filled`. The dependency graph is recalculated, possibly unlocking blocked holes. The Agent returns to DISCOVER.
 
-**REJECT**: Compilation failed. Today that appears as a watch `compile_result` with `status: "error"` plus compiler diagnostics; the richer structured rejection payload below remains the target transport shape:
+**REJECT**: Compilation failed. Today that appears as a watch `compile_result` with `status: "error"` plus compiler diagnostics; the richer structured rejection payload below remains the target transport shape. A future additive `rejection_reasons` field should capture the normalized machine causes without changing the current v0.x lineage:
 
 ```json
 {
@@ -972,7 +993,9 @@ This is the central section of SEP-0005. The hole system is designed with AI Age
 
 ### Information Self-Sufficiency
 
-A HoleReport v0.3 is **self-contained**. An Agent reading a report needs zero additional context to attempt a fill. The report includes:
+A HoleReport on the current v0.x lineage is **self-contained**. An Agent
+reading a report needs zero additional context to attempt a fill. The report
+includes:
 
 1. **What to produce**: `type.expected` with `type.inferred_from` explaining why
 2. **What is available**: `bindings` with types, simulated values, and `binding_dependencies` showing data-flow
@@ -1347,10 +1370,16 @@ These are runtime markers with no compiler support. They provide no type informa
 
 ### Schema Versioning
 
-- HoleReport v0.3 uses schema `"spore/hole-report/v2"`
+- HoleReport stays on the current `v0.x` lineage; additive extensions must not
+  force a detached `v3` naming story
+- Current implementation payloads are shared JSON objects without an explicit
+  schema tag; any future schema identifier should stay in the
+  `spore/hole-report/v0.x` family
 - All v0.2 fields are preserved with identical semantics
-- New v0.3 fields (`binding_dependencies`, `confidence`, `error_clusters`, `candidates[].scores`, `candidates[].overall`, `candidates[].adjustments`) are additive
-- Tools that do not recognize v0.3 fields can safely ignore them
+- New v0.3 fields (`binding_dependencies`, `confidence`, `error_clusters`,
+  `candidates[].scores`, `candidates[].overall`, `candidates[].adjustments`)
+  are additive
+- Tools that do not recognize newer v0.x fields can safely ignore them
 
 ### CLI Flags
 

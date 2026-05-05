@@ -15,7 +15,7 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines Spore's effect system as a flat effect-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The canonical surface syntax uses explicit `effect` declarations, `perform Effect.op(...)`, top-level `handler`, and `handle { ... } with { ... }`, while semantic checking remains a subset test over effect sets. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, handler semantics, narrowing rules, and diagnostics.
+> **Executive Summary**: Defines Spore's effect system as a flat effect-set model with 10 built-in intent-oriented atomic effects (Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit) plus user-defined effects. The compositional model treats handlers as explicit discharge points: normal handlers, mock handlers, and Platform handlers are the same semantic object, with handled effects removed from a local residual set and handler implementation effects added back to the outer requirement. Concrete grammar is centralized in SEP-0001; this SEP specifies effect algebra, unified handler semantics, discharge rules, narrowing rules, and diagnostics.
 
 ## Summary
 
@@ -26,6 +26,12 @@ The built-in effect vocabulary is **intent-oriented**: each built-in effect answ
 The design is intentionally **flat and monomorphic**: effect sets are finite sets of atomic identifiers with no effect variables, no row types, and no effect polymorphism. Named aliases (`effect X = A | B`) provide ergonomics without adding expressiveness. Higher-order functions such as `map` accept only pure (`uses []`) closures; effectful iteration is expressed through `parallel_scope` + `spawn`.
 
 Concrete surface syntax for `effect`, `handler`, `perform`, and `handle ... with` is defined in SEP-0001. This SEP focuses on semantics, algebra, typing, protocol fields, and diagnostics.
+
+> **Release-safety note**: Handler discharge and the unified declaration form in
+> this SEP describe the target behavior of the current compositional-semantics
+> wave. The shipping implementation already checks explicit `perform` usage and
+> effect sets, but parser/runtime support for the full unified handler surface is
+> still being completed.
 
 ---
 
@@ -606,6 +612,63 @@ Spawn ∈ S_scope    S_body ⊆ S_scope
 
 > **Note on spawn purity.** The `spawn` expression itself is **pure** — it merely creates a task descriptor (of type `Task[T]`). No side effect is executed at the point of `spawn`; the effect occurs when the task is later scheduled. This is why a closure containing only `spawn { ... }` satisfies `uses []` when passed to `map` or other pure-closure-requiring combinators.
 
+### 8.1 Handler discharge semantics
+
+Handlers are the effect-system's **discharge operator**. A handler declaration
+names the effects it covers and the implementation effects it may itself use:
+
+```spore
+handler Name(params?) handles [EffectA, EffectB] uses [ImplEffects] {
+    impl EffectA { ... }
+    impl EffectB { ... }
+}
+```
+
+This is the preferred surface shape for the current wave. Normal handlers,
+mock handlers used in tests, and Platform-installed handlers are all instances
+of this same semantic form; "Platform handler" is a deployment role, not a
+distinct language feature.
+
+Let:
+
+- `S_body` be the effect set collected from the handled block before discharge
+- `H` be the union of effects listed in active handler declarations
+- `S_impl` be the union of all handler implementation effect sets
+
+Then the enclosing residual effect set is:
+
+```text
+residual(handle e with h̄) = (S_body \ H) ∪ S_impl
+```
+
+Intuition:
+
+1. effects covered by the active handlers stop leaking outward;
+2. any effects required to *run the handlers themselves* still count; and
+3. unhandled effects remain visible to the outer scope.
+
+This rule is purely semantic. Users still declare ordinary `uses [...]`
+signatures; there is no separate user-facing "effect subtraction" syntax.
+
+#### Coverage and duplicate-match rules
+
+A handler scope is well-formed only if all of the following hold:
+
+1. **Interface completeness.** For every `Effect` listed in `handles [...]`,
+   the handler provides an `impl Effect { ... }` block covering the declared
+   operations of that effect interface.
+2. **Unique local match.** Within one `with` block, the same `Effect.op`
+   cannot be matched by two sibling handlers or two sibling inline arms.
+3. **Innermost wins.** If nested handler scopes both cover an operation, the
+   innermost matching handler is chosen.
+4. **Explicit leakage.** A `perform Effect.op(...)` not covered by the active
+   handler stack remains in the residual effect set and must still be justified
+   by the enclosing `uses [...]`.
+
+Inline `on Effect.op(...) => ...` arms are semantic sugar for anonymous
+single-scope handlers and therefore obey the same discharge and duplicate-match
+rules.
+
 ### 9. Effect checking algorithm
 
 The compiler performs effect checking during type-checking as a single pass:
@@ -757,44 +820,67 @@ This expands semantically to the union of the two effects and does not define a 
 
 ### 14. Effect handlers
 
-Effect handlers provide concrete implementations for effect operations, enabling testability, mockability, and platform abstraction:
+Effect handlers provide concrete implementations for effect operations,
+enabling testability, mockability, and platform abstraction. Spore uses a
+**unified handler model**: ordinary handlers, mock handlers, and Platform
+handlers all use the same declaration shape and discharge rules.
 
 #### Handler definition
 
 ```spore
-handler Console as MockConsole(output: List[Str]) {
-    fn println(msg: Str) -> () { self.output.push(msg) }
-    fn read_line() -> Str ! IoError { "mock input" }
+handler MockConsole(output: List[Str]) handles [Console] uses [] {
+    impl Console {
+        fn println(msg: Str) -> () { self.output.push(msg) }
+        fn read_line() -> Str ! IoError { "mock input" }
+    }
 }
 
-handler FileRead as RealFileRead(root: Str) {
-    fn read_file(path: Str) -> Str ! IoError {
-        platform.fs.read(self.root + "/" + path)
-    }
-    fn list_dir(path: Str) -> List[Str] ! IoError {
-        platform.fs.list(self.root + "/" + path)
+handler FixtureFiles(files: Map[Str, Str])
+handles [FileRead]
+uses []
+{
+    impl FileRead {
+        fn read_file(path: Str) -> Str ! IoError {
+            self.files.get(path).unwrap_or("")
+        }
+
+        fn list_dir(path: Str) -> List[Str] ! IoError {
+            []
+        }
     }
 }
 ```
 
+The first example is a mock handler. The second shows the same declaration
+shape applied to a different effect family. A Platform package installs
+handlers using the same model; the difference is only *where* the handler
+instance comes from (project startup / adapter wiring) rather than any special
+Platform-only semantics.
+
 #### Handler binding
 
-The canonical handler form is `handle { ... } with { ... }`. The `with` block may contain inline effect arms via `on Effect.op(...) => ...` and/or named handler installations via `use HandlerName { ... }`. The `use` payload initializes the handler instance fields declared in `handler <Effect> as <HandlerName>(...)`, and duplicate matches for the same `Effect.op` inside one `with` block are errors.
+The canonical handler form is `handle { ... } with { ... }`. The `with` block
+may contain named handler installations via `use HandlerName(...)` and/or
+inline effect arms via `on Effect.op(...) => ...`. Installing a named handler
+discharges the effects listed in that handler's `handles [...]` clause and
+re-exports the handler's own `uses [...]` as residual obligations of the outer
+scope. Duplicate matches for the same `Effect.op` inside one `with` block are
+errors.
 
 ```spore
 // Bind a single named handler
 handle {
     greet("world")
 } with {
-    use MockConsole { output: [] }
+    use MockConsole(output: [])
 }
 
 // Bind multiple named handlers
 handle {
     app.run()
 } with {
-    use RealFileRead { root: "/srv/app" }
-    use MockConsole { output: [] }
+    use FixtureFiles(files: fixture_files)
+    use MockConsole(output: [])
 }
 
 // Inline handler arms remain available
@@ -814,9 +900,11 @@ effect RateLimit {
     fn check_limit(key: Str) -> Bool
 }
 
-handler RateLimit as FixedDecisionRateLimit(allowed: Bool) {
-    fn check_limit(key: Str) -> Bool {
-        self.allowed
+handler FixedDecisionRateLimit(allowed: Bool) handles [RateLimit] uses [] {
+    impl RateLimit {
+        fn check_limit(key: Str) -> Bool {
+            self.allowed
+        }
     }
 }
 ```
@@ -1013,7 +1101,13 @@ Algebraic effect handlers (as in Koka or OCaml 5) allow effects to be intercepte
 3. **Platform abstraction** — The same user code runs on different platforms by swapping handlers (e.g., browser vs. server filesystem).
 4. **Colorless functions** — Unlike async/await, effect handlers do not bifurcate the function space.
 
-Spore's handler model is intentionally simpler than full algebraic effects: handlers are lexical, non-resumable, and one-shot. A matching handler arm computes the value of the corresponding `perform` expression directly; there is no continuation capture or `resume()` path in canonical v0.1 semantics.
+Spore's handler model is intentionally simpler than full algebraic effects:
+handlers are lexical, non-resumable, and one-shot. A matching handler arm
+computes the value of the corresponding `perform` expression directly; there is
+no continuation capture or `resume()` path in canonical v0.1 semantics.
+Discharge is explicit: handled effects are removed from the local residual set,
+while handler implementation effects remain visible to the enclosing scope.
+Normal, mock, and Platform handlers all follow this same rule.
 
 Syntax: `effect` defines operations, `handler` provides implementations, `handle ... with` binds handlers at call sites. See §13-14 for full details.
 

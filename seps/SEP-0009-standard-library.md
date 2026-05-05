@@ -28,6 +28,12 @@ This SEP specifies the standard library that ships with every Spore implementati
 
 The stdlib is deliberately small. Spore follows the principle that the standard library should provide exactly the types and functions needed to write idiomatic Spore code, with everything else available as packages.
 
+> **Target-surface note**: This SEP still contains historical `std.*` examples
+> in places. For the approved compositional-semantics wave, the engineering-
+> facing helper naming is expected to use `spore.combine`, `spore.merge`,
+> `spore.order`, and `spore.laws`, and explicitly does **not** introduce a
+> user-facing `std.algebra` surface.
+
 ## Motivation
 
 Currently, SEPs 0001–0008 reference standard library items (e.g., `map`, `fold`, `Option[T]`, `Result[T, E]`, `List[T]`) without a single authoritative specification. This creates several problems:
