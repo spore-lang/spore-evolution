@@ -51,8 +51,7 @@ Currently, SEPs 0001–0008 reference standard library items (e.g., `map`, `fold
 Every Spore file implicitly has access to:
 
 ```spore
-// Primitive types (compiler-intrinsic)
-// Int, Float, Bool, String, Char, Unit, Never
+// Primitive types: I8..U64, F32, F64, Bool, Str, Unit, Never (see SEP-0002)
 
 // Algebraic types
 type Option[T] { Some(T), None }
@@ -116,17 +115,22 @@ The prelude is implicitly imported into every module. It contains:
 
 #### Primitive types
 
-| Type | Description | Default | Size |
-|------|-------------|---------|------|
-| `Int` | Canonical integer scalar (`I64` alias) | `0` | 8 bytes |
-| `Float` | Canonical floating-point scalar (`F64` alias) | `0.0` | 8 bytes |
+| Type | Description | Default | Size / notes |
+|------|-------------|---------|----------------|
+| `I8`…`I64`, `U8`…`U64` | Fixed-width integers | `0` for the chosen width | 1–8 bytes |
+| `F32`, `F64` | IEEE-754 floats | `0.0` | 4 or 8 bytes |
 | `Bool` | Boolean | `false` | 1 byte |
-| `String` | Immutable UTF-8 string | `""` | Variable |
-| `Char` | Unicode scalar value | — | 4 bytes |
+| `Str` | Immutable UTF-8 string | `""` | Variable |
 | `Unit` | Zero-valued type | `()` | 0 bytes |
 | `Never` | Bottom type (uninhabited) | — | 0 bytes |
 
+**No `Char`.** Unicode scalars are represented as `Str` values (typically length 1). Character predicates and conversions live in `stdlib/char.sp` (`is_digit`, `char_to_int`, …). This matches `spore` PR #113.
+
+**Literals.** In the reference type checker, unsuffixed integer literals default to **`I64`** and float literals to **`F64`**. Older spec examples may still say `Int` / `Float` — see SEP-0002 for the informal shorthand convention.
+
 #### Algebraic types
+
+Prelude **`List[T]`** is always **unbounded** and is the canonical sequence type. **`Vec[T, max: N]`** exists for the minority of APIs that require a compile-time `max` in the type (SEP-0002); omit it unless those generics truly buy you something `List` + `cost`/refinements cannot.
 
 ```spore
 type Option[T] {
@@ -221,14 +225,14 @@ fn flat_map[A, B](list: List[A], f: (A) -> List[B]) -> List[B]
 fn zip[A, B](a: List[A], b: List[B]) -> List[(A, B)]
     cost O(min(len(a), len(b)))
 
-fn enumerate[A](list: List[A]) -> List[(Int, A)]
+fn enumerate[A](list: List[A]) -> List[(I64, A)]
     cost O(len(list))
 ```
 
 #### List query functions
 
 ```spore
-fn len[A](list: List[A]) -> Int
+fn len[A](list: List[A]) -> I64
     cost O(1)
 
 fn is_empty[A](list: List[A]) -> Bool
@@ -272,13 +276,13 @@ fn concat[A](a: List[A], b: List[A]) -> List[A]
 fn reverse[A](list: List[A]) -> List[A]
     cost O(len(list))
 
-fn take[A](list: List[A], n: Int) -> List[A]
+fn take[A](list: List[A], n: I64) -> List[A]
     cost O(n)
 
-fn drop[A](list: List[A], n: Int) -> List[A]
+fn drop[A](list: List[A], n: I64) -> List[A]
     cost O(n)
 
-fn range(start: Int, end: Int) -> List[Int]
+fn range(start: I64, end: I64) -> List[I64]
     cost O(end - start)
 ```
 
@@ -296,11 +300,11 @@ fn sort_by[A](list: List[A], cmp: (A, A) -> Ordering) -> List[A]
 #### Conversion and display
 
 ```spore
-fn to_string[A](value: A) -> String
+fn to_string[A](value: A) -> Str
     where A: Display
     cost O(1)
 
-fn debug[A](value: A) -> String
+fn debug[A](value: A) -> Str
     where A: Debug
     cost O(1)
 ```
@@ -312,41 +316,41 @@ fn debug[A](value: A) -> String
 ```spore
 module std.math
 
-fn abs(x: Int) -> Int             cost O(1)
-fn abs_float(x: Float) -> Float   cost O(1)
-fn min(a: Int, b: Int) -> Int     cost O(1)
-fn max(a: Int, b: Int) -> Int     cost O(1)
-fn clamp(x: Int, lo: Int, hi: Int) -> Int  cost O(1)
+fn abs(x: I64) -> I64             cost O(1)
+fn abs_float(x: F64) -> F64   cost O(1)
+fn min(a: I64, b: I64) -> I64     cost O(1)
+fn max(a: I64, b: I64) -> I64     cost O(1)
+fn clamp(x: I64, lo: I64, hi: I64) -> I64  cost O(1)
 
 // Floating-point math
-fn sqrt(x: Float) -> Float        cost O(1)
-fn pow(base: Float, exp: Float) -> Float  cost O(1)
-fn log(x: Float) -> Float         cost O(1)
-fn log2(x: Float) -> Float        cost O(1)
-fn log10(x: Float) -> Float       cost O(1)
-fn exp(x: Float) -> Float         cost O(1)
+fn sqrt(x: F64) -> F64        cost O(1)
+fn pow(base: F64, exp: F64) -> F64  cost O(1)
+fn log(x: F64) -> F64         cost O(1)
+fn log2(x: F64) -> F64        cost O(1)
+fn log10(x: F64) -> F64       cost O(1)
+fn exp(x: F64) -> F64         cost O(1)
 
 // Trigonometric
-fn sin(x: Float) -> Float         cost O(1)
-fn cos(x: Float) -> Float         cost O(1)
-fn tan(x: Float) -> Float         cost O(1)
-fn asin(x: Float) -> Float        cost O(1)
-fn acos(x: Float) -> Float        cost O(1)
-fn atan(x: Float) -> Float        cost O(1)
-fn atan2(y: Float, x: Float) -> Float  cost O(1)
+fn sin(x: F64) -> F64         cost O(1)
+fn cos(x: F64) -> F64         cost O(1)
+fn tan(x: F64) -> F64         cost O(1)
+fn asin(x: F64) -> F64        cost O(1)
+fn acos(x: F64) -> F64        cost O(1)
+fn atan(x: F64) -> F64        cost O(1)
+fn atan2(y: F64, x: F64) -> F64  cost O(1)
 
 // Rounding
-fn floor(x: Float) -> Int         cost O(1)
-fn ceil(x: Float) -> Int          cost O(1)
-fn round(x: Float) -> Int         cost O(1)
-fn truncate(x: Float) -> Int      cost O(1)
+fn floor(x: F64) -> I64         cost O(1)
+fn ceil(x: F64) -> I64          cost O(1)
+fn round(x: F64) -> I64         cost O(1)
+fn truncate(x: F64) -> I64      cost O(1)
 
 // Constants
-let pi: Float = 3.14159265358979323846
-let e: Float = 2.71828182845904523536
-let infinity: Float
-let neg_infinity: Float
-let nan: Float
+let pi: F64 = 3.14159265358979323846
+let e: F64 = 2.71828182845904523536
+let infinity: F64
+let neg_infinity: F64
+let nan: F64
 ```
 
 #### `std.string`
@@ -354,33 +358,33 @@ let nan: Float
 ```spore
 module std.string
 
-fn length(s: String) -> Int                  cost O(1)
-fn is_empty(s: String) -> Bool               cost O(1)
-fn char_at(s: String, index: Int) -> Option[Char]  cost O(1)
-fn substring(s: String, start: Int, end: Int) -> String  cost O(end - start)
+fn length(s: Str) -> I32                  cost O(1)
+fn is_empty(s: Str) -> Bool               cost O(1)
+fn char_at(s: Str, index: I32) -> Option[Str]  cost O(1)
+fn substring(s: Str, start: I32, end: I32) -> Str  cost O(end - start)
 
-fn concat(a: String, b: String) -> String    cost O(len(a) + len(b))
-fn join(parts: List[String], sep: String) -> String
+fn concat(a: Str, b: Str) -> Str    cost O(len(a) + len(b))
+fn join(parts: List[Str], sep: Str) -> Str
     cost O(total_len(parts) + len(parts) * len(sep))
 
-fn split(s: String, sep: String) -> List[String]
+fn split(s: Str, sep: Str) -> List[Str]
     cost O(len(s))
 
-fn trim(s: String) -> String                 cost O(len(s))
-fn trim_start(s: String) -> String           cost O(len(s))
-fn trim_end(s: String) -> String             cost O(len(s))
+fn trim(s: Str) -> Str                 cost O(len(s))
+fn trim_start(s: Str) -> Str           cost O(len(s))
+fn trim_end(s: Str) -> Str             cost O(len(s))
 
-fn to_upper(s: String) -> String             cost O(len(s))
-fn to_lower(s: String) -> String             cost O(len(s))
+fn to_upper(s: Str) -> Str             cost O(len(s))
+fn to_lower(s: Str) -> Str             cost O(len(s))
 
-fn contains(s: String, pattern: String) -> Bool  cost O(len(s))
-fn starts_with(s: String, prefix: String) -> Bool  cost O(len(prefix))
-fn ends_with(s: String, suffix: String) -> Bool  cost O(len(suffix))
+fn contains(s: Str, pattern: Str) -> Bool  cost O(len(s))
+fn starts_with(s: Str, prefix: Str) -> Bool  cost O(len(prefix))
+fn ends_with(s: Str, suffix: Str) -> Bool  cost O(len(suffix))
 
-fn replace(s: String, from: String, to: String) -> String  cost O(len(s))
+fn replace(s: Str, from: Str, to: Str) -> Str  cost O(len(s))
 
-fn parse_int(s: String) -> Result[Int, ParseError]  cost O(len(s))
-fn parse_float(s: String) -> Result[Float, ParseError]  cost O(len(s))
+fn parse_int(s: Str) -> Result[I32, ParseError]  cost O(len(s))
+fn parse_float(s: Str) -> Result[F64, ParseError]  cost O(len(s))
 ```
 
 #### `std.collections`
@@ -417,7 +421,7 @@ fn values[K, V](m: Map[K, V]) -> List[V]
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)]
     cost O(len(m))
 
-fn map_size[K, V](m: Map[K, V]) -> Int
+fn map_size[K, V](m: Map[K, V]) -> I64
     cost O(1)
 
 fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V]
@@ -441,7 +445,7 @@ fn remove_from[T](s: Set[T], item: T) -> Set[T]
 fn member[T](s: Set[T], item: T) -> Bool
     cost O(1)
 
-fn set_size[T](s: Set[T]) -> Int
+fn set_size[T](s: Set[T]) -> I64
     cost O(1)
 
 fn union[T](a: Set[T], b: Set[T]) -> Set[T]
@@ -501,13 +505,13 @@ foreign fn elapsed(start: DateTime) -> Duration
     uses [Clock]
     cost O(1)
 
-fn duration_ms(d: Duration) -> Int
+fn duration_ms(d: Duration) -> I64
     cost O(1)
 
-fn duration_secs(d: Duration) -> Float
+fn duration_secs(d: Duration) -> F64
     cost O(1)
 
-foreign fn sleep(ms: Int) -> Unit
+foreign fn sleep(ms: I64) -> Unit
     uses [Clock]
     cost @unbounded
 ```
@@ -520,21 +524,21 @@ module std.json
 type JsonValue {
     JsonNull,
     JsonBool(Bool),
-    JsonInt(Int),
-    JsonFloat(Float),
-    JsonString(String),
+    JsonInt(I64),
+    JsonFloat(F64),
+    JsonString(Str),
     JsonArray(List[JsonValue]),
-    JsonObject(Map[String, JsonValue]),
+    JsonObject(Map[Str, JsonValue]),
 }
 
-fn parse_json(s: String) -> Result[JsonValue, ParseError]
+fn parse_json(s: Str) -> Result[JsonValue, ParseError]
     cost O(len(s))
 
-fn to_json[T](value: T) -> String
+fn to_json[T](value: T) -> Str
     where T: Serialize
     cost O(size(value))
 
-fn from_json[T](s: String) -> Result[T, ParseError]
+fn from_json[T](s: Str) -> Result[T, ParseError]
     where T: Deserialize
     cost O(len(s))
 ```
@@ -544,15 +548,15 @@ fn from_json[T](s: String) -> Result[T, ParseError]
 ```spore
 module std.random
 
-foreign fn random_float() -> Float
+foreign fn random_float() -> F64
     uses [Random]
     cost O(1)
 
-foreign fn random_int(min: Int, max: Int) -> Int
+foreign fn random_int(min: I64, max: I64) -> I64
     uses [Random]
     cost O(1)
 
-foreign fn uuid() -> String
+foreign fn uuid() -> Str
     uses [Random]
     cost O(1)
 
@@ -571,39 +575,39 @@ All stdlib errors conform to a base trait:
 
 ```spore
 trait Error[T] {
-    fn message(self: T) -> String
+    fn message(self: T) -> Str
 }
 ```
 
 The standard error types:
 
 ```spore
-type PanicError { Panic(String) }
+type PanicError { Panic(Str) }
 
 type IoError {
-    NotFound(String),
-    PermissionDenied(String),
-    AlreadyExists(String),
-    Other(String),
+    NotFound(Str),
+    PermissionDenied(Str),
+    AlreadyExists(Str),
+    Other(Str),
 }
 
 type HttpError {
-    ConnectionFailed(String),
-    Timeout(String),
-    StatusError(Int, String),
-    Other(String),
+    ConnectionFailed(Str),
+    Timeout(Str),
+    StatusError(I32, Str),
+    Other(Str),
 }
 
 type ParseError {
-    InvalidFormat(String),
-    UnexpectedToken(String, Int),
-    Other(String),
+    InvalidFormat(Str),
+    UnexpectedToken(Str, I32),
+    Other(Str),
 }
 
 type JsonError {
-    InvalidJson(String, Int),
-    TypeMismatch(String),
-    MissingField(String),
+    InvalidJson(Str, I32),
+    TypeMismatch(Str),
+    MissingField(Str),
 }
 ```
 
@@ -618,12 +622,12 @@ These 13 traits have special compiler support (SEP-0002). The stdlib provides th
 | `Eq` | `eq(self, other) -> Bool` | ✅ | Equality comparison |
 | `Ord` | `compare(self, other) -> Ordering` | ✅ | Total ordering |
 | `Clone` | `clone(self) -> Self` | ✅ | Deep copy |
-| `Display` | `display(self) -> String` | ❌ | Human-readable formatting |
-| `Debug` | `debug(self) -> String` | ✅ | Debug formatting |
-| `Hash` | `hash(self) -> Int` | ✅ | Hash computation |
+| `Display` | `display(self) -> Str` | ❌ | Human-readable formatting |
+| `Debug` | `debug(self) -> Str` | ✅ | Debug formatting |
+| `Hash` | `hash(self) -> I32` | ✅ | Hash computation |
 | `Default` | `default() -> Self` | ✅ | Default value |
-| `Serialize` | `serialize(self) -> List[Int]` | ✅ | Byte serialization |
-| `Deserialize` | `deserialize(bytes: List[Int]) -> Result[Self, ParseError]` | ✅ | Byte deserialization |
+| `Serialize` | `serialize(self) -> List[I32]` | ✅ | Byte serialization |
+| `Deserialize` | `deserialize(bytes: List[I32]) -> Result[Self, ParseError]` | ✅ | Byte deserialization |
 | `Add` | `add(self, other) -> Self` | ❌ | `+` operator |
 | `Sub` | `sub(self, other) -> Self` | ❌ | `-` operator |
 | `Mul` | `mul(self, other) -> Self` | ❌ | `*` operator |
@@ -687,7 +691,7 @@ The stdlib is designed for progressive discovery:
 1. **Prelude is small**: Only essential types and iteration primitives — no import ceremony for basic programs
 2. **Module names are predictable**: `std.math`, `std.string`, `std.collections` follow standard conventions
 3. **Cost annotations are readable**: `cost O(len(list))` reads naturally
-4. **Error types are descriptive**: Enum variants like `NotFound(String)` carry context
+4. **Error types are descriptive**: Enum variants like `NotFound(Str)` carry context
 5. **No hidden effects**: Every I/O function explicitly declares its effect requirements
 
 ## Agent experience impact
@@ -788,12 +792,12 @@ This is a new specification — no backward compatibility concerns. However:
 
 2. **Concurrency primitives**: `Task[T]`, `Chan[T]`, `select` are defined in SEP-0007 — should they be re-exported via `std.concurrent` or remain as language primitives?
 
-3. **String encoding**: Should `String` expose byte-level access, or only character-level? Current spec assumes UTF-8 with character indexing.
+3. **String encoding**: Should `Str` expose byte-level access, or only scalar-oriented indexing? Current spec assumes UTF-8; there is no `Char` type (length-1 `Str` values instead).
 
-4. **Numeric tower**: Should there be `Int8`, `Int16`, `Int32`, `Int64`, `UInt*` types for low-level use, or only `Int` and `Float`?
+4. **Numeric tower**: The reference implementation already exposes fixed widths (`I8`…`U64`, `F32`, `F64`). This SEP still mixes pedagogical `Int`/`Float` in some module sketches; those should converge to explicit widths over time.
 
 5. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
 
 6. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
 
-7. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `Int` → `i64` or `BigInt`?)
+7. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `I64` ↔ `i64`, `Str` ↔ UTF-8 buffer)

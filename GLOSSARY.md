@@ -164,6 +164,10 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Startup function** (SEP-0008): The callable inside the selected entry module that satisfies the Platform's startup contract. Today this is usually `main`.
 
+**`Str`** (SEP-0002): The UTF-8 text primitive in Spore surface syntax (not `String`). Single Unicode scalars use length-1 `Str` values; there is no separate `Char` type (see implementation PR #113).
+
+**Default literals** (SEP-0002): In the reference compiler (`sporec-typeck`), unsuffixed integer literals synthesize as **`I64`** and float literals as **`F64`**, unless a signature or context fixes another width (see metavariables **ι** / **φ** in SEP-0002 for other fixed sizes).
+
 ## T
 
 **`Task[T]`** (SEP-0007): Typed future representing an asynchronous computation that will produce a value of type `T`.

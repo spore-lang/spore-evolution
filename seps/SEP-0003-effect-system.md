@@ -98,10 +98,10 @@ fn greet(name: Str) uses [Console] {
 If a function needs no effects it is *pure* and the `uses` clause may be omitted entirely:
 
 ```spore
-fn add(a: Int, b: Int) -> Int {
+fn add(a: I64, b: I64) -> I64 {
     a + b
 }
-// equivalent to: fn add(a: Int, b: Int) -> Int uses [] { a + b }
+// equivalent to: fn add(a: I64, b: I64) -> I64 uses [] { a + b }
 ```
 
 ### Built-in atomic effects
@@ -204,17 +204,17 @@ but `perform Alias.println(...)` is not the canonical surface.
 Higher-order combinators such as `map`, `filter`, and `fold` accept **only pure closures** — closures whose effect set is empty:
 
 ```spore
-fn process_scores(scores: List[Int]) -> List[String] {
+fn process_scores(scores: List[I64]) -> List[Str] {
     scores
-        .filter(|s| s >= 60)              // pure: (Int) -> Bool
-        .map(|s| format("Pass: {}", s))   // pure: (Int) -> String
+        .filter(|s| s >= 60)              // pure: (I64) -> Bool
+        .map(|s| format("Pass: {}", s))   // pure: (I64) -> Str
 }
 ```
 
 Attempting to pass an effectful closure is a compile error:
 
 ```spore
-fn bad_example(scores: List[Int]) -> List[Unit]
+fn bad_example(scores: List[I64]) -> List[Unit]
 uses [FileWrite]
 {
     // ❌ ERROR: map requires a pure closure, but this closure uses [FileWrite]
@@ -308,7 +308,7 @@ Diagnostics and tooling should therefore not synthesize or rely on `module X use
 The `@allows` annotation constrains which functions an AI agent (or developer) may use to fill a Hole. In the shared SEP-0005 hole protocol, this shows up as a filtered `candidates` list rather than as a separate bespoke schema.
 
 ```spore
-fn process_input(raw: String) -> SafeInput ! ValidationError {
+fn process_input(raw: Str) -> SafeInput ! ValidationError {
     @allows[validate, sanitize]
     ?clean_input
 }
@@ -345,7 +345,7 @@ Without `@allows`, all functions matching the type and effect constraints may ap
 A pure recursive function requires no annotations:
 
 ```spore
-fn fibonacci(n: Int) -> Int {
+fn fibonacci(n: I64) -> I64 {
     match n {
         0 => 0,
         1 => 1,
@@ -360,7 +360,7 @@ Compiler inference output:
 uses []
 // auto-inferred: pure, deterministic
 // total: structural recursion on n (decreasing) — provable
-cost ≤ O(2^n)
+// cost: non-structural; compute ~ O(2^n) (SEP-0004)
 ```
 
 ---
@@ -695,10 +695,10 @@ A closure defined within a context with effect set *S* has an inferred effect se
 fn example() -> Unit
 uses [FileRead, NetConnect]
 {
-    // Inferred type: (String) -> Data uses [NetConnect]
+    // Inferred type: (Str) -> Data uses [NetConnect]
     let fetch_fn = |url| http.get(url)
 
-    // Inferred type: (Int) -> Int uses []  (pure)
+    // Inferred type: (I64) -> I64 uses []  (pure)
     let double = |x| x * 2
 }
 ```

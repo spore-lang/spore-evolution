@@ -42,7 +42,7 @@ The design unifies five properties that no existing language achieves simultaneo
 | **Colorless functions** | Concurrency does not introduce `async`/`await` syntax bifurcation | All developers |
 | **Structured lifetimes** | Child tasks cannot escape the parent scope | Resource management, debugging |
 | **Explicit effects** | Concurrent tasks may only use declared effects | Security audits |
-| **Bounded cost** | Compiler statically verifies `cost ≤ N` and `parallel(lane)` | Performance predictability |
+| **Bounded cost** | Compiler statically verifies four-slot `cost [c, a, i, p]` (incl. `parallel`) | Performance predictability |
 | **Simulatable execution** | Handlers are replaceable—same code compiles to simulation / deterministic test / production parallel | Agents, CI |
 
 ---
@@ -54,7 +54,7 @@ The design unifies five properties that no existing language achieves simultaneo
 Traditional concurrency models—raw threads, unbounded `goroutine` spawning, `GlobalScope.launch`—share a common flaw: **concurrent tasks form an arbitrary directed graph whose lifetime is unmanageable at compile time**. This leads to:
 
 - **Resource leaks**: A spawned task outlives its creator, holding file handles or network connections the parent assumed were released.
-- **Unanalyzable cost**: Fire-and-forget tasks are invisible to the compiler's cost model. If `cost ≤ N` is declared in the function signature but the function spawns background work that escapes the scope, the declared bound is meaningless.
+- **Unanalyzable cost**: Fire-and-forget tasks are invisible to the compiler's cost model. If a four-slot `cost [...]` budget is declared in the function signature but the function spawns background work that escapes the scope, the declared bound is meaningless.
 - **Debugging nightmares**: Stack traces of escaped tasks lose the causal chain to their spawning point, making production incidents harder to diagnose.
 
 Structured concurrency, as articulated by Nathaniel J. Smith (*"Go statement considered harmful"*, 2018), solves these problems by enforcing **tree-shaped task lifetimes**: every child task is nested inside a scope that does not exit until all children have completed (or been cancelled). In Spore this means:
@@ -80,7 +80,7 @@ Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` spl
 ```spore
 // No async annotation needed—concurrency declared via the Spawn effect
 fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
-cost ≤ urls.len * per_fetch
+cost [urls.len * per_fetch + urls.len * 10, urls.len * 2, urls.len, urls.len]
 uses [Spawn, NetConnect]
 {
     parallel_scope {
@@ -91,7 +91,7 @@ uses [Spawn, NetConnect]
 
 // Pure function: no Spawn, no IO—compiler guarantees single-threaded
 fn transform(data: List[Item]) -> List[Item]
-cost ≤ data.len * 3
+cost [data.len * 3, data.len, 0, 1]
 {
     data.map(|item| item.process())
 }
@@ -336,7 +336,7 @@ Server entrypoints that accept inbound connections declare `NetListen`; the inne
 effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! DbError | Timeout
-cost ≤ 5000
+cost [5000, 800, 200, 3]
 uses [HttpHandler]
 {
     with_timeout(10.seconds) {
@@ -364,9 +364,9 @@ uses [HttpHandler]
 fn etl_pipeline(
     source: DataSource,
     sink: DataSink,
-    batch_size: Int,
+    batch_size: I64,
 ) -> EtlReport ! ExtractError | TransformError | LoadError
-cost ≤ batch_size * 200
+cost [batch_size * 200 + 4000, batch_size * 50, batch_size * 40, 6]
 uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)
@@ -550,7 +550,7 @@ effect RateLimit {
     fn release_permit() -> ()
 }
 
-handler RateLimit as token_bucket_handler(rate: Int, per: Duration) {
+handler RateLimit as token_bucket_handler(rate: I64, per: Duration) {
     fn acquire_permit() -> () ! RateLimitExceeded {
         if self.tokens > 0 {
             self.tokens -= 1;
@@ -604,14 +604,14 @@ effect ChanRecv[T] {
 Functions using channels must declare the corresponding effects:
 
 ```spore
-fn producer(tx: Sender[Int]) -> Unit ! ChannelClosed
-uses [ChanSend[Int]]
+fn producer(tx: Sender[I64]) -> Unit ! ChannelClosed
+uses [ChanSend[I64]]
 {
     (0..100).each(|i| tx.send(i))
 }
 
-fn consumer(rx: Receiver[Int]) -> List[Int] ! ChannelClosed
-uses [ChanRecv[Int]]
+fn consumer(rx: Receiver[I64]) -> List[I64] ! ChannelClosed
+uses [ChanRecv[I64]]
 {
     rx.collect()
 }
@@ -703,7 +703,7 @@ Developers need not manually allocate lanes. The compiler infers from the task t
 
 ```spore
 fn pipeline(data: Data) -> Result
-cost ≤ 5000
+cost [5000, 600, 80, 4]
 uses [Spawn, FileRead, NetConnect]
 {
     // Phase 1: 4 lanes
@@ -733,7 +733,7 @@ When the number of spawned tasks depends on runtime values, the compiler uses **
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
-cost ≤ urls.len * per_fetch
+cost [urls.len * per_fetch + urls.len * 10, urls.len * 2, urls.len, urls.len]
 uses [Spawn, NetConnect]
 {
     parallel_scope {
@@ -753,15 +753,15 @@ $ sporec --query-cost fetch_all
 }
 ```
 
-To make the cost statically verifiable, use a **refinement type** to limit the input size:
+To make the cost easier to reason about at compile time while keeping **`List`** as the carrier type, attach an explicit **`max_items`** refinement or enforce `urls.len()` at runtime / via `parallel_scope(lanes: …)`. For the rare case where the **type** itself must expose a numeric cap (`N`), use **`Vec[..., max: N]`** (SEP-0002)—most programs should stay on **`List`**.
 
 ```spore
-fn bounded_fetch(urls: List[Url, max: 100]) -> List[Response] ! NetError
-cost ≤ 100 * per_fetch + 500
+fn bounded_fetch(urls: List[Url]) -> List[Response] ! NetError
+cost [100 * per_fetch + 500, 800, 100 * per_fetch, 100]
 uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 10) {
-        // At most 10 parallel tasks; remaining queue
+        // At most 10 parallel tasks; remaining queue — keep urls.len within policy via caller checks / refinements
         urls.each(|url| spawn { fetch(url) })
     }
 }
@@ -772,10 +772,10 @@ $ sporec --query-cost bounded_fetch
 {
   "function": "bounded_fetch",
   "cost_upper": "100 × per_fetch + 500",
-  "cost_declared": "≤ 100 * per_fetch + 500",
+  "cost_declared": "four-slot `cost [...]` on `bounded_fetch` (see SEP-0001)",
   "status": "within_bound",
   "parallel_lanes_peak": 10,
-  "note": "urls.len ≤ 100 (refinement); lanes capped at 10"
+  "note": "prefer List[T] here; lanes capped at 10; caller bounds urls.len separately"
 }
 ```
 
@@ -786,7 +786,7 @@ $ sporec --query-cost pipeline
 {
   "function": "pipeline",
   "cost_scalar": 4200,
-  "cost_declared": "≤ 5000",
+  "cost_declared": "[5000, 600, 80, 4]",
   "status": "within_bound",
   "dimensions": {
     "compute": 3800,
@@ -825,7 +825,7 @@ Holes in concurrent functions participate in cost budget analysis:
 
 ```spore
 fn concurrent_pipeline(data: Data) -> Result
-cost ≤ 3000
+cost [3000, 400, 100, 2]
 uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 2) {
@@ -1043,7 +1043,7 @@ At the application boundary (the `main` function or service entry point), handle
 
 | Spore subsystem | Interaction with the concurrency model |
 |-----------------|---------------------------------------|
-| Signature syntax | `uses [Spawn, ...]` declares concurrency effect; `cost ≤ N` bounds total cost |
+| Signature syntax | `uses [Spawn, ...]` declares concurrency effect; `cost [c, a, i, p]` bounds each dimension |
 | Cost model | Fourth dimension `parallel(lane)` defined by this SEP |
 | Effect system | `Spawn` is a built-in effect; child task effects ⊆ parent |
 | Effect annotations | `pure` excludes `Spawn`; `deterministic` + `Spawn` requires schedule-independent results |
@@ -1063,7 +1063,7 @@ The compiler reports the following concurrency-related diagnostics:
 | `spawn` outside `parallel_scope` | Error | `spawn { ... }` at top level |
 | Missing `Spawn` effect | Error | Function calls `spawn` but does not declare `uses [Spawn]` |
 | Lane budget exceeded | Error | `parallel_scope(lanes: 2)` with 5 spawns that cannot queue |
-| Cost budget exceeded due to parallelism | Error | Inferred parallel cost exceeds declared `cost ≤ N` |
+| Cost budget exceeded due to parallelism | Error | Inferred parallel dimension exceeds declared `parallel` slot of `cost [...]` |
 | Long recursion/iteration without cancellation checkpoint | Warning | CPU-bound computation > 100 iterations without `check_cancelled()` |
 | Effect widening in spawn | Error | `spawn uses [NetConnect] { ... }` when parent lacks `NetConnect` |
 | Unused `Task` (never awaited, never cancelled) | Warning | Task result is silently discarded |
@@ -1137,7 +1137,7 @@ This timeline can be rendered as a Gantt chart, flame graph, or task dependency 
 
 ### Alternative 6: Unstructured spawning with optional scoping
 
-**Rejected.** Providing both structured and unstructured spawning (as in Kotlin's `GlobalScope` vs. `coroutineScope`) creates an escape hatch that undermines cost analysis. If untracked concurrent tasks exist, the compiler cannot verify `cost ≤ N` or `parallel(lane)` bounds.
+**Rejected.** Providing both structured and unstructured spawning (as in Kotlin's `GlobalScope` vs. `coroutineScope`) creates an escape hatch that undermines cost analysis. If untracked concurrent tasks exist, the compiler cannot verify four-slot `cost [...]` bounds or lane caps.
 
 **Consequences of rejection:** Long-lived background tasks (daemon processes, connection pools) must be managed at the Platform level rather than in user code. This pushes certain patterns to Platform authors.
 
@@ -1195,8 +1195,8 @@ The concurrency model is introduced as a new language feature. There is no exist
 
 ### Interaction with existing SEPs
 
-- **SEP-0001 (Core Syntax, extended by SEP-0003 for effects):** The `uses [Spawn, ...]` clause and `cost ≤ N` declarations are extensions to the signature syntax defined in SEP-0001, with effect annotations from SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
-- **SEP-0004 (Cost Model):** This SEP adds the fourth dimension `parallel(lane)` to the cost model. Existing cost annotations (which only use `C`, `A`, `W`) remain valid; the `P` dimension defaults to `0` for functions without `Spawn`.
+- **SEP-0001 (Core Syntax, extended by SEP-0003 for effects):** The `uses [Spawn, ...]` clause and `cost [c, a, i, p]` declarations are extensions to the signature syntax defined in SEP-0001, with effect annotations from SEP-0003. No breaking changes to existing signatures are required; `uses` and `cost` are additive clauses.
+- **SEP-0004 (Cost Model):** This SEP defines the fourth dimension `parallel(lane)`. Cost declarations are always the four-slot form `cost [compute, alloc, io, parallel]`; sequential code uses `parallel = 0`.
 
 ### Migration path for developers from other languages
 
@@ -1323,7 +1323,7 @@ Concrete syntax for `effect`, `handler`, and `handle ... with` is defined in SEP
 ```spore
 fn name(params) -> ReturnType ! Errors
 where T: Constraints
-cost ≤ <N>
+cost [c_compute, c_alloc, c_io, c_parallel]
 uses [Spawn, Channel, ...]
 {
     <body>
@@ -1336,7 +1336,7 @@ uses [Spawn, Channel, ...]
 effect HttpHandler = Spawn | NetConnect | DbRead | Clock
 
 fn handle_request(req: Request) -> Response ! DbError | Timeout
-cost ≤ 5000
+cost [5000, 800, 200, 3]
 uses [HttpHandler]
 {
     with_timeout(10.seconds) {
@@ -1362,9 +1362,9 @@ uses [HttpHandler]
 fn etl_pipeline(
     source: DataSource,
     sink: DataSink,
-    batch_size: Int,
+    batch_size: I64,
 ) -> EtlReport ! ExtractError | TransformError | LoadError
-cost ≤ batch_size * 200
+cost [batch_size * 200 + 4000, batch_size * 50, batch_size * 40, 6]
 uses [Spawn, NetConnect, DbRead, DbWrite]
 {
     let (raw_tx, raw_rx)     = Channel.new[RawRecord](buffer: batch_size)

@@ -1378,7 +1378,7 @@ error[K0101]: cost budget exceeded
    |
    = note: `summarize` budget is 5000 op, already used 1200 op
    = note: remaining budget: 3800 op, shortfall: 4400 op
-help: filter `records` before scanning, or increase budget to `cost ≤ 10000`
+help: filter `records` before scanning, or widen the declared `cost [..., ...]` compute (or aggregate) slots
 ```
 
 **Hole report:**
@@ -1484,27 +1484,33 @@ All diagnostics carry a categorized code. Every code is queryable: `sporec expla
 
 #### K0xxx — Cost Violations
 
-| Code | Name | Description |
-|------|------|-------------|
-| `K0101` | budget-exceeded | Concrete cost exceeds `cost ≤ K` |
-| `K0102` | symbolic-budget-exceeded | Symbolic cost may exceed bound for some inputs |
-| `K0103` | cost-underflow | Remaining budget negative after prior statements |
-| `K0201` | unbounded-call | Calling `unbounded` function without `with_cost_limit` |
-| `K0202` | unbounded-recursion | Recursive function without structural termination proof |
-| `K0301` | cost-declaration-missing | Function with cost-sensitive callees but no `cost ≤ K` |
+| Code | Name (implementation) | Short description |
+|------|----------------------|-------------------|
+| `K0101` | cost budget exceeded | Inferred cost exceeds declared bound (warning in current policy) |
+| `K0102` | cost annotation mismatch | Declared `cost [...]` does not match inferred cost |
+| `K0001` | cost budget exceeded | Legacy alias for `K0101` |
+| `K0201` | unbounded recursion detected | Recursion pattern not structurally bounded |
+| `K0202` | loop without bounded iteration | Reserved / iteration-path diagnostic |
+| `K0301` | missing cost on recursive function | Recursive function lacks `cost [...]` where required |
+| `K0302` | invalid cost expression | `cost [...]` parse or shape error |
+| `K0303` | `@unbounded` requires cost | `@unbounded` without `cost [c, a, i, p]` (hard error) |
+
+Canonical enum and messages: `spore` repo `crates/sporec-typeck/src/error.rs`.
 
 #### H0xxx — Hole Diagnostics
 
-| Code | Name | Description |
-|------|------|-------------|
-| `H0101` | hole-report | Standard hole report with type, bindings, candidates |
-| `H0102` | hole-type-conflict | Explicit annotation conflicts with inferred type |
-| `H0103` | hole-unconstrained | Hole has no type constraints from context |
-| `H0201` | partial-function | Function contains one or more unfilled holes |
-| `H0202` | hole-cost-tight | Remaining budget < 10% of total |
-| `H0301` | hole-duplicate-name | Two holes share a name in the same module |
-| `H0302` | hole-in-signature | Hole in signature position (not allowed for value holes) |
-| `H0303` | circular-hole-dependency | Circular hole dependency detected |
+| Code | Name (implementation) | Short description |
+|------|----------------------|-------------------|
+| `H0101` | typed hole found | Standard hole report entry |
+| `H0102` | hole with inferred type | Hole with type context |
+| `H0103` | hole in return position | Hole where return is expected |
+| `H0201` | hole candidates available | Ranked fills exist |
+| `H0202` | no candidates found | No suitable fill |
+| `H0203` | ambiguous candidates | Multiple close matches |
+| `H0301` | hole depends on another hole | Ordering / dependency |
+| `H0302` | circular hole dependency | Dependency cycle |
+
+Canonical enum: `spore` repo `crates/sporec-typeck/src/error.rs` (SEP tables may lag other `H` variants).
 
 #### M0xxx — Module Errors
 
@@ -1879,6 +1885,6 @@ Suppression is limited to **warnings only** — errors and notes cannot be suppr
 | **hole** | Source-code placeholder (`?name`) for unfinished implementation, carrying type information |
 | **effect** | A declared system permission (e.g., `Network`, `FileSystem`) required to perform certain operations |
 | **effect ceiling** | Project-level maximum effect set; no module may exceed it |
-| **cost annotation** | A declared upper bound on a function's computational cost (`cost ≤ K`) |
+| **cost annotation** | A declared four-slot upper bound (`cost [compute, alloc, io, parallel]`) |
 | **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
 | **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |

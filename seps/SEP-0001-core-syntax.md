@@ -18,7 +18,7 @@ superseded_by: null
 
 ## Summary
 
-This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and cost bounds (`cost`) as composable clauses. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
+This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and a four-slot **`cost [compute, alloc, io, parallel]`** clause as composable signature metadata. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
 
 ## Motivation
 
@@ -47,7 +47,7 @@ This section introduces Spore's syntax from a user's perspective, building from 
 The simplest Spore function looks familiar to anyone who has used Rust, Go, or TypeScript:
 
 ```spore
-fn add(a: Int, b: Int) -> Int {
+fn add(a: I64, b: I64) -> I64 {
     a + b
 }
 ```
@@ -117,11 +117,11 @@ let category = if age < 13 {
 
 ```spore
 type Shape =
-    | Circle(radius: Float)
-    | Rectangle(width: Float, height: Float)
-    | Triangle(base: Float, height: Float);
+    Circle(radius: F64)
+    | Rectangle(width: F64, height: F64)
+    | Triangle(base: F64, height: F64);
 
-fn area(shape: Shape) -> Float {
+fn area(shape: Shape) -> F64 {
     match shape {
         Circle(r) => 3.14159 * r * r,
         Rectangle(w, h) => w * h,
@@ -152,13 +152,13 @@ Spore has **no** `for`, `while`, `loop`, `break`, or `continue`. All iteration u
 
 ```spore
 // Sum a list using fold
-fn sum(numbers: List[Int]) -> Int {
+fn sum(numbers: List[I64]) -> I64 {
     numbers.fold(0, |acc, x| acc + x)
 }
 
 // Factorial using tail recursion (TCO guaranteed)
-fn factorial(n: Int) -> Int {
-    fn go(n: Int, acc: Int) -> Int {
+fn factorial(n: I64) -> I64 {
+    fn go(n: I64, acc: I64) -> I64 {
         if n <= 1 { acc } else { go(n - 1, n * acc) }
     }
     go(n, 1)
@@ -240,23 +240,29 @@ Errors are declared in the function signature with `!` and propagated with `?`:
 
 ```spore
 type FileError =
-    | NotFound(path: String)
-    | PermissionDenied(path: String)
-    | IoError(message: String);
+    NotFound(path: Str)
+    | PermissionDenied(path: Str)
+    | IoError(message: Str);
 
-fn read_config(path: String) -> Config ! FileError | ParseError {
+fn read_config(path: Str) -> Config ! FileError | ParseError {
     let content = read_file(path)?;     // propagates FileError
     let config = parse_toml(content)?;  // propagates ParseError
     config
 }
 ```
 
+Current implementation note: the parser surface already accepts `! E1 | E2`, and
+the checker currently validates `?` through call/pipeline propagation rules. This
+wave standardizes the **target** canonicalization-first error-set semantics on top
+of that shipping surface. It does **not** require a new top-level
+`error Alias = ...` declaration form.
+
 #### Error conversion
 
 When a function's error set differs from a callee's, Spore can automatically convert errors if a conversion exists:
 
 ```spore
-fn load_config(path: String) -> Config ! ConfigError {
+fn load_config(path: Str) -> Config ! ConfigError {
     let content = read_file(path)?;       // FileError -> ConfigError (auto-converted)
     let config = parse_toml(content)?;    // ParseError -> ConfigError (auto-converted)
     config
@@ -279,8 +285,8 @@ fn get_config() -> Config {
 }
 
 // Retry with tail recursion (TCO guaranteed)
-fn fetch_with_retry(url: String, max_retries: Int) -> Data ! NetworkError {
-    fn retry(url: String, attempts: Int, max: Int) -> Data ! NetworkError {
+fn fetch_with_retry(url: Str, max_retries: I64) -> Data ! NetworkError {
+    fn retry(url: Str, attempts: I64, max: I64) -> Data ! NetworkError {
         match fetch(url) {
             Ok(data) => data,
             Err(NetworkError.Timeout) if attempts < max => {
@@ -300,11 +306,11 @@ Spore uses square brackets for generics, not angle brackets:
 
 ```spore
 type Option[T] =
-    | Some(T)
+    Some(T)
     | None;
 
 type Result[T, E] =
-    | Ok(T)
+    Ok(T)
     | Err(E);
 
 struct Pair[A, B] {
@@ -325,7 +331,7 @@ The full signature order is:
 fn name[T](params) -> ReturnType ! ErrorSet
 where T: Bound
 uses [Effect1, Effect2]
-cost ≤ N
+cost [compute, alloc, io, parallel]
 spec {
     example "...": ...
     property "...": |param: Type| ...
@@ -339,19 +345,19 @@ But you only write what you need:
 
 ```spore
 // 1. Simple pure function — zero overhead
-fn add(a: Int, b: Int) -> Int {
+fn add(a: I64, b: I64) -> I64 {
     a + b
 }
 
 // 2. Function with errors
-fn parse_int(input: String) -> Int ! InvalidFormat {
+fn parse_int(input: Str) -> I64 ! InvalidFormat {
     ...
 }
 
 // 3. With generic constraints and behavioral spec
 fn serialize[T](value: T) -> Bytes ! SerializeError
 where T: Serialize
-cost ≤ 500
+cost [500, 50, 0, 1]
 spec {
     example "empty struct": serialize(Empty {}) == Ok(b"")
 }
@@ -363,7 +369,7 @@ spec {
 /// @idempotent
 fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! NetworkTimeout | AuthExpired
 uses [NetConnect, FileRead, Clock]
-cost ≤ 8500
+cost [8500, 200, 800, 4]
 spec {
     example "returns report on success" {
         let report = sync_user_data(UserId(1), MockSource.success());
@@ -440,7 +446,7 @@ uses [CLI]
 Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `uses`, and `cost`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
 
 ```spore
-fn add(a: Int, b: Int) -> Int
+fn add(a: I64, b: I64) -> I64
 spec {
     example "positive inputs": add(2, 3) == 5
     example "identity":        add(0, 42) == 42
@@ -470,12 +476,12 @@ example "handles leap year" {
 **`property` items** express universally quantified assertions using explicitly typed lambda syntax. The compiler generates random inputs for property-based testing:
 
 ```spore
-fn parse_date(s: String) -> Result[Date, ParseError] ! ParseError
+fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError
 spec {
     example "ISO 8601":          parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
     example "rejects ambiguous": parse_date("01/15/24")   == Err(AmbiguousFormat)
 
-    property "total":      |s: String| parse_date(s).is_ok() || parse_date(s).is_err()
+    property "total":      |s: Str| parse_date(s).is_ok() || parse_date(s).is_err()
     property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
 }
 {
@@ -489,47 +495,45 @@ Key design properties:
 - **Current amendment scope**: This amendment defines `spec` for ordinary function declarations and `impl` methods with bodies. Trait-method `spec` syntax and inheritance semantics are deferred to a later amendment.
 - **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
 
-Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. `handle` accepts one or more `with` clauses. SEP-0003 defines the effect algebra and handler semantics; this SEP only fixes the settled outer syntax. The grammar intentionally leaves each handler operand as an expression because the richer handler/`handle` model is still pending the item-3 decision.
-
 ### Struct and type definitions
 
 ```spore
 // Named-field struct
 struct User {
-    id: Int,
-    name: String,
-    email: String,
+    id: I64,
+    name: Str,
+    email: Str,
 }
 
 impl Display for User {
-    fn to_string(self) -> String {
+    fn to_string(self) -> Str {
         f"User({self.name}, {self.email})"
     }
 }
 
 impl Serialize for User {
-    fn serialize(self) -> String ! SerializeError {
+    fn serialize(self) -> Str ! SerializeError {
         ...
     }
 }
 
 // Tuple struct
-struct Color(Int, Int, Int);
+struct Color(I64, I64, I64);
 
 // Unit struct
 struct NoData;
 
 // Sum type (algebraic data type)
 type BinaryTree[T] =
-    | Leaf(T)
+    Leaf(T)
     | Node(left: BinaryTree[T], value: T, right: BinaryTree[T])
     | Empty;
 
 // Refinement type
-type PositiveInt = Int if |n| n > 0;
-type Percentage = Float if |p| p >= 0.0 && p <= 100.0;
-type I32 = Int if |n| n >= -2147483648 && n <= 2147483647;
-type U8 = Int if |n| n >= 0 && n <= 255;
+type PositiveInt = I64 if |n| n > 0;
+type Percentage = F64 if |p| p >= 0.0 && p <= 100.0;
+type I32 = I64 if |n| n >= -2147483648 && n <= 2147483647;
+type U8 = I64 if |n| n >= 0 && n <= 255;
 ```
 
 Field punning allows omitting the value when the variable name matches the field name, both in construction and pattern matching:
@@ -606,7 +610,7 @@ parallel_scope {
 Channels are multi-producer, single-consumer (MPSC). Senders can be cloned; receivers cannot:
 
 ```spore
-let (tx, rx) = Channel.new[Int](buffer: 10);
+let (tx, rx) = Channel.new[I64](buffer: 10);
 
 parallel_scope {
     // Multiple producers via tx.clone()
@@ -629,11 +633,11 @@ parallel_scope {
 `select` multiplexes across channels. Use recursion for event loops (no `for`/`loop`):
 
 ```spore
-let (tx1, rx1) = Channel.new[Int](buffer: 1);
-let (tx2, rx2) = Channel.new[String](buffer: 1);
+let (tx1, rx1) = Channel.new[I64](buffer: 1);
+let (tx2, rx2) = Channel.new[Str](buffer: 1);
 
 // Recursive event loop (TCO guaranteed)
-fn event_loop(rx1: Channel.Receiver[Int], rx2: Channel.Receiver[String]) {
+fn event_loop(rx1: Channel.Receiver[I64], rx2: Channel.Receiver[Str]) {
     select {
         value from rx1 => {
             print(f"Got integer: {value}");
@@ -654,8 +658,8 @@ fn event_loop(rx1: Channel.Receiver[Int], rx2: Channel.Receiver[String]) {
 
 ```spore
 // src/math.sp
-pub fn add(a: Int, b: Int) -> Int { a + b }
-fn helper() -> Int { 42 }  // private by default
+pub fn add(a: I64, b: I64) -> I64 { a + b }
+fn helper() -> I64 { 42 }  // private by default
 
 import std.collections as collections;
 import std.math as math;
@@ -665,9 +669,11 @@ import std.math as math;
 
 ### Lexical structure
 
-#### Character set
+#### Source text encoding
 
 Spore source files are UTF-8 encoded. Identifiers may contain Unicode letters, ASCII digits, and underscores. Identifiers must begin with a letter or underscore.
+
+**Character literals.** Single-quoted `'_'` syntax is **not** part of the language. The reference compiler rejects it at lex time with `character literals are not supported` (see `spore` PR #113). Use a normal string literal for a single scalar (for example `"a"`, `"世"`); character-oriented helpers in `stdlib/char.sp` take `Str` values of length 1.
 
 #### Keywords
 
@@ -692,7 +698,7 @@ The complete reserved keyword table:
 | `alias` | Type alias |
 | `where` | Generic type constraints |
 | `uses` | Effect requirement declaration |
-| `cost` | Cost bound clause |
+| `cost` | Four-slot cost vector clause |
 | `spec` | Behavioral specification block in function declarations and `impl` methods |
 | `example` | Concrete labeled example item inside a `spec` block |
 | `property` | Universally quantified assertion inside a `spec` block |
@@ -779,9 +785,11 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 0xFF        // hexadecimal
 0o755       // octal
 0b1010_1100 // binary
-42i32       // typed suffix
-100u64      // typed suffix
+42i32       // typed suffix (reserved — not accepted by the reference lexer yet)
+100u64      // typed suffix (reserved — not accepted by the reference lexer yet)
 ```
+
+**Implementation note:** The reference lexer parses integer literals without suffixes and the type checker gives them a default numeric type (**`I64`** in `sporec-typeck`). Float literals default to **`F64`**.
 
 **Floats:**
 
@@ -791,14 +799,14 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 1.0e-10
 2.5e+3
 1_000.5
-3.14f32
+3.14f32     // typed suffix (reserved — not accepted by the reference lexer yet)
 ```
+
+**Implementation note:** Unsuffixed floats become `F64` in `sporec-typeck`.
 
 **Booleans:** `true`, `false`
 
-**Characters:** `'a'`, `'世'`, `'\n'`, `'\u{1F600}'`
-
-**Strings:**
+**Strings** (including “single character” text as length-1 `Str` values):
 
 ```text
 "Hello, World!"                    // regular string
@@ -1132,7 +1140,7 @@ HoleExpr        = "?"
 (* ─── Literals ────────────────────────────────────── *)
 
 Literal         = IntLiteral | FloatLiteral | BoolLiteral
-                | StringLiteral | CharLiteral ;
+                | StringLiteral ;
 
 IntLiteral      = DecimalInt | HexInt | OctalInt | BinaryInt ;
 DecimalInt      = [ "-" ] Digit { Digit | "_" } [ IntSuffix ] ;
@@ -1156,8 +1164,7 @@ StringLiteral   = '"' { StringChar } '"'
 FStringPart     = StringChar | "{" Expr "}" ;
 TStringPart     = StringChar | "{" Ident "}" ;
 
-CharLiteral     = "'" ( Char | EscapeSeq ) "'" ;
-EscapeSeq       = "\\" ( "n" | "t" | "r" | "\\" | "'" | '"' | "0"
+EscapeSeq       = "\\" ( "n" | "t" | "r" | "\\" | '"' | "0"
                 | "u{" HexDigit { HexDigit } "}" ) ;
 
 (* ─── Identifier ──────────────────────────────────── *)
@@ -1178,7 +1185,7 @@ The function signature system is the heart of Spore's design. The clauses appear
 fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 [where <GenericName>: <Constraint>, ...]
 [uses [<Effect>, ...]]
-[cost ≤ <N>]
+[cost [<compute_expr>, <alloc_expr>, <io_expr>, <parallel_expr>]]
 [spec { <examples and properties> }]
 {
     <body>
@@ -1189,7 +1196,13 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
 1. **`-> ReturnType`** — The return type. Omitted for functions returning `Unit`.
 
-2. **`! ErrorTypes`** — The error set. A function with `! E1 | E2` may produce errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
+2. **`! ErrorTypes`** — The error set. A function with `! E1 | E2` may produce
+   errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
+   Compatibility and `?` propagation use **canonicalized** error-set comparison:
+   resolve each written item to its canonical nominal identity, drop duplicates,
+   and compare by canonical subset/equivalence. Duplicate or canonically
+   equivalent items are redundant and should be diagnosed, even though signature
+   hashing remains conservative over the written surface form.
 
 3. **`where T: Bound, U: Bound`** — Generic constraints. The canonical form is a single `where` clause with comma-separated constraints. Spore does not use `+` multi-bound syntax.
 
@@ -1218,12 +1231,12 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
 ```spore
 trait Display {
-    fn to_string(self) -> String;
+    fn to_string(self) -> Str;
 }
 
 trait Collection {
     type Item;
-    fn len(self) -> Int;
+    fn len(self) -> I64;
     fn is_empty(self) -> Bool {
         self.len() == 0
     }
@@ -1249,7 +1262,13 @@ All control flow constructs are expressions that produce values.
 - `x |> f(_, y)` → `f(x, y)`
 - `x |> .method()` → `x.method()`
 
-**Error propagation (`?`)**: `expr?` evaluates `expr`. If the result is `Ok(v)`, yields `v`. If `Err(e)`, immediately returns `Err(e)` from the enclosing function. The error type must be in the function's declared error set.
+**Error propagation (`?`)**: `expr?` evaluates `expr`. If the result is `Ok(v)`,
+yields `v`. If `Err(e)`, immediately returns `Err(e)` from the enclosing
+function. This check is performed by canonical subset comparison: the callee's
+canonical error set must be a subset of the enclosing function's canonical
+declared error set. The first slice keeps the current call/pipeline-oriented
+checker architecture; it does not require a richer expression-local `Try` model
+to land first.
 
 ### Pattern matching details
 
@@ -1271,9 +1290,9 @@ Supported pattern forms:
 
 ### Type system
 
-**Primitive types:** `Int` (arbitrary-precision integer), `Float` (arbitrary-precision float), `Bool`, `String`, `Char`. Specific fixed-width types (`I32`, `U64`, `F32`, etc.) are obtained via refinement types (e.g., `type I32 = Int if |n| n >= -2147483648 && n <= 2147483647`).
+**Primitive types:** Fixed-width numerics `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, and `F64`; `Bool`; UTF-8 text as `Str`. There is **no** separate `Char` type. **Implementation note:** The reference compiler’s `Ty` enum in `sporec-typeck` uses exactly those numeric widths (plus `Str`, `Bool`, `Unit`, `Never`, tuples, refinements, …); **unsuffixed integer literals default to `I64`** and float literals to **`F64`**. Many narrative examples in SEPs still say `Int` or `Float` for readability — treat them as informal shorthands for **`I64` / `F64`** until the examples are fully normalized. Narrower ranges are expressed with **refinement types** on a fixed-width base (for example `alias Port = I64 when self >= 1 && self <= 65535`).
 
-**Collection types:** `List[T]`, `Map[K, V]`, `Set[T]`, `Array[T, N]`
+**Collection types:** **`List[T]`** (default—always unbounded); **`Vec[T, max: N]`** (bounded, **rarely needed**—only when `N` belongs in the type; see SEP-0002); **`Map[K, V]`**, **`Set[T]`**, **`Array[T, N]`**
 
 **Special types:** `Option[T]`, `Result[T, E]`, `Ref[T]`, `Channel[T]`, `Unit`
 
@@ -1281,18 +1300,18 @@ Supported pattern forms:
 
 ```spore
 // Fixed-size array
-struct Array[T, const N: Int] {
+struct Array[T, const N: I64] {
     data: List[T],  // length guaranteed to be N
 }
 
 // Fixed-size matrix
-struct Matrix[T, const ROWS: Int, const COLS: Int] {
+struct Matrix[T, const ROWS: I64, const COLS: I64] {
     data: Array[Array[T, COLS], ROWS],
 }
 
 // Usage
-let vec3: Array[Float, 3] = Array.new([1.0, 2.0, 3.0]);
-let identity: Matrix[Float, 3, 3] = Matrix.identity();
+let vec3: Array[F64, 3] = Array.new([1.0, 2.0, 3.0]);
+let identity: Matrix[F64, 3, 3] = Matrix.identity();
 ```
 
 **Refinement types:** `type PositiveInt = Int if |n| n > 0;`
@@ -1319,16 +1338,16 @@ The `@allows` annotation constrains which functions the compiler (or an AI agent
 
 ```spore
 @allows[validate, sanitize, format]
-fn process_input(raw: String) -> String ! ValidationError {
+fn process_input(raw: Str) -> Str ! ValidationError {
     let validated = validate(raw)?;
     let sanitized = sanitize(validated);
     ?final_step  // this hole can only call validate/sanitize/format
 }
 
 @allows[add, multiply, negate]
-fn arithmetic(a: Int, b: Int) -> Int {
-    let x = ?step1 : Int;  // only add/multiply/negate
-    let y = ?step2 : Int;  // same constraint
+fn arithmetic(a: I64, b: I64) -> I64 {
+    let x = ?step1 : I64;  // only add/multiply/negate
+    let y = ?step2 : I64;  // same constraint
     x + y
 }
 ```
@@ -1341,9 +1360,9 @@ The compiler infers hole types through pipeline chains:
 fn example() {
     let list = [1, 2, 3, 4, 5];
     let result = list
-        |> filter(?)        // hole: fn(Int) -> Bool
-        |> map(?)           // hole: fn(Int) -> ?R
-        |> fold(0, ?);     // hole: fn(Int, ?R) -> Int
+        |> filter(?)        // hole: fn(I64) -> Bool
+        |> map(?)           // hole: fn(I64) -> ?R
+        |> fold(0, ?);     // hole: fn(I64, ?R) -> I64
 }
 ```
 
@@ -1367,31 +1386,31 @@ When a function has both a `spec` block and a hole body, that shared hole object
 
 ### Expression parser and evaluator
 
-This example demonstrates algebraic data types, pattern matching, recursion, error handling, and cost bounds working together:
+This example demonstrates algebraic data types, pattern matching, recursion, error handling, and four-slot cost clauses working together:
 
 ```spore
 // Expression AST
 type Expr =
-    | Literal(Int)
-    | Variable(name: String)
+    Literal(I64)
+    | Variable(name: Str)
     | BinOp(op: Op, left: Expr, right: Expr)
     | UnaryOp(op: UnaryOp, expr: Expr)
-    | Let(name: String, value: Expr, body: Expr)
+    | Let(name: Str, value: Expr, body: Expr)
     | If(condition: Expr, then_branch: Expr, else_branch: Expr);
 
 type Op = Add | Sub | Mul | Div | Equal | LessThan;
 type UnaryOp = Negate | Not;
 
-type Env = Map[String, Int];
+type Env = Map[Str, I64];
 
 type EvalError =
-    | UndefinedVariable(name: String)
+    UndefinedVariable(name: Str)
     | DivisionByZero
-    | TypeError(message: String);
+    | TypeError(message: Str);
 
 // Evaluator — pure recursion, no loops
-fn eval(expr: Expr, env: Env) -> Int ! EvalError
-cost ≤ expr_size(expr) * 10
+fn eval(expr: Expr, env: Env) -> I64 ! EvalError
+cost [expr_size(expr) * 10, expr_size(expr), 0, 1]
 {
     match expr {
         Literal(n) => n,
@@ -1432,7 +1451,7 @@ cost ≤ expr_size(expr) * 10
     }
 }
 
-fn eval_binop(op: Op, left: Int, right: Int) -> Int ! EvalError {
+fn eval_binop(op: Op, left: I64, right: I64) -> I64 ! EvalError {
     match op {
         Add => left + right,
         Sub => left - right,
@@ -1473,11 +1492,11 @@ This example demonstrates channels, structured concurrency, tail-recursive messa
 
 ```spore
 type Task =
-    | Process(id: Int, data: String)
+    Process(id: I64, data: Str)
     | Stop;
 
 // Producer generates tasks and sends them to a channel
-fn producer(tx: Channel.Sender[Task], task_count: Int) {
+fn producer(tx: Channel.Sender[Task], task_count: I64) {
     (1..=task_count)
         .map(|i| Task.Process(i, f"Task data {i}"))
         .for_each(|task| tx.send(task));
@@ -1485,8 +1504,8 @@ fn producer(tx: Channel.Sender[Task], task_count: Int) {
 }
 
 // Consumer processes tasks via tail recursion
-fn consumer(id: Int, rx: Channel.Receiver[Task], result_tx: Channel.Sender[String]) {
-    fn process(id: Int, rx: Channel.Receiver[Task], result_tx: Channel.Sender[String]) {
+fn consumer(id: I64, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Str]) {
+    fn process(id: I64, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Str]) {
         match rx.recv() {
             Task.Process(task_id, data) => {
                 let result = f"Consumer {id} processed task {task_id}: {data}";
@@ -1500,8 +1519,8 @@ fn consumer(id: Int, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Strin
 }
 
 // Result collector using tail recursion
-fn collector(rx: Channel.Receiver[String], expected: Int) {
-    fn collect(rx: Channel.Receiver[String], remaining: Int) {
+fn collector(rx: Channel.Receiver[Str], expected: I64) {
+    fn collect(rx: Channel.Receiver[Str], remaining: I64) {
         if remaining <= 0 { return }
         let result = rx.recv();
         print(result);
@@ -1514,7 +1533,7 @@ fn main() {
     let task_count = 10;
     let consumer_count = 3;
     let (task_tx, task_rx) = Channel.new[Task](buffer: 5);
-    let (result_tx, result_rx) = Channel.new[String](buffer: 10);
+    let (result_tx, result_rx) = Channel.new[Str](buffer: 10);
 
     parallel_scope {
         spawn { producer(task_tx, task_count) };
@@ -1546,7 +1565,7 @@ Spore's syntax prioritizes scannability. The fixed operator set means readers ne
 
 ### Progressive disclosure
 
-Simple functions require zero ceremony — `fn add(a: Int, b: Int) -> Int { a + b }` has no clauses to learn. Effects, error sets, and cost bounds are introduced only when the code actually needs them.
+Simple functions require zero ceremony — `fn add(a: Int, b: Int) -> Int { a + b }` has no clauses to learn. Effects, error sets, and the `cost [...]` clause are introduced only when the code actually needs them.
 
 ## Agent experience impact
 
@@ -1565,7 +1584,7 @@ Function signatures are machine-readable contracts. An agent can extract:
 - **Input/output types** from the parameter list and return type
 - **Failure modes** from the `! ErrorSet`
 - **Side effect profile** from `uses [...]`
-- **Performance budget** from `cost ≤ N`
+- **Performance budget** from the `cost [compute, alloc, io, parallel]` clause
 - **Generic requirements** from `where` clauses
 
 This enables agents to:
@@ -1588,10 +1607,10 @@ Any change to the following signature components produces a new snapshot hash an
 | Function name | `parse_config` → `load_config` |
 | Parameter names | `raw` → `input` |
 | Parameter order | `(a, b)` → `(b, a)` |
-| Parameter types | `String` → `Bytes` |
+| Parameter types | `Str` → `Bytes` |
 | Return type | `Config` → `Settings` |
-| Error type set | add/remove any error type |
-| Cost bound | `≤ 200` → `≤ 300` |
+| Error clause surface | add/remove/reorder/rename/duplicate any written error item |
+| Cost slots | e.g. `[200, 20, 0, 1]` → `[300, 40, 50, 2]` |
 | Effect set | add/remove any effect |
 | Generic constraints | `T: Eq` → `T: Eq + Hash` |
 
@@ -1604,6 +1623,12 @@ The `spec` block is tracked via a separate **spec hash**, independent of the sna
 | Any signature clause change (types, effects, cost, etc.) | changed | unchanged | `--permit` |
 
 The lighter `--permit-spec` approval reflects that spec changes clarify behavioral contracts without altering calling conventions. Downstream callers need only re-run their own tests, not update call sites.
+
+For error clauses, this policy is intentionally **conservative**. Canonically
+equivalent declarations such as reordered items or duplicate spellings are
+treated as the same semantic error set for checking and diagnostics, but they
+still change the snapshot hash until a later compatibility policy explicitly
+relaxes that rule.
 
 ## Structured representation / protocol impact
 
@@ -1632,10 +1657,10 @@ Program
     ├── cost?
     ├── spec?
     │   ├── examples[]
-    │   │   ├── label: String
+    │   │   ├── label: Str
     │   │   └── body: Expr
     │   └── properties[]
-    │       ├── label: String
+    │       ├── label: Str
     │       └── predicate: LambdaExpr
     └── body: Block
 
@@ -1729,7 +1754,7 @@ error[E0501]: `spec` must appear after all other signature clauses
   --> src/lib.sp:5:1
    |
  5 | spec { ... }
- 6 | cost ≤ 500
+ 6 | cost [500, 30, 50, 2]
    |
    = help: move `cost` before `spec`
 ```
@@ -1765,7 +1790,7 @@ spec counterexample: `parse_date` — property "round-trip"
 warning[W0501]: public function `parse_date` has no `spec` block
   --> src/dates.sp:3:1
    |
- 3 | pub fn parse_date(s: String) -> Result[Date, ParseError] ! ParseError {
+ 3 | pub fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError {
    |        ^^^^^^^^^^ no behavioral contract declared
    |
    = help: add a `spec { example "...": ... }` block before the function body
@@ -1934,7 +1959,10 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 11. **Standard effect taxonomy evolution**: SEP-0003 now defines the initial built-in effect vocabulary (`Console`, `FileRead`, `FileWrite`, `NetConnect`, `NetListen`, `Env`, `Spawn`, `Clock`, `Random`, `Exit`). Future SEPs may extend it, but changes should preserve the intent-oriented classification.
 
-12. **Error type subtyping**: If function `f` declares `! NetworkError` and function `g` declares `! NetworkError | ParseError`, can `g` call `f` directly? How does error set subtyping work?
+12. **Error-set surface aliases**: This slice standardizes canonicalized error-set
+equivalence and subset checks without introducing a dedicated `error Alias = ...`
+surface. Should a later SEP add user-declared error-set aliases, or should Spore
+continue relying on existing nominal type names plus canonicalization?
 
 13. **`property` with `uses`**: If a property calls a function that has side effects, what effect scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
 

@@ -16,10 +16,7 @@ For current release behavior, installation guidance, supported syntax, and
 implementation status, use the implementation repository first: `spore/README.md`
 and `spore/docs/DESIGN.md`.
 
-In particular, older SEP examples may use historical spellings such as
-`String`/`Unit`/`Int`/`Float` or scalar cost forms such as `cost ≤ expr` and
-`@cost`. Current implementation-facing docs use the active primitive spellings
-and the four-slot `cost [compute, alloc, io, parallel]` form where applicable.
+**Authoritative surface typing (as of the alignment pass):** default unsuffixed literals are **`I64`** (integer) and **`F64`** (float); UTF-8 text is **`Str`**; there is **no `Char`**. Full rules, metavariables **ι** / **φ** for other widths, and “Platform decides” ABI details are in [SEP-0002 §3.1 / Summary](seps/SEP-0002-type-system.md).
 
 ## What lives here
 

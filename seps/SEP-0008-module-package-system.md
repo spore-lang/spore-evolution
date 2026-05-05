@@ -36,7 +36,12 @@ Traditional package ecosystems rely on semantic versioning (semver) to communica
 
 Spore eliminates these problems by giving every function two content hashes computed via BLAKE3:
 
-1. **Signature hash (`sig`)**: Covers the function's public contract—parameter names, parameter types, return type, error types, effects, cost bound, effects, and generic constraints. This hash changes **only** when the API changes.
+1. **Signature hash (`sig`)**: Covers the function's public contract—parameter
+   names, parameter types, return type, error types, effects, cost bound,
+   effects, and generic constraints. This hash changes **only** when the API
+   changes. For error clauses, the policy is intentionally conservative:
+   semantically equivalent canonical error sets may still hash differently when
+   their written surface spelling changes.
 2. **Implementation AST hash (`impl`)**: Covers the compiled AST of the function body. This hash changes whenever the implementation changes. Partial functions (those containing holes) have `impl = None`.
 
 This dual-hash scheme provides two independent guarantees:
@@ -87,7 +92,7 @@ import billing.types
 import billing.tax
 
 pub fn generate_invoice(order: Order) -> Invoice ! TaxError | ValidationError
-    cost ≤ 3000
+    cost [3000, order.items.len * 20 + 500, 0, 2]
     uses [PaymentGateway, AuditLog]
 {
     let tax = tax.calculate(order.items, order.region)
@@ -95,8 +100,8 @@ pub fn generate_invoice(order: Order) -> Invoice ! TaxError | ValidationError
     finalize(order.customer, line_items)
 }
 
-fn build_line_items(items: Vec<Item>, tax: TaxResult) -> Vec<LineItem>
-    cost ≤ 500
+fn build_line_items(items: List[Item], tax: TaxResult) -> List[LineItem]
+    cost [800, 500, 0, 1]
 {
     items |> map(fn(item) -> to_line_item(item, tax))
 }
@@ -446,7 +451,7 @@ Visibility applies to functions, types, and aliases:
 ```spore
 pub type Invoice { id: InvoiceId, total: Money }       // public type
 pub(pkg) type ValidatedOrder { original: Order }        // package-internal type
-type InternalCache { entries: Map<String, CacheEntry> } // private type
+type InternalCache { entries: Map<Str, CacheEntry> } // private type
 
 pub alias GenInv = billing.invoice.generate_invoice     // public alias
 pub(pkg) alias Validate = billing.invoice.validate      // package-internal alias
@@ -1177,7 +1182,7 @@ Holes by module:
 
 #### Interaction with the Cost Model
 
-Cost is a per-function property (`cost ≤ N`). There are no module-level cost budgets. When a function calls an imported function, the callee's **declared** cost bound is used for estimation:
+Cost is a per-function property (`cost [c, a, i, p]`). There are no module-level cost budgets. When a function calls an imported function, the callee's **declared** four-slot bound is used for estimation:
 
 ```text
 $ spore cost-report billing.invoice
@@ -1185,12 +1190,12 @@ $ spore cost-report billing.invoice
 Module: billing.invoice
 
   Function costs:
-    generate_invoice    cost ≤ 3000  (measured: 2800)
-    void_invoice        cost ≤ 500   (measured: 320)
+    generate_invoice    cost [3000, …, …, …]   (scalar summary measured: ~2800 op-eq.)
+    void_invoice        cost [500, …, …, …]    (scalar summary measured: ~320 op-eq.)
 
   Module aggregate:
-    max single-call cost: 3000 ops (generate_invoice)
-    total declared budget: 3500 ops
+    max single-call cost (scalar summary): 3000 op-eq. (generate_invoice)
+    total declared budget (scalar summary): 3500 op-eq.
 ```
 
 #### Interaction with the Snapshot System
@@ -1232,7 +1237,7 @@ A module containing only type definitions is valid and pure:
 // src/billing/types.sp
 pub type Invoice { id: InvoiceId, total: Money, status: InvoiceStatus }
 pub type InvoiceStatus { Draft, Sent, Paid, Void }
-pub type LineItem { description: String, quantity: Int, unit_price: Money }
+pub type LineItem { description: Str, quantity: I64, unit_price: Money }
 ```
 
 ```text
@@ -1392,12 +1397,12 @@ handler HttpClientHandler uses [NetConnect] {
 
 ```spore
 handler StatefulCache {
-    var cache: Map[String, Bytes] = Map.new()
+    var cache: Map[Str, Bytes] = Map.new()
 
-    Cache.get(key: String) -> Option[Bytes] {
+    Cache.get(key: Str) -> Option[Bytes] {
         resume(cache.get(key))
     }
-    Cache.set(key: String, value: Bytes) -> Unit {
+    Cache.set(key: Str, value: Bytes) -> Unit {
         cache.insert(key, value)
         resume(())
     }
@@ -1565,8 +1570,8 @@ pub foreign fn env_set(key: Str, value: Str) -> () uses [Env]
 
 // basic_cli.cmd
 pub foreign fn process_run(cmd: Str, args: List[Str]) -> Str ! ExecError uses [Spawn]
-pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> Int ! ExecError uses [Spawn]
-pub foreign fn exit(code: Int) -> Never uses [Exit]
+pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> I64 ! ExecError uses [Spawn]
+pub foreign fn exit(code: I64) -> Never uses [Exit]
 ```
 
 **Comparison with Roc, Elm, and Koka**:
@@ -2044,7 +2049,7 @@ generic_params ::= '[' IDENT (',' IDENT)* ']'
 params         ::= (param (',' param)*)?
 param          ::= IDENT ':' type
 error_clause   ::= '!' '[' type (',' type)* ']'
-cost_clause    ::= 'cost' '≤' expr
+cost_clause    ::= 'cost' '[' expr ',' expr ',' expr ',' expr ']'
 uses_clause    ::= 'uses' cap_list
 
 // Type declarations

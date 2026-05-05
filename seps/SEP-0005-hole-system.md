@@ -23,7 +23,7 @@ superseded_by: null
 
 This SEP specifies Spore's **Hole System** — a first-class language mechanism that treats unfinished code as a structured, typed, compiler-mediated collaboration interface between humans and AI Agents.
 
-A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`.
+A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, a legacy `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`. That `cost_budget` field name remains on the current stable surface, but today it is still a scalar-style compatibility snapshot rather than a fully checked 4D residual context.
 
 Multiple holes still form a **Hole Dependency Graph** (DAG), enabling topological ordering and parallel filling by multiple Agents. The long-term **Agent Protocol** defines a five-state machine (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous filling workflows. Today, however, `spore watch --json` remains a thinner transport: it emits per-cycle `compile_result` plus a summary `hole_graph_update`, while richer per-hole watch events remain the target architecture rather than the stable contract.
 
@@ -56,7 +56,7 @@ Making holes a first-class language construct enables:
 - **Compiler-mediated collaboration**: The compiler produces HoleReports that are *information-self-sufficient* — an Agent reading a report needs zero additional context to attempt a fill.
 - **Incremental development**: Functions transition smoothly from `partial` to `complete`. Downstream callers are not invalidated because holes are body-only — they never affect signature hashes.
 - **Dependency-ordered filling**: The compiler can analyze data-flow between holes, build a DAG, and recommend an optimal filling order.
-- **Cost-bounded filling**: Each hole carries a remaining cost budget inherited from the enclosing function's declared checked budget.
+- **Cost-bounded filling (target behavior)**: each hole should eventually carry the checked residual context inherited from the enclosing function's declared budget; today the stable payload still exposes only a legacy `cost_budget` snapshot, and the compiler does not yet compute authoritative per-hole 4D residuals for candidate scoring.
 
 ### Why the Agent Protocol Matters
 
@@ -80,7 +80,7 @@ A hole is written with a `?` prefix followed by an identifier. Holes can appear 
 ```spore
 fn calculate_tax(income: Money, region: Region) -> Money ! InvalidRegion
     uses [TaxTable]
-    cost ≤ 500
+    cost [500, 100, 0, 1]
 {
     ?tax_logic
 }
@@ -91,7 +91,7 @@ The function compiles successfully. It is marked `partial` — not broken.
 Optionally, holes can carry a type annotation:
 
 ```spore
-let body: String = ?report_body : String
+let body: Str = ?report_body : Str
 ```
 
 If the annotation conflicts with the inferred type, the compiler emits a `hole-type-conflict` warning (not an error — holes are exploratory).
@@ -101,8 +101,8 @@ If the annotation conflicts with the inferred type, the compiler emits a `hole-t
 A function may contain any number of independently named holes:
 
 ```spore
-fn reconcile(ledger: Ledger, txns: Vec[Tx]) -> Ledger ! Mismatch
-    cost ≤ 5000
+fn reconcile(ledger: Ledger, txns: List[Tx]) -> Ledger ! Mismatch
+    cost [5000, txns.len * 4, 0, 1]
 {
     let grouped     = group_by_account(txns)
     let adjustments = ?compute_adjustments
@@ -116,7 +116,7 @@ Holes can also appear nested inside expressions, function arguments, and match a
 ```spore
 fn render(page: Page) -> Html ! TemplateError
     uses [Templates]
-    cost ≤ 800
+    cost [800, 400, 0, 1]
 {
     let nav = render_nav(?nav_items)                 // hole as argument
     let content = match page.kind {
@@ -153,11 +153,11 @@ A complete Human → Agent → Compiler interaction:
 ```spore
 fn generate_invoice(
     customer: Customer,
-    items: Vec[LineItem],
+    items: List[LineItem],
     tax_region: TaxRegion,
 ) -> Invoice ! TaxCalculationError | InvalidLineItem
     uses [TaxTable]
-    cost ≤ 5000
+    cost [5000, items.len * 8, 0, 1]
 {
     let validated_items = ?validate_items
     let subtotal = sum(validated_items.map(|i| i.price * i.quantity))
@@ -173,7 +173,7 @@ fn generate_invoice(
 $ sporec query-hole src/billing/invoice.sp ?validate_items --json
 ```
 
-The compiler returns a HoleReport (see §4 for the full structure) containing: expected type `Vec[LineItem]`, available bindings, candidate function `validate_line_items` with an exact type match, cost 300 within budget 5000.
+The compiler returns a HoleReport (see §4 for the full structure) containing: expected type `List[LineItem]`, available bindings, candidate function `validate_line_items` with an exact type match, cost 300 within budget 5000.
 
 **Step 3 — Agent proposes a fill:**
 
@@ -191,6 +191,10 @@ $ spore check src/billing/invoice.sp
   ?compute_tax: still open
   budget for ?compute_tax: ≤4580
 ```
+
+Until the checker publishes full CostVector residuals in HoleReport, treat the
+stable `cost_budget` field as schema-oriented metadata, not a proof of an exact
+residual.
 
 **Step 5 — Agent fills the next hole, compiler confirms completion:**
 
@@ -223,7 +227,7 @@ Empty function bodies desugar to a single hole named `{function_name}_body`.
 
 ### HoleInfo Structure
 
-The implementation (in `spore-typeck`) represents a single hole as:
+The implementation (in `sporec-typeck`) represents a single hole as:
 
 ```rust
 pub struct HoleInfo {
@@ -231,11 +235,11 @@ pub struct HoleInfo {
     pub expected_type: Ty,         // inferred/expected type
     pub function: String,          // enclosing function
     pub bindings: BTreeMap<String, Ty>,  // local bindings at hole site
-    pub suggestions: Vec[String],  // candidate functions
+    pub suggestions: List[Str],  // candidate functions (unbounded list)
 }
 ```
 
-**HoleInfo vs HoleReport:** `HoleInfo` is the **compiler-internal** representation (Rust struct in `spore-typeck`), while `HoleReport` is the **JSON output format** for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` via `to_json()` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
+**HoleInfo vs HoleReport:** `HoleInfo` is the **compiler-internal** representation (Rust struct in `sporec-typeck`), while `HoleReport` is the **JSON output format** for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` via `to_json()` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
 
 The `HoleReport` aggregates all holes in a module, with `to_json()` for machine consumption. Hand-rolled JSON serialization is used in v0.1 to minimize dependencies; serde migration is tracked as future work (see Unresolved Questions §10).
 
@@ -260,9 +264,9 @@ preserved; four new extensions are added.
 | `bindings` | Variables in scope with name, type, and simulated value (`symbolic` or `computed`) |
 | `available_effects` | The `uses` list available at the hole site |
 | `errors_to_handle` | Error types not yet handled before the hole |
-| `cost.budget_total` | The `cost ≤ N` from the enclosing function |
-| `cost.cost_before_hole` | Cumulative cost of statements before the hole |
-| `cost.budget_remaining` | `budget_total - cost_before_hole` |
+| `cost_budget.budget_total` | Legacy scalar-style compatibility field carried by today's stable payload |
+| `cost_budget.cost_before_hole` | Legacy prefix-cost snapshot; useful as schema context, not yet an authoritative checked residual |
+| `cost_budget.budget_remaining` | Legacy derived remainder; current implementations should not treat it as a precise 4D residual proof |
 | `candidates` | Functions in scope whose return type matches the hole's expected type |
 | `dependent_holes` | Holes that become reachable when this hole is filled |
 | `enclosing_function` | Full signature context of the containing function |
@@ -308,6 +312,12 @@ Replaces the coarse `match_quality: "exact" | "partial"` string with a four-dime
 | Effect fit | `required_effects_fit` | `{0, 1}` | All required effects available (boolean) |
 | Error coverage | `error_coverage` | `[0, 1]` | Fraction of candidate's declared errors covered by context |
 
+This scoring vector is still a **target** contract. In particular, `cost_fit`
+should ultimately be computed against checked residual context, but current
+implementation work has not yet connected real residual checking to candidate
+ranking. The stable `cost_budget` field should therefore be read as schema
+compatibility, not as evidence that `cost_fit` is already authoritative today.
+
 **Type match formula:**
 
 ```text
@@ -345,8 +355,11 @@ expected to be **additive** rather than schema-breaking:
 
 1. **`effect_context`** — active handler stack, already-discharged effects, and
    the visible effect aliases / interfaces at the hole site.
-2. **`residual_context`** — remaining checked budgets after the current prefix,
-   including residual cost and any still-unhandled effect / error obligations.
+2. **`residual_context`** — remaining checked obligations after the current
+   prefix, including a 4D cost vector (`budget_declared`, `cost_before`,
+   `budget_residual`) plus any still-unhandled effect / error obligations. This
+   stays on the `v0.x` line and is the planned successor to the legacy
+   scalar-style `cost_budget` snapshot once the compiler computes real residuals.
 3. **`rejection_reasons`** — structured VERIFY/REJECT feedback explaining why a
    proposed fill failed (for example: `type_mismatch`, `effect_leak`,
    `budget_exceeded`, `duplicate_handler_match`).
@@ -429,7 +442,7 @@ Example:
 ```spore
 fn fetch_and_parse(url: Url) -> Document ! NetworkError | ParseError | Timeout
     uses [Http]
-    cost ≤ 3000
+    cost [3000, 500, 100, 1]
 {
     let response = http_get(url)          // may raise NetworkError, Timeout
         |> catch Timeout => retry_once(url)  // Timeout handled here
@@ -466,7 +479,7 @@ Edges are classified into three dependency types:
 |---|---|---|
 | Type dependency | `type` | h₂'s expected type contains a type variable solvable only after h₁ is filled |
 | Value dependency | `value` | h₂'s available bindings include a value whose data-flow traces back to h₁ |
-| Cost dependency | `cost` | h₂'s remaining cost budget depends on h₁'s actual cost |
+| Cost dependency | `cost` | h₂'s target checked residual context depends on h₁'s actual cost |
 
 #### Graph Construction
 
@@ -484,7 +497,7 @@ function build_hole_graph(module: TypedAST) -> Graph:
             if trace_type_source(tv) is HoleOutput(h'):
                 edges.add(Edge(from=h', to=h, kind="type"))
 
-        if h.cost_budget depends on another hole h':
+        if h.residual_context (or legacy cost_budget compatibility data) depends on another hole h':
             edges.add(Edge(from=h', to=h, kind="cost"))
 
     return Graph(vertices=holes, edges=deduplicate(edges))
@@ -594,7 +607,7 @@ function compute_fill_order(G: Graph) -> Result[List[Set[Hole]], CycleError]:
 
 **Proof.** By induction on layer index k.
 
-**Base case (k = 0):** L₀ = { h ∈ V | in-degree(h) = 0 }. These holes have no predecessors — their types, bindings, and cost budgets are fully determined. They are fillable. Since we take *all* zero in-degree nodes, no fillable hole is missed.
+**Base case (k = 0):** L₀ = { h ∈ V | in-degree(h) = 0 }. These holes have no predecessors — their types, bindings, and any target residual dependencies are fully determined. They are fillable. In current implementations the exposed `cost_budget` payload may still be a compatibility placeholder, but the dependency statement here is about the target checked-residual model. Since we take *all* zero in-degree nodes, no fillable hole is missed.
 
 **Inductive step (k → k+1):** Assume layers L₀ through Lₖ are correctly computed and all holes in them are filled. Let G' be the subgraph remaining after removing L₀ ∪ ... ∪ Lₖ.
 
@@ -782,14 +795,14 @@ Current watch output is compile-result oriented; richer transport states such as
     "errors": [
       {
         "code": "E0301",
-        "message": "type mismatch: expected Vec[ValidItem], found Vec[RawItem]",
+        "message": "type mismatch: expected List[ValidItem], found List[RawItem]",
         "location": { "file": "src/orders.sp", "line": 18, "column": 5 },
         "suggestion": "consider using validate_items(raw_input).map(|i| i.into())"
       }
     ],
     "root_cause": "type_mismatch",
     "fix_hints": [
-      "candidate validate_items returns Vec[RawItem], not Vec[ValidItem]",
+      "candidate validate_items returns List[RawItem], not List[ValidItem]",
       "try: validate_items(raw_input).map(|i| i.into())"
     ]
   }
@@ -812,8 +825,8 @@ The Agent reads diagnostics, understands the failure, and autonomously decides t
 A hole in a recursive function is valid — `?name` is just an expression of some type. It does not call itself. The compiler detects recursive calls to partial functions and terminates simulation at depth 1:
 
 ```spore
-fn factorial(n: Int) -> Int
-    cost ≤ 1000
+fn factorial(n: I64) -> I64
+    cost [1000, 200, 0, 1]
 {
     if n <= 1 { 1 }
     else { n * ?factorial_step }
@@ -823,7 +836,7 @@ fn factorial(n: Int) -> Int
 Here `?factorial_step` has type `Int`. The function is partial. If a recursive call to `factorial` occurs:
 
 ```spore
-fn bad(n: Int) -> Int
+fn bad(n: I64) -> I64
 {
     ?self_ref + bad(n - 1)   // bad is partial; recursive call also partial
 }
@@ -879,10 +892,10 @@ Value holes:
 When a hole has contradictory type constraints from its context, the compiler reports the conflict without failing:
 
 ```spore
-fn conflicted(flag: Bool) -> Int
+fn conflicted(flag: Bool) -> I64
 {
-    let x: String = ?ambiguous   // constraint 1: String (from let binding)
-    let y: Int = x               // constraint 2: Int (from assignment)
+    let x: Str = ?ambiguous   // constraint 1: Str (from let binding)
+    let y: I64 = x               // constraint 2: I64 (from assignment)
     y
 }
 ```
@@ -933,7 +946,7 @@ A hole in a function inferred as `pure` (i.e., `uses []`) is itself pure by defi
 **Formal rule:** If function `f` has `uses []` (and is therefore inferred as `pure`), any expression that replaces a hole `?h` in `f`'s body must also be pure — it may not call functions requiring IO or State effects.
 
 ```spore
-fn pure_fn(x: Int) -> Int
+fn pure_fn(x: I64) -> I64
 {
     ?must_be_pure   // ok: hole is inert
 }
@@ -1152,6 +1165,11 @@ All hole-related commands support `--json` for machine consumption.
 
 **`sporec holes FILE --json`:** emits the batch hole report. The stable root object contains `holes` plus `dependency_graph`.
 
+The JSON example below intentionally shows today's stable `cost_budget` field
+name. Its numeric contents are illustrative compatibility data, not a claim that
+current releases already emit authoritative checked 4D residual vectors; that is
+the planned `residual_context` extension on the same `v0.x` lineage.
+
 ```json
 {
   "holes": [
@@ -1268,10 +1286,10 @@ The hole system integrates with Language Server Protocol:
 ### Cost diagnostics for partial functions
 
 ```text
-[partial] pipeline: (Vec[Int]) -> Vec[Int]
+[partial] pipeline: (List[Int]) -> List[Int]
   known cost: 200 (before hole) + ≤150 (after hole) = ≤350
   budget for ?middle_step: ≤650 (1000 - 350)
-  note: ?middle_step filling must have cost ≤ 650
+  note: ?middle_step filling must stay within the remaining compute budget (≤ 650)
 ```
 
 ### Post-fill diagnostics
