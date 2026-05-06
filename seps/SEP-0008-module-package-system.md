@@ -217,7 +217,7 @@ import basic_cli.cmd
 
 fn main() -> () uses [Console, Exit] {
     println("about to exit")
-    exit(7)
+    exit(7u8)
 }
 ```
 
@@ -615,7 +615,7 @@ explicitly:
 import basic_cli.cmd
 
 fn main() -> () uses [Exit] {
-    exit(7)
+    exit(7u8)
 }
 ```
 
@@ -1570,8 +1570,8 @@ pub foreign fn env_set(key: Str, value: Str) -> () uses [Env]
 
 // basic_cli.cmd
 pub foreign fn process_run(cmd: Str, args: List[Str]) -> Str ! ExecError uses [Spawn]
-pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> I64 ! ExecError uses [Spawn]
-pub foreign fn exit(code: I64) -> Never uses [Exit]
+pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> Option[U8] ! ExecError uses [Spawn]
+pub foreign fn exit(code: U8) -> Never uses [Exit]
 ```
 
 **Comparison with Roc, Elm, and Koka**:
@@ -1851,19 +1851,24 @@ broader whole-program effect routing remains follow-up work.
 
 ## Diagnostics impact
 
-### New diagnostic categories
+### Canonical diagnostic categories
+
+This SEP reuses the canonical diagnostic families defined in SEP-0006 instead
+of introducing a separate `E3xxx` / `E4xxx` namespace. Older draft placeholders
+in those ranges are retired in favor of the shared `M0xxx` and `C0xxx`
+registries.
 
 | Code | Category | Example |
 |---|---|---|
-| `E3001` | Visibility violation | Accessing a private function from another module |
-| `E3002` | Circular dependency | Module A → B → A |
-| `E3003` | Effect declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
-| `E3004` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
-| `E3005` | Alias chain | `pub alias` pointing to another alias |
-| `E3006` | Shadowing conflict | Import alias conflicts with module name |
-| `E4201` | Platform binding conflict | Project declares more than one Platform binding |
-| `E4202` | Unsupported startup effect | Selected startup entry requires an effect not listed in the Platform's `[platform].handled-effects` metadata |
-| `E4203` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
+| `M0201` | Visibility violation | Accessing a private function from another module |
+| `M0101` | Circular dependency | Module A → B → A |
+| `C0101` | Effect declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
+| `M0401` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
+| `M0204` | Alias chain | `pub alias` pointing to another alias |
+| `M0304` | Shadowing conflict | Import alias conflicts with module name |
+| `M0501` | Platform binding conflict | Project declares more than one Platform binding |
+| `C0201` | Unsupported startup effect | Selected startup entry requires an effect not listed in the Platform's `[platform].handled-effects` metadata |
+| `M0502` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
 
 ### Diagnostic structure
 

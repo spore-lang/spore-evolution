@@ -33,13 +33,13 @@ Ty ::= I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64 | F32 | F64
       | Named(name)
       | App(name, [Ty])
       | Record([(name, Ty)])
-      | Fn([Ty], Ty, EffectSet)
+      | Fn([Ty], Ty, EffectSet, ErrorSet)
       | Var(u32)
       | Hole(name)
       | Error
 ```
 
-**Reference compiler:** This matches the `Ty` enum shipped in `sporec-typeck` (see `crates/sporec-typeck/src/types.rs`): fixed-width numerics, no `Char`, plus `Tuple` and `Refined`. Single-quoted character literals are rejected in the lexer (**no `Char` type or literals**, `spore` PR #113). **Unsuffixed integer literals infer as `I64` and float literals as `F64`** unless a context forces another fixed width. Many examples in this SEP still write `Int` / `Float`; treat them as informal names for those defaults (`I64` / `F64`) until rewritten.
+**Reference compiler:** This matches the `Ty` enum shipped in `sporec-typeck` (see `crates/sporec-typeck/src/types.rs`): fixed-width numerics, no `Char`, plus `Tuple` and `Refined`. Single-quoted character literals are rejected in the lexer (**no `Char` type or literals**, `spore` PR #113). **Unsuffixed integer literals infer as `I64` and float literals as `F64`** unless a context forces another fixed width. `Int` and `Float` are not primitive names or informal aliases.
 
 **Platform-specific integers (e.g. process exit status).** The core type system does **not** fix a single machine type for exit codes or other host ABI surfaces. Those contracts live in the **Platform package** metadata and startup/exit specifications (see SEP-0008); this SEP only requires that the Spore signature matches whatever that Platform declares.
 
@@ -128,7 +128,7 @@ alias Port = I64 when self >= 1 && self <= 65535
 
 Platform code generation maps these types to machine representations; refinements are checked in the decidable fragment described later in this SEP.
 
-**Informal `Int` / `Float` in examples.** Older text may still write `Int` or `Float` for ergonomics. Until those examples are rewritten, read them as referring to the default scalar widths **`I64` / `F64`** in the reference toolchain.
+**No informal scalar aliases.** Examples and normative text must write fixed-width scalar names (`I64`, `F64`, `U8`, and so on). A project may define its own `alias Int = I64`, but that is ordinary user code and not part of the language prelude.
 
 ### 3.2 Type annotations on functions
 
@@ -220,7 +220,7 @@ summarize(data: { count: named.count, total: named.total })   // OK
 
 ### 3.5 Function types with effects
 
-Function types carry a **EffectSet** — the set of effects the function requires:
+Function types carry an **EffectSet** and an **ErrorSet** — the effects they require and the errors they may propagate:
 
 ```spore
 type Logger = Fn(msg: Str) -> () uses [FileWrite]
@@ -1049,7 +1049,7 @@ The internal type representation is the `Ty` enum, defined in `crates/sporec-typ
     | Named(n)                     // named type / type parameter
     | App(n, [τ₁, …, τₖ])         // generic type application
     | Record([(f₁, τ₁), …])       // anonymous record (structural)
-    | Fn([τ₁, …, τₙ], τᵣ, C)     // function type with effect set
+    | Fn([τ₁, …, τₙ], τᵣ, C, E)  // function type with effect and error sets
     | Var(id)                      // unification variable
     | Hole(name)                   // typed hole placeholder
     | Error                        // error sentinel (recovery)
@@ -1059,7 +1059,8 @@ Where:
 
 - `n` ranges over identifiers (strings).
 - `id` ranges over `u32` (unique unification variable IDs).
-- `C` is a **EffectSet** = `BTreeSet<String>`, the set of effect names the function requires.
+- `C` is an **EffectSet** = `BTreeSet<String>`, the set of effect names the function requires.
+- `E` is an **ErrorSet**, the closed union of error types declared with `!`.
 - `f` ranges over field names (strings) in anonymous records.
 
 **Never type.** `Ty::Never` is the bottom type — a subtype of all types. It is produced by diverging expressions (`panic`, non-terminating recursion). During unification, `unify(τ, Never) = ok` for all `τ`.
@@ -1076,10 +1077,10 @@ Where:
 pub type EffectSet = BTreeSet<String>;
 ```
 
-A `EffectSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`:
+An `EffectSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`; the fourth component is the function's `ErrorSet`:
 
 ```text
-Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
+Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … }, { err₁, err₂, … })
 ```
 
 **EffectSet rules:**
@@ -1092,10 +1093,11 @@ Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 **Formal effect checking rule:**
 
 ```text
-Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f)
+Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f, E_f)
 C_caller ⊇ C_f
-─────────────────────────────────────────
-Γ; C_caller ⊢ f(e₁, …, eₙ) : τᵣ
+canonicalize(E_f) ⊆ canonicalize(E_caller)
+────────────────────────────────────────────────────────────
+Γ; C_caller; E_caller ⊢ f(e₁, …, eₙ) : τᵣ
 ```
 
 If `C_f ⊄ C_caller`, the checker emits:
@@ -1281,11 +1283,12 @@ x : τ ∈ Γ
 **Function application (synthesis):**
 
 ```text
-Γ ⊢ f ⇒ Fn([σ₁, …, σₙ], τᵣ, C)
+Γ ⊢ f ⇒ Fn([σ₁, …, σₙ], τᵣ, C, E)
 Γ ⊢ eᵢ ⇐ σᵢ   for i ∈ 1..n
 C ⊆ C_current
-──────────────────────────────────
-Γ; C_current ⊢ f(e₁, …, eₙ) ⇒ τᵣ
+canonicalize(E) ⊆ canonicalize(E_current)
+────────────────────────────────────────────────────
+Γ; C_current; E_current ⊢ f(e₁, …, eₙ) ⇒ τᵣ
 ```
 
 **Let binding (synthesis):**
@@ -1484,10 +1487,10 @@ Record(fields₁) <: Record(fields₂)
 
 ### 4.8 Function types
 
-Function types are `Ty::Fn(params, ret, EffectSet)`:
+Function types are `Ty::Fn(params, ret, EffectSet, ErrorSet)`:
 
 ```text
-Fn([σ₁, …, σₙ], τᵣ, C)
+Fn([σ₁, …, σₙ], τᵣ, C, E)
 ```
 
 A function value is a first-class value. Looking up a function name in the registry when it appears as a bare expression produces its function type:
@@ -1496,8 +1499,8 @@ A function value is a first-class value. Looking up a function name in the regis
 Expr::Var(name) => {
     if let Some(ty) = self.env.lookup(name) {
         ty.clone()
-    } else if let Some((params, ret, caps)) = self.registry.functions.get(name) {
-        Ty::Fn(params.clone(), Box::new(ret.clone()), caps.clone())
+    } else if let Some((params, ret, caps, errs)) = self.registry.functions.get(name) {
+        Ty::Fn(params.clone(), Box::new(ret.clone()), caps.clone(), errs.clone())
     } else {
         self.err(format!("undefined variable `{name}`"));
         Ty::Error
@@ -1551,7 +1554,7 @@ Spore primarily uses **equality-based** type compatibility via unification, with
 
 (Both operands unify to the **same** `Ty`; there is no implicit widening between widths—see §4.9.)
 
-**String concatenation** (`+` only):
+**`Str` concatenation** (`+` only):
 
 ```text
 Γ ⊢ e₁ ⇒ Str    Γ ⊢ e₂ ⇒ Str
@@ -1676,7 +1679,7 @@ Traits are registered in a `TraitRegistry` alongside the `TypeRegistry`. Each tr
 
 - Trait name
 - Supertrait requirements (e.g., `Ord: Eq`)
-- Method signatures (name, parameter types, return type, EffectSet)
+- Method signatures (name, parameter types, return type, EffectSet, ErrorSet)
 - Associated type declarations
 - Default method implementations (if any)
 
@@ -1870,8 +1873,8 @@ All types implement `Display` with a canonical format:
 | `Ty::Named("Foo")` | `Foo` |
 | `Ty::App("List", [I64])` | `List[I64]` |
 | `Ty::Record([(x, I64), (y, F64)])` | `{ x: I64, y: F64 }` |
-| `Ty::Fn([I64], Bool, {})` | `(I64) -> Bool` |
-| `Ty::Fn([I64], Bool, {"Net"})` | `(I64) -> Bool uses [Net]` |
+| `Ty::Fn([I64], Bool, {}, {})` | `(I64) -> Bool` |
+| `Ty::Fn([I64], Bool, {"Net"}, {})` | `(I64) -> Bool uses [Net]` |
 | `Ty::Var(3)` | `?T3` |
 | `Ty::Hole("h1")` | `?h1` |
 | `Ty::Error` | `<error>` |
@@ -2081,7 +2084,7 @@ Since this is the first formal type system specification (implemented by `sporec
 
 ## Unresolved questions
 
-1. **EffectSet in unification.** Currently, function type unification ignores EffectSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should EffectSets participate in unification, or remain checked separately? Separate checking is simpler but could miss effect mismatches in higher-order function arguments.
+1. **EffectSet in unification.** Currently, function type unification ignores EffectSets and ErrorSets (the `_` placeholders in `Fn(p1, r1, _, _), Fn(p2, r2, _, _)`). Should those sets participate in unification, or remain checked separately? Separate checking is simpler but could miss higher-order mismatches unless call-site validation stays strict.
 
 2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[I64]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
 

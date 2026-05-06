@@ -306,7 +306,7 @@ fn event_loop(
     events: Receiver[Event],
     shutdown: Receiver[Unit],
 ) -> Unit ! ChannelClosed
-uses [ChanRecv[Command], ChanRecv[Event], ChanRecv[Unit], Spawn]
+uses [Channel, Spawn]
 {
     select {
         cmd from commands => {
@@ -592,12 +592,9 @@ let (tx, rx) = Channel.new[Message](buffer: 0)
 #### Channel operations as effects
 
 ```spore
-effect ChanSend[T] {
-    fn send(value: T) -> Unit ! ChannelClosed
-}
-
-effect ChanRecv[T] {
-    fn recv() -> T ! ChannelClosed
+effect Channel {
+    fn send[T](channel: Sender[T], value: T) -> Unit ! ChannelClosed
+    fn recv[T](channel: Receiver[T]) -> T ! ChannelClosed
 }
 ```
 
@@ -605,13 +602,13 @@ Functions using channels must declare the corresponding effects:
 
 ```spore
 fn producer(tx: Sender[I64]) -> Unit ! ChannelClosed
-uses [ChanSend[I64]]
+uses [Channel]
 {
     (0..100).each(|i| tx.send(i))
 }
 
 fn consumer(rx: Receiver[I64]) -> List[I64] ! ChannelClosed
-uses [ChanRecv[I64]]
+uses [Channel]
 {
     rx.collect()
 }

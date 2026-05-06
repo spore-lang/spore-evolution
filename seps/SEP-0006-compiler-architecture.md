@@ -19,7 +19,7 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
-> **Executive Summary**: Defines a 6-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Lower → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (effect violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
+> **Executive Summary**: Defines a 5-phase compiler pipeline (Lex → Parse → Resolve → TypeCheck → Codegen) with SEP-aligned diagnostic codes organized by category — E0xxx (type errors), C0xxx (effect violations), K0xxx (cost budget), M0xxx (module errors), W0xxx (warnings). The architecture centers on a shared diagnostics pipeline consumed by CLI JSON, LSP, and the hole/reporting surfaces, while `spore watch --json` currently provides summary NDJSON events (`compile_result` plus `hole_graph_update`) and leaves richer watch transports as a later layer.
 
 ## Summary
 
@@ -119,7 +119,7 @@ error[E0301]: type mismatch
   --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
-   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
+   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `Str`
    |
 help: try `Money.from_string("fifty dollars")`
 ```
@@ -324,7 +324,7 @@ The Desugar pass (merged into Resolve) canonicalizes all syntactic sugar:
 |-------|---------------|
 | `a \|> f(b)` | `f(a, b)` |
 | `expr?` | `match expr { Ok(v) => v, Err(e) => return Err(e.into()) }` |
-| `f"hello {name}"` | `format("hello {}", name)` |
+| `f"hello {name}"` | `InterpolatedStr([Literal("hello "), Expr(name)])` |
 | `t"hello {name}"` | `Template([Literal("hello "), Interpolation(name)])` |
 
 **sig hash is computed at this layer.** It covers:
@@ -602,8 +602,8 @@ $ spore watch src/main.sp
 [watch] ✓ Initial compilation complete, 0 errors, 3 holes
 
   Holes (3):
-    ◯ src/auth.sp:10  hash_password     : String -> HashedPassword
-    ◯ src/auth.sp:20  verify_password   : String -> HashedPassword -> Bool
+    ◯ src/auth.sp:10  hash_password     : Str -> HashedPassword
+    ◯ src/auth.sp:20  verify_password   : Str -> HashedPassword -> Bool
     ◯ src/app.sp:50   create_user       : UserInput -> Result User Error
          ⚠ blocked: depends on hash_password, verify_password
   Ready to fill: hash_password, verify_password
@@ -616,7 +616,7 @@ $ spore watch src/main.sp
 [watch] sig hash unchanged → skipping downstream
   ✓ 0 errors, 2 holes (was: 3)
     ● hash_password      [filled ✓]
-    ◯ verify_password   : String -> HashedPassword -> Bool
+    ◯ verify_password   : Str -> HashedPassword -> Bool
     ◯ create_user       ⚠ blocked: depends on verify_password
   Ready to fill: verify_password
 
@@ -640,10 +640,18 @@ $ spore watch src/main.sp
   ✓ 0 errors, 0 holes 🎉 All holes filled!
 ```
 
-#### Hole status data structures
+#### Current hole summary and future graph structures
 
 ```text
-type HoleReport:
+type HoleGraphSummary:
+    holes_total: Nat
+    filled_this_cycle: Nat
+    ready_to_fill: Nat
+    blocked: Nat
+
+// Current stable `hole_graph_update` NDJSON payload
+// Future richer watch transport (not yet the stable payload shape)
+type HoleGraphUpdate:
     total: Nat
     filled_this_cycle: List Hole
     ready_to_fill: List Hole        // dependencies satisfied, can implement now
@@ -652,13 +660,18 @@ type HoleReport:
 type Hole:
     module: ModuleId
     location: SourceLocation
-    name: String
+    name: Str
     signature: Type
 
 type BlockedHole:
     hole: Hole
     blocked_by: List ModuleId       // modules containing unfilled dependency holes
 ```
+
+Current `spore watch --json` serializes `hole_graph_update` as the compact
+`HoleGraphSummary` shape shown above. `HoleGraphUpdate` remains the target
+extension type for a later richer watch transport that can carry per-hole
+details without overloading the stable summary contract.
 
 #### Module dependency graph structures
 
@@ -747,7 +760,7 @@ LSP diagnostics are published directly from the compiler's shared diagnostics pi
       "severity": 1,
       "code": "E0301",
       "source": "spore",
-      "message": "type mismatch: expected `Token`, found `String`"
+      "message": "type mismatch: expected `Token`, found `Str`"
     }]
   }
 }
@@ -833,18 +846,18 @@ error[E0301]: type mismatch
   --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
-   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
+   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `Str`
    |
 help: try `Money.from_string("fifty dollars")`
 
   inference chain:
-    "fifty dollars" : String       (literal, line 42)
+    "fifty dollars" : Str          (literal, line 42)
     charge.amount : Money          (from signature, sig@b3c1e2)
-    String ≠ Money                 (nominal mismatch)
+    Str ≠ Money                    (nominal mismatch)
 
   candidates considered:
-    String -> Money via Money.from_string  ✓ (exact match)
-    String -> Money via Money.parse        ✓ (may raise ParseError)
+    Str -> Money via Money.from_string     ✓ (exact match)
+    Str -> Money via Money.parse           ✓ (may raise ParseError)
 
   effect context: [PaymentGateway]
   cost at this point: 120 / budget 500
@@ -862,7 +875,7 @@ make richer analysis payloads an explicit later layer.
 {
   "code": "E0301",
   "severity": "error",
-  "message": "type mismatch: expected `Money`, found `String`",
+  "message": "type mismatch: expected `Money`, found `Str`",
   "primary_span": {
     "file": "src/billing.sp",
     "range": {
@@ -992,11 +1005,11 @@ $ sporec explain E0301
   - Pipe operator (left-hand type ≠ right-hand function's first parameter)
 
   Example:
-      fn greet(name: String) -> String { ... }
-      greet(42)   // error: expected String, found Int
+      fn greet(name: Str) -> Str { ... }
+      greet(42)   // error: expected Str, found I64
 
   Common fixes:
-  - Use a conversion function (e.g. `Int.to_string(42)`)
+  - Use a conversion function (e.g. `I64.to_string(42)`)
   - Change the declaration to accept the actual type
   - Add a type annotation to guide inference
 
@@ -1014,7 +1027,7 @@ Target latencies (aspirational, not hard guarantees):
 | Hash computation (single module) | < 5ms | blake3 of module content |
 | Full project initial analysis (~100 modules) | < 5s | Cold start, parallel compilation |
 | End-to-end latency (file save → diagnostics) | < 200ms | Including 100ms debounce |
-| Hole report update | < 50ms | Incremental HoleReport regeneration |
+| Hole graph update | < 50ms | Incremental hole summary / `HoleGraphUpdate` regeneration |
 
 **Cache strategy:** Watch mode maintains in-memory caches for hashes, dependency graph, compilation artifacts, and hole state. Persistence to disk is not required for v0.1 but is a future option.
 
@@ -1348,7 +1361,7 @@ error[E0301]: type mismatch
   --> src/billing.sp:42:22
    |
 42 |     charge(card, "fifty dollars")
-   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `String`
+   |                  ^^^^^^^^^^^^^^^ expected `Money`, found `Str`
    |
 help: try `Money.from_string("fifty dollars")`
 ```
@@ -1522,11 +1535,15 @@ Canonical enum: `spore` repo `crates/sporec-typeck/src/error.rs` (SEP tables may
 | `M0201` | visibility-violation | Accessing private or `pub(pkg)` symbol from outside scope |
 | `M0202` | re-export-visibility | Re-exporting with broader visibility than original |
 | `M0203` | orphan-impl | Implementing external trait for external type |
+| `M0204` | alias-chain | `pub alias` points to another alias instead of a concrete export |
 | `M0301` | import-not-found | Imported module or symbol does not exist |
 | `M0302` | ambiguous-import | Two imports bring same name into scope |
 | `M0303` | wildcard-import | Wildcard imports are not allowed in Spore |
+| `M0304` | import-shadowing-conflict | Import alias conflicts with module name or existing import binding |
 | `M0401` | snapshot-changed | Dependent signature hash changed; requires `--permit` |
 | `M0402` | snapshot-missing | Referenced snapshot not found in `.spore-lock` |
+| `M0501` | platform-binding-conflict | Project declares more than one Platform binding |
+| `M0502` | startup-contract-mismatch | Startup function signature does not satisfy selected Platform contract |
 
 ### System integration
 
@@ -1535,10 +1552,10 @@ Diagnostics do not exist in isolation — they connect to every major Spore subs
 #### Hole System integration
 
 - `H0101` (hole-report) is emitted as `note` severity for each unfilled hole during compilation
-- `sporec query-hole <file> ?name` returns a full `HoleReport` — a superset of
-  `H0101` with candidate ranking, binding types, and cost budget
+- `sporec query-hole <file> ?name` returns the full per-hole `HoleReport` —
+  a superset of `H0101` with candidate ranking, binding types, and cost budget
 - Partial functions (`H0201`) compile successfully — they produce diagnostics but not errors
-- The HoleReport JSON extends the diagnostic schema with a `hole_report` field
+- The per-hole HoleReport JSON extends the diagnostic schema with a `hole_report` field
 
 #### Cost System integration
 

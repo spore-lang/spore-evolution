@@ -90,7 +90,7 @@ import basic_cli.cmd
 
 fn main() -> () uses [Console, Exit] {
     println("hello")
-    exit(0)
+    exit(0u8)
 }
 ```
 
@@ -126,7 +126,7 @@ The prelude is implicitly imported into every module. It contains:
 
 **No `Char`.** Unicode scalars are represented as `Str` values (typically length 1). Character predicates and conversions live in `stdlib/char.sp` (`is_digit`, `char_to_int`, …). This matches `spore` PR #113.
 
-**Literals.** In the reference type checker, unsuffixed integer literals default to **`I64`** and float literals to **`F64`**. Older spec examples may still say `Int` / `Float` — see SEP-0002 for the informal shorthand convention.
+**Literals.** In the reference type checker, unsuffixed integer literals default to **`I64`** and floating-point literals default to **`F64`**. Standard-library signatures use explicit fixed-width names; `Int` and `Float` are not standard aliases.
 
 #### Algebraic types
 
@@ -158,22 +158,22 @@ type Ordering { Less, Equal, Greater }
 ```spore
 fn unwrap[T](opt: Option[T]) -> T
     ! PanicError
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn unwrap_or[T](opt: Option[T], default: T) -> T
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn map[T, U](opt: Option[T], f: (T) -> U) -> Option[U]
-    cost cost(f)
+    cost [cost(f), 0, 0, 1]
 
 fn and_then[T, U](opt: Option[T], f: (T) -> Option[U]) -> Option[U]
-    cost cost(f)
+    cost [cost(f), 0, 0, 1]
 
 fn is_some[T](opt: Option[T]) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn is_none[T](opt: Option[T]) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 ```
 
 #### Result[T, E] methods
@@ -181,25 +181,25 @@ fn is_none[T](opt: Option[T]) -> Bool
 ```spore
 fn unwrap[T, E](res: Result[T, E]) -> T
     ! PanicError
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn unwrap_or[T, E](res: Result[T, E], default: T) -> T
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn map[T, U, E](res: Result[T, E], f: (T) -> U) -> Result[U, E]
-    cost cost(f)
+    cost [cost(f), 0, 0, 1]
 
 fn map_err[T, E, F](res: Result[T, E], f: (E) -> F) -> Result[T, F]
-    cost cost(f)
+    cost [cost(f), 0, 0, 1]
 
 fn and_then[T, U, E](res: Result[T, E], f: (T) -> Result[U, E]) -> Result[U, E]
-    cost cost(f)
+    cost [cost(f), 0, 0, 1]
 
 fn is_ok[T, E](res: Result[T, E]) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn is_err[T, E](res: Result[T, E]) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 ```
 
 #### List iteration (core HOFs)
@@ -208,82 +208,82 @@ These are the **primary iteration primitives** in Spore (no loops — SEP-0001):
 
 ```spore
 fn map[A, B](list: List[A], f: (A) -> B) -> List[B]
-    cost len(list) * cost(f) + O(len(list))
+    cost [len(list) * cost(f) + len(list), len(list), 0, 1]
 
 fn filter[A](list: List[A], p: (A) -> Bool) -> List[A]
-    cost len(list) * cost(p) + O(len(list))
+    cost [len(list) * cost(p) + len(list), len(list), 0, 1]
 
 fn fold[A, B](list: List[A], init: B, f: (B, A) -> B) -> B
-    cost len(list) * cost(f)
+    cost [len(list) * cost(f), 0, 0, 1]
 
 fn each[A](list: List[A], f: (A) -> Unit) -> Unit
-    cost len(list) * cost(f)
+    cost [len(list) * cost(f), 0, 0, 1]
 
 fn flat_map[A, B](list: List[A], f: (A) -> List[B]) -> List[B]
-    cost len(list) * cost(f) + O(total_output_len)
+    cost [len(list) * cost(f) + total_output_len, total_output_len, 0, 1]
 
 fn zip[A, B](a: List[A], b: List[B]) -> List[(A, B)]
-    cost O(min(len(a), len(b)))
+    cost [min(len(a), len(b)), min(len(a), len(b)), 0, 1]
 
 fn enumerate[A](list: List[A]) -> List[(I64, A)]
-    cost O(len(list))
+    cost [len(list), len(list), 0, 1]
 ```
 
 #### List query functions
 
 ```spore
 fn len[A](list: List[A]) -> I64
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn is_empty[A](list: List[A]) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn head[A](list: List[A]) -> Option[A]
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn tail[A](list: List[A]) -> Option[List[A]]
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn last[A](list: List[A]) -> Option[A]
-    cost O(len(list))
+    cost [len(list), 0, 0, 1]
 
 fn contains[A](list: List[A], item: A) -> Bool
     where A: Eq
-    cost O(len(list))
+    cost [len(list), 0, 0, 1]
 
 fn find[A](list: List[A], p: (A) -> Bool) -> Option[A]
-    cost O(len(list)) * cost(p)
+    cost [len(list) * cost(p), 0, 0, 1]
 
 fn any[A](list: List[A], p: (A) -> Bool) -> Bool
-    cost O(len(list)) * cost(p)
+    cost [len(list) * cost(p), 0, 0, 1]
 
 fn all[A](list: List[A], p: (A) -> Bool) -> Bool
-    cost O(len(list)) * cost(p)
+    cost [len(list) * cost(p), 0, 0, 1]
 ```
 
 #### List construction functions
 
 ```spore
 fn append[A](list: List[A], item: A) -> List[A]
-    cost O(len(list))
+    cost [len(list), len(list), 0, 1]
 
 fn prepend[A](item: A, list: List[A]) -> List[A]
-    cost O(1)
+    cost [1, 1, 0, 1]
 
 fn concat[A](a: List[A], b: List[A]) -> List[A]
-    cost O(len(a))
+    cost [len(a), len(a) + len(b), 0, 1]
 
 fn reverse[A](list: List[A]) -> List[A]
-    cost O(len(list))
+    cost [len(list), len(list), 0, 1]
 
 fn take[A](list: List[A], n: I64) -> List[A]
-    cost O(n)
+    cost [n, n, 0, 1]
 
 fn drop[A](list: List[A], n: I64) -> List[A]
-    cost O(n)
+    cost [n, len(list), 0, 1]
 
 fn range(start: I64, end: I64) -> List[I64]
-    cost O(end - start)
+    cost [end - start, end - start, 0, 1]
 ```
 
 #### Sorting
@@ -291,10 +291,10 @@ fn range(start: I64, end: I64) -> List[I64]
 ```spore
 fn sort[A](list: List[A]) -> List[A]
     where A: Ord
-    cost O(len(list) * log(len(list)))
+    cost [len(list) * log(len(list)), len(list), 0, 1]
 
 fn sort_by[A](list: List[A], cmp: (A, A) -> Ordering) -> List[A]
-    cost O(len(list) * log(len(list))) * cost(cmp)
+    cost [len(list) * log(len(list)) * cost(cmp), len(list), 0, 1]
 ```
 
 #### Conversion and display
@@ -302,11 +302,11 @@ fn sort_by[A](list: List[A], cmp: (A, A) -> Ordering) -> List[A]
 ```spore
 fn to_string[A](value: A) -> Str
     where A: Display
-    cost O(1)
+    cost [1, 1, 0, 1]
 
 fn debug[A](value: A) -> Str
     where A: Debug
-    cost O(1)
+    cost [1, 1, 0, 1]
 ```
 
 ### 4.3 Core modules
@@ -314,36 +314,35 @@ fn debug[A](value: A) -> Str
 #### `std.math`
 
 ```spore
-module std.math
-
-fn abs(x: I64) -> I64             cost O(1)
-fn abs_float(x: F64) -> F64   cost O(1)
-fn min(a: I64, b: I64) -> I64     cost O(1)
-fn max(a: I64, b: I64) -> I64     cost O(1)
-fn clamp(x: I64, lo: I64, hi: I64) -> I64  cost O(1)
+fn abs(x: I64) -> I64                 cost [1, 0, 0, 1]
+fn abs_float(x: F64) -> F64           cost [1, 0, 0, 1]
+fn min(a: I64, b: I64) -> I64         cost [1, 0, 0, 1]
+fn max(a: I64, b: I64) -> I64         cost [1, 0, 0, 1]
+fn clamp(x: I64, lo: I64, hi: I64) -> I64
+    cost [1, 0, 0, 1]
 
 // Floating-point math
-fn sqrt(x: F64) -> F64        cost O(1)
-fn pow(base: F64, exp: F64) -> F64  cost O(1)
-fn log(x: F64) -> F64         cost O(1)
-fn log2(x: F64) -> F64        cost O(1)
-fn log10(x: F64) -> F64       cost O(1)
-fn exp(x: F64) -> F64         cost O(1)
+fn sqrt(x: F64) -> F64                cost [1, 0, 0, 1]
+fn pow(base: F64, exp: F64) -> F64    cost [1, 0, 0, 1]
+fn log(x: F64) -> F64                 cost [1, 0, 0, 1]
+fn log2(x: F64) -> F64                cost [1, 0, 0, 1]
+fn log10(x: F64) -> F64               cost [1, 0, 0, 1]
+fn exp(x: F64) -> F64                 cost [1, 0, 0, 1]
 
 // Trigonometric
-fn sin(x: F64) -> F64         cost O(1)
-fn cos(x: F64) -> F64         cost O(1)
-fn tan(x: F64) -> F64         cost O(1)
-fn asin(x: F64) -> F64        cost O(1)
-fn acos(x: F64) -> F64        cost O(1)
-fn atan(x: F64) -> F64        cost O(1)
-fn atan2(y: F64, x: F64) -> F64  cost O(1)
+fn sin(x: F64) -> F64                 cost [1, 0, 0, 1]
+fn cos(x: F64) -> F64                 cost [1, 0, 0, 1]
+fn tan(x: F64) -> F64                 cost [1, 0, 0, 1]
+fn asin(x: F64) -> F64                cost [1, 0, 0, 1]
+fn acos(x: F64) -> F64                cost [1, 0, 0, 1]
+fn atan(x: F64) -> F64                cost [1, 0, 0, 1]
+fn atan2(y: F64, x: F64) -> F64       cost [1, 0, 0, 1]
 
 // Rounding
-fn floor(x: F64) -> I64         cost O(1)
-fn ceil(x: F64) -> I64          cost O(1)
-fn round(x: F64) -> I64         cost O(1)
-fn truncate(x: F64) -> I64      cost O(1)
+fn floor(x: F64) -> I64                cost [1, 0, 0, 1]
+fn ceil(x: F64) -> I64                 cost [1, 0, 0, 1]
+fn round(x: F64) -> I64                cost [1, 0, 0, 1]
+fn truncate(x: F64) -> I64             cost [1, 0, 0, 1]
 
 // Constants
 let pi: F64 = 3.14159265358979323846
@@ -356,77 +355,76 @@ let nan: F64
 #### `std.string`
 
 ```spore
-module std.string
+fn length(s: Str) -> I64                    cost [1, 0, 0, 1]
+fn is_empty(s: Str) -> Bool                 cost [1, 0, 0, 1]
+fn char_at(s: Str, index: I64) -> Option[Str]
+    cost [1, 0, 0, 1]
+fn substring(s: Str, start: I64, end: I64) -> Str
+    cost [end - start, end - start, 0, 1]
 
-fn length(s: Str) -> I32                  cost O(1)
-fn is_empty(s: Str) -> Bool               cost O(1)
-fn char_at(s: Str, index: I32) -> Option[Str]  cost O(1)
-fn substring(s: Str, start: I32, end: I32) -> Str  cost O(end - start)
-
-fn concat(a: Str, b: Str) -> Str    cost O(len(a) + len(b))
+fn concat(a: Str, b: Str) -> Str      cost [len(a) + len(b), len(a) + len(b), 0, 1]
 fn join(parts: List[Str], sep: Str) -> Str
-    cost O(total_len(parts) + len(parts) * len(sep))
+    cost [total_len(parts) + len(parts) * len(sep), total_len(parts) + len(parts) * len(sep), 0, 1]
 
 fn split(s: Str, sep: Str) -> List[Str]
-    cost O(len(s))
+    cost [len(s), len(s), 0, 1]
 
-fn trim(s: Str) -> Str                 cost O(len(s))
-fn trim_start(s: Str) -> Str           cost O(len(s))
-fn trim_end(s: Str) -> Str             cost O(len(s))
+fn trim(s: Str) -> Str                   cost [len(s), len(s), 0, 1]
+fn trim_start(s: Str) -> Str             cost [len(s), len(s), 0, 1]
+fn trim_end(s: Str) -> Str               cost [len(s), len(s), 0, 1]
 
-fn to_upper(s: Str) -> Str             cost O(len(s))
-fn to_lower(s: Str) -> Str             cost O(len(s))
+fn to_upper(s: Str) -> Str               cost [len(s), len(s), 0, 1]
+fn to_lower(s: Str) -> Str               cost [len(s), len(s), 0, 1]
 
-fn contains(s: Str, pattern: Str) -> Bool  cost O(len(s))
-fn starts_with(s: Str, prefix: Str) -> Bool  cost O(len(prefix))
-fn ends_with(s: Str, suffix: Str) -> Bool  cost O(len(suffix))
+fn contains(s: Str, pattern: Str) -> Bool    cost [len(s), 0, 0, 1]
+fn starts_with(s: Str, prefix: Str) -> Bool  cost [len(prefix), 0, 0, 1]
+fn ends_with(s: Str, suffix: Str) -> Bool    cost [len(suffix), 0, 0, 1]
 
-fn replace(s: Str, from: Str, to: Str) -> Str  cost O(len(s))
+fn replace(s: Str, from: Str, to: Str) -> Str
+    cost [len(s), len(s), 0, 1]
 
-fn parse_int(s: Str) -> Result[I32, ParseError]  cost O(len(s))
-fn parse_float(s: Str) -> Result[F64, ParseError]  cost O(len(s))
+fn parse_int(s: Str) -> Result[I64, ParseError]    cost [len(s), 0, 0, 1]
+fn parse_float(s: Str) -> Result[F64, ParseError]  cost [len(s), 0, 0, 1]
 ```
 
 #### `std.collections`
 
 ```spore
-module std.collections
-
 // ── Map[K, V] ──────────────────────────────────────────────────────
 
 type Map[K, V]  // Immutable hash map (K must implement Hash + Eq)
 
 fn empty_map[K, V]() -> Map[K, V]
     where K: Hash + Eq
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn get[K, V](m: Map[K, V], key: K) -> Option[V]
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn insert[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V]
-    cost O(1)  // amortized
+    cost [1, 1, 0, 1]  // amortized
 
 fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V]
-    cost O(1)  // amortized
+    cost [1, 1, 0, 1]  // amortized
 
 fn contains_key[K, V](m: Map[K, V], key: K) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn keys[K, V](m: Map[K, V]) -> List[K]
-    cost O(len(m))
+    cost [len(m), len(m), 0, 1]
 
 fn values[K, V](m: Map[K, V]) -> List[V]
-    cost O(len(m))
+    cost [len(m), len(m), 0, 1]
 
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)]
-    cost O(len(m))
+    cost [len(m), len(m), 0, 1]
 
 fn map_size[K, V](m: Map[K, V]) -> I64
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V]
     where K: Hash + Eq
-    cost O(len(pairs))
+    cost [len(pairs), len(pairs), 0, 1]
 
 // ── Set[T] ─────────────────────────────────────────────────────────
 
@@ -434,35 +432,35 @@ type Set[T]  // Immutable hash set (T must implement Hash + Eq)
 
 fn empty_set[T]() -> Set[T]
     where T: Hash + Eq
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn add[T](s: Set[T], item: T) -> Set[T]
-    cost O(1)  // amortized
+    cost [1, 1, 0, 1]  // amortized
 
 fn remove_from[T](s: Set[T], item: T) -> Set[T]
-    cost O(1)  // amortized
+    cost [1, 1, 0, 1]  // amortized
 
 fn member[T](s: Set[T], item: T) -> Bool
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn set_size[T](s: Set[T]) -> I64
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn union[T](a: Set[T], b: Set[T]) -> Set[T]
-    cost O(len(a) + len(b))
+    cost [len(a) + len(b), len(a) + len(b), 0, 1]
 
 fn intersection[T](a: Set[T], b: Set[T]) -> Set[T]
-    cost O(min(len(a), len(b)))
+    cost [min(len(a), len(b)), min(len(a), len(b)), 0, 1]
 
 fn difference[T](a: Set[T], b: Set[T]) -> Set[T]
-    cost O(len(a))
+    cost [len(a), len(a), 0, 1]
 
 fn to_list[T](s: Set[T]) -> List[T]
-    cost O(len(s))
+    cost [len(s), len(s), 0, 1]
 
 fn from_list[T](items: List[T]) -> Set[T]
     where T: Hash + Eq
-    cost O(len(items))
+    cost [len(items), len(items), 0, 1]
 ```
 
 #### `std.io` (future standardization layer)
@@ -480,6 +478,12 @@ manifest-backed projects import Platform package modules directly. For
 | `basic_cli.env` | `env_get`, `env_set` | `Env` |
 | `basic_cli.cmd` | `process_run`, `process_run_status`, `exit` | `Spawn`, `Exit` |
 
+```spore
+pub foreign fn process_run(cmd: Str, args: List[Str]) -> Str ! ExecError uses [Spawn]
+pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> Option[U8] ! ExecError uses [Spawn]
+pub foreign fn exit(code: U8) -> Never uses [Exit]
+```
+
 `basic_cli.cmd.exit(code)` is the currently shipped explicit process-termination
 surface. In project mode it works together with SEP-0008's startup contract
 (`main() -> ()`), and the runtime converts the resulting structured outcome into
@@ -492,24 +496,22 @@ design sketches rather than as the current contract.
 #### `std.time` (platform-provided)
 
 ```spore
-module std.time
-
 type DateTime   // Opaque timestamp
 type Duration   // Time interval
 
 foreign fn now() -> DateTime
     uses [Clock]
-    cost O(1)
+    cost [1, 0, 1, 1]
 
 foreign fn elapsed(start: DateTime) -> Duration
     uses [Clock]
-    cost O(1)
+    cost [1, 0, 1, 1]
 
 fn duration_ms(d: Duration) -> I64
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 fn duration_secs(d: Duration) -> F64
-    cost O(1)
+    cost [1, 0, 0, 1]
 
 foreign fn sleep(ms: I64) -> Unit
     uses [Clock]
@@ -519,8 +521,6 @@ foreign fn sleep(ms: I64) -> Unit
 #### `std.json`
 
 ```spore
-module std.json
-
 type JsonValue {
     JsonNull,
     JsonBool(Bool),
@@ -532,41 +532,39 @@ type JsonValue {
 }
 
 fn parse_json(s: Str) -> Result[JsonValue, ParseError]
-    cost O(len(s))
+    cost [len(s), len(s), 0, 1]
 
 fn to_json[T](value: T) -> Str
     where T: Serialize
-    cost O(size(value))
+    cost [size(value), size(value), 0, 1]
 
 fn from_json[T](s: Str) -> Result[T, ParseError]
     where T: Deserialize
-    cost O(len(s))
+    cost [len(s), len(s), 0, 1]
 ```
 
 #### `std.random` (platform-provided)
 
 ```spore
-module std.random
-
 foreign fn random_float() -> F64
     uses [Random]
-    cost O(1)
+    cost [1, 0, 1, 1]
 
 foreign fn random_int(min: I64, max: I64) -> I64
     uses [Random]
-    cost O(1)
+    cost [1, 0, 1, 1]
 
 foreign fn uuid() -> Str
     uses [Random]
-    cost O(1)
+    cost [1, 16, 1, 1]
 
 fn shuffle[A](list: List[A]) -> List[A]
     uses [Random]
-    cost O(len(list))
+    cost [len(list), len(list), 1, 1]
 
 fn sample[A](list: List[A]) -> Option[A]
     uses [Random]
-    cost O(1)
+    cost [1, 0, 1, 1]
 ```
 
 ### 4.4 Error type hierarchy
@@ -594,18 +592,18 @@ type IoError {
 type HttpError {
     ConnectionFailed(Str),
     Timeout(Str),
-    StatusError(I32, Str),
+    StatusError(U16, Str),
     Other(Str),
 }
 
 type ParseError {
     InvalidFormat(Str),
-    UnexpectedToken(Str, I32),
+    UnexpectedToken(Str, I64),
     Other(Str),
 }
 
 type JsonError {
-    InvalidJson(Str, I32),
+    InvalidJson(Str, I64),
     TypeMismatch(Str),
     MissingField(Str),
 }
@@ -624,10 +622,10 @@ These 13 traits have special compiler support (SEP-0002). The stdlib provides th
 | `Clone` | `clone(self) -> Self` | ✅ | Deep copy |
 | `Display` | `display(self) -> Str` | ❌ | Human-readable formatting |
 | `Debug` | `debug(self) -> Str` | ✅ | Debug formatting |
-| `Hash` | `hash(self) -> I32` | ✅ | Hash computation |
+| `Hash` | `hash(self) -> U64` | ✅ | Hash computation |
 | `Default` | `default() -> Self` | ✅ | Default value |
-| `Serialize` | `serialize(self) -> List[I32]` | ✅ | Byte serialization |
-| `Deserialize` | `deserialize(bytes: List[I32]) -> Result[Self, ParseError]` | ✅ | Byte deserialization |
+| `Serialize` | `serialize(self) -> List[U8]` | ✅ | Byte serialization |
+| `Deserialize` | `deserialize(bytes: List[U8]) -> Result[Self, ParseError]` | ✅ | Byte deserialization |
 | `Add` | `add(self, other) -> Self` | ❌ | `+` operator |
 | `Sub` | `sub(self, other) -> Self` | ❌ | `-` operator |
 | `Mul` | `mul(self, other) -> Self` | ❌ | `*` operator |
@@ -642,7 +640,7 @@ The current runtime stack for platform-backed I/O looks like this:
 │ User Code                                    │
 │ fn main() -> () uses [Console, Exit] {       │
 │   println("done")                            │
-│   exit(0)                                    │
+│   exit(0u8)                                  │
 │ }                                            │
 ├──────────────────────────────────────────────┤
 │ Platform package modules                     │
@@ -674,13 +672,13 @@ The cost annotation language (SEP-0004) uses these stdlib-provided size function
 
 | Function | Description | Returns |
 |----------|-------------|---------|
-| `len(list)` | Length of a list | `Int` |
-| `len(s)` | Length of a string | `Int` |
-| `len(m)` | Number of entries in a map | `Int` |
-| `len(s)` | Number of elements in a set | `Int` |
-| `size(value)` | Serialized size of a value | `Int` |
-| `depth(tree)` | Depth of a tree structure | `Int` |
-| `nodes(tree)` | Number of nodes in a tree | `Int` |
+| `len(list)` | Length of a list | `I64` |
+| `len(s)` | Length of a string | `I64` |
+| `len(m)` | Number of entries in a map | `I64` |
+| `len(s)` | Number of elements in a set | `I64` |
+| `size(value)` | Serialized size of a value | `I64` |
+| `depth(tree)` | Depth of a tree structure | `I64` |
+| `nodes(tree)` | Number of nodes in a tree | `I64` |
 
 These functions are only valid inside cost annotations and are evaluated at compile time via the type checker's cost analysis pass.
 
@@ -689,8 +687,8 @@ These functions are only valid inside cost annotations and are evaluated at comp
 The stdlib is designed for progressive discovery:
 
 1. **Prelude is small**: Only essential types and iteration primitives — no import ceremony for basic programs
-2. **Module names are predictable**: `std.math`, `std.string`, `std.collections` follow standard conventions
-3. **Cost annotations are readable**: `cost O(len(list))` reads naturally
+2. **Module names are predictable**: imports like `std.math`, `std.string`, and `std.collections` follow standard conventions
+3. **Cost annotations are readable**: four-slot forms like `cost [len(list), len(list), 0, 1]` stay copy-pasteable
 4. **Error types are descriptive**: Enum variants like `NotFound(Str)` carry context
 5. **No hidden effects**: Every I/O function explicitly declares its effect requirements
 
@@ -794,7 +792,7 @@ This is a new specification — no backward compatibility concerns. However:
 
 3. **String encoding**: Should `Str` expose byte-level access, or only scalar-oriented indexing? Current spec assumes UTF-8; there is no `Char` type (length-1 `Str` values instead).
 
-4. **Numeric tower**: The reference implementation already exposes fixed widths (`I8`…`U64`, `F32`, `F64`). This SEP still mixes pedagogical `Int`/`Float` in some module sketches; those should converge to explicit widths over time.
+4. **Numeric tower**: The reference implementation exposes fixed widths (`I8`…`U64`, `F32`, `F64`). Stdlib APIs should choose explicit widths at each boundary rather than relying on abstract scalar aliases.
 
 5. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
 

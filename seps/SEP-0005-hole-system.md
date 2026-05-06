@@ -241,12 +241,17 @@ pub struct HoleInfo {
 
 **HoleInfo vs HoleReport:** `HoleInfo` is the **compiler-internal** representation (Rust struct in `sporec-typeck`), while `HoleReport` is the **JSON output format** for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` via `to_json()` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
 
-The `HoleReport` aggregates all holes in a module, with `to_json()` for machine consumption. Hand-rolled JSON serialization is used in v0.1 to minimize dependencies; serde migration is tracked as future work (see Unresolved Questions §10).
+The batch `sporec holes FILE --json` response aggregates all holes in a module by
+returning a root object with `holes` and `dependency_graph`; each element of
+`holes` is the same per-hole `HoleReport` object returned directly by
+`sporec query-hole FILE ?name --json`. Hand-rolled JSON serialization is used
+in v0.1 to minimize dependencies; serde migration is tracked as future work
+(see Unresolved Questions §10).
 
 ### HoleReport v0.3 (within the v0.x lineage)
 
 HoleReport v0.3 is a **superset** of v0.2 on the same `v0.x` line. The
-project should not rename this family to a detached `v3`/`v1`/`v2` scheme just
+project should not rename this family to a detached major-version scheme just
 because additive fields land. Current implementation payloads are effectively
 unversioned shared objects; if/when an explicit schema tag is emitted, it
 should remain on a `spore/hole-report/v0.x` identifier. All v0.2 fields are
@@ -279,7 +284,7 @@ A hole's type is determined by the **intersection of all constraints** imposed b
 2. **Return position:** A hole in tail position inherits the function's return type
 3. **Function arguments:** `f(?h)` constrains `?h` to the parameter type of `f`
 4. **Match arms:** A hole in a match arm must have the same type as sibling arms
-5. **Operators:** `?h + x` where `x: Int` constrains `?h` to `Int` (or a type implementing `Add<Int>`)
+5. **Operators:** `?h + x` where `x: I64` constrains `?h` to `I64` (or a type implementing `Add<I64>`)
 
 When multiple constraints agree, the intersection is the agreed-upon type. When constraints conflict, the compiler applies the **nearest constraint rule** (see Edge Cases §8.3) and emits a warning.
 
@@ -833,7 +838,7 @@ fn factorial(n: I64) -> I64
 }
 ```
 
-Here `?factorial_step` has type `Int`. The function is partial. If a recursive call to `factorial` occurs:
+Here `?factorial_step` has type `I64`. The function is partial. If a recursive call to `factorial` occurs:
 
 ```spore
 fn bad(n: I64) -> I64
@@ -845,7 +850,7 @@ fn bad(n: I64) -> I64
 The compiler reports:
 
 ```text
-[partial] bad: (Int) -> Int
+[partial] bad: (I64) -> I64
   holes: ?self_ref
   note: recursive call to partial function bad — simulation terminates at depth 1
 ```
@@ -900,14 +905,14 @@ fn conflicted(flag: Bool) -> I64
 }
 ```
 
-**Resolution rule:** The compiler uses the **nearest constraint** — the one syntactically closest to the hole. In this case, the `let x: String` annotation is nearest, so `?ambiguous` is reported with type `String`.
+**Resolution rule:** The compiler uses the **nearest constraint** — the one syntactically closest to the hole. In this case, the `let x: Str` annotation is nearest, so `?ambiguous` is reported with type `Str`.
 
 ```text
 warning[H0002]: hole ?ambiguous has conflicting type constraints
-  constraint 1: String (from let binding on line 4)
-  constraint 2: Int    (from usage on line 5)
+  constraint 1: Str (from let binding on line 4)
+  constraint 2: I64    (from usage on line 5)
   note: no type satisfies both constraints simultaneously.
-        The hole is reported with type `String` (nearest constraint).
+        The hole is reported with type `Str` (nearest constraint).
         Filling this hole will likely require restructuring the surrounding code.
 ```
 
@@ -1286,7 +1291,7 @@ The hole system integrates with Language Server Protocol:
 ### Cost diagnostics for partial functions
 
 ```text
-[partial] pipeline: (List[Int]) -> List[Int]
+[partial] pipeline: (List[I64]) -> List[I64]
   known cost: 200 (before hole) + ≤150 (after hole) = ≤350
   budget for ?middle_step: ≤650 (1000 - 350)
   note: ?middle_step filling must stay within the remaining compute budget (≤ 650)
@@ -1415,7 +1420,7 @@ These are runtime markers with no compiler support. They provide no type informa
 
 1. **Existing complete code**: Unaffected. No holes means no HoleReports, no dependency graphs, no Agent protocol activation.
 2. **New code with holes**: Opt-in by writing `?name` in function bodies.
-3. **Agent tooling**: Agents should check `schema` version and handle both `"spore/hole-report/v1"` and `"spore/hole-report/v2"`.
+3. **Agent tooling**: Agents should treat the payload as a `v0.x`-lineage schema and ignore unknown additive fields. If an explicit schema identifier is emitted, it should stay in the `"spore/hole-report/v0.x"` family.
 
 ---
 

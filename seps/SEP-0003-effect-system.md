@@ -224,20 +224,29 @@ uses [FileWrite]
 
 ### Effectful iteration with `parallel_scope` + `spawn`
 
-When you need side effects during iteration, use the structured concurrency pattern:
+When you need side effects during iteration, keep the effectful work explicit rather than hiding it inside a pure combinator closure:
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Response] ! NetworkError
 uses [NetConnect, Spawn]
 {
     parallel_scope {
-        let tasks = urls.map(|url| {
-            spawn {
-                // spawn body uses [NetConnect], ⊆ parent {NetConnect, Spawn}  ✓
-                http.get(url)
+        fn spawn_all(remaining: List[Url]) -> List[Task[Response]]
+        uses [NetConnect, Spawn]
+        {
+            match remaining {
+                [] => [],
+                [url, ..rest] => [
+                    spawn {
+                        // spawn body uses [NetConnect], ⊆ parent {NetConnect, Spawn}  ✓
+                        http.get(url)
+                    },
+                    ..spawn_all(rest),
+                ],
             }
-        })
-        tasks.collect_results()
+        }
+
+        spawn_all(urls).collect_results()
     }
 }
 ```
@@ -245,9 +254,9 @@ uses [NetConnect, Spawn]
 Why does this type-check?
 
 1. `fetch_all` declares `uses [NetConnect, Spawn]`.
-2. `spawn { ... }` requires `Spawn ∈ {NetConnect, Spawn}` — satisfied.
-3. Inside the spawn body, `http.get` requires `NetConnect`; `{NetConnect} ⊆ {NetConnect, Spawn}` — satisfied.
-4. The closure passed to `map` returns `Task[Response]`. The `spawn` expression itself is pure (it merely creates a task handle), so the closure satisfies `uses []`.
+2. The local helper `spawn_all` is also declared with `uses [NetConnect, Spawn]`, so its recursive body may both spawn tasks and perform network requests inside those tasks.
+3. `spawn { ... }` requires `Spawn ∈ {NetConnect, Spawn}` — satisfied.
+4. Inside the spawn body, `http.get` requires `NetConnect`; `{NetConnect} ⊆ {NetConnect, Spawn}` — satisfied.
 
 ### Auto-inferred properties
 
@@ -469,7 +478,7 @@ $$(T_1, T_2) \to R \equiv (T_1, T_2) \to R \ \textbf{uses}\ \{\}$$
 
 The compiler derives semantic properties from the `uses` set via the property-inference function **𝒫**:
 
-$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{true} & \text{if } S \subseteq \{\text{Spawn}\} \\ \text{false} & \text{otherwise} \end{cases}$$
+$$\mathcal{P}(\text{pure}, S) = \begin{cases} \text{true} & \text{if } S = \emptyset \\ \text{false} & \text{otherwise} \end{cases}$$
 
 $$\mathcal{P}(\text{deterministic}, S) = \begin{cases} \text{true} & \text{if } S \cap \{\text{Clock, Random}\} = \emptyset \\ \text{false} & \text{otherwise} \end{cases}$$
 
@@ -477,12 +486,12 @@ $$\mathcal{P}(\text{total}, S) = \text{determined by a separate termination anal
 
 #### 5.0 Edge cases in the `pure` formula
 
-The complete rule: `𝒫(pure, S) = true` iff `S ⊆ {Spawn}`. Pure computation requires no declared effect — it is the default. `Spawn` is pure-compatible because `spawn` merely creates a task descriptor; the effect is deferred. All other built-in effects represent interactions with the external world and therefore make a function impure.
+The complete rule: `𝒫(pure, S) = true` iff `S = ∅`. Pure computation requires no declared effect — it is the default. `Spawn` is not pure-compatible: creating schedulable work has observable concurrency and scheduling consequences even when the spawned body is deterministic. Determinism remains a separate property.
 
 | Effect set S | pure? | Rationale |
 |---|---|---|
 | `{}` | true | No effects at all |
-| `{Spawn}` | true | `spawn` merely creates a task descriptor (pure); the effect is deferred |
+| `{Spawn}` | false | `spawn` introduces observable concurrency/scheduling behavior |
 | `{Console}` | false | Console interacts with the terminal — an external I/O channel |
 | `{Clock}` | false | Clock reads the external world (system time) |
 | `{Random}` | false | Random reads external entropy |
@@ -571,7 +580,7 @@ Read: "Under type context Γ and effect set S, expression e has type T."
 
 
 ────────────────────────────  [PURE-LITERAL]
-Γ; S ⊢ 42 : Int      ∀ S
+Γ; S ⊢ 42 : I64      ∀ S
 ```
 
 ### 8. Effect composition rules
@@ -610,7 +619,7 @@ Spawn ∈ S_scope    S_body ⊆ S_scope
 Γ; S_scope ⊢ spawn { body } : Task[T]
 ```
 
-> **Note on spawn purity.** The `spawn` expression itself is **pure** — it merely creates a task descriptor (of type `Task[T]`). No side effect is executed at the point of `spawn`; the effect occurs when the task is later scheduled. This is why a closure containing only `spawn { ... }` satisfies `uses []` when passed to `map` or other pure-closure-requiring combinators.
+> **Note on `spawn`.** A `spawn { ... }` expression still requires `Spawn` in the surrounding `uses` set even though the child body may run later. Creating schedulable work is therefore **not** pure and cannot be smuggled through APIs that require `uses []` closures such as `map`.
 
 ### 8.1 Handler discharge semantics
 
@@ -965,8 +974,8 @@ The canonical serialised form of a function type includes the EffectSet:
 ```json
 {
   "kind": "Fn",
-  "params": ["Int", "Int"],
-  "return": "Int",
+  "params": ["I64", "I64"],
+  "return": "I64",
   "effects": [],
   "errors": []
 }
@@ -1148,9 +1157,9 @@ This SEP depends on SEP-0002 (Type System). The `EffectSet` is integrated into t
 
 ```rust
 enum Ty {
-    Int,
+    I64,
     Bool,
-    String,
+    Str,
     Fn(Vec<Ty>, Box<Ty>, EffectSet),  // params, return, effects
     // ...
 }

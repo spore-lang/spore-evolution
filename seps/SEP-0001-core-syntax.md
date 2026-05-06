@@ -18,7 +18,7 @@ superseded_by: null
 
 ## Summary
 
-This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and a four-slot **`cost [compute, alloc, io, parallel]`** clause as composable signature metadata. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[Int]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
+This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and a four-slot **`cost [compute, alloc, io, parallel]`** clause as composable signature metadata. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[I64]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
 
 ## Motivation
 
@@ -34,7 +34,7 @@ Spore aims to occupy a unique design point:
 
 4. **No loops — recursion with TCO guarantee**: By removing `for`, `while`, `loop`, `break`, and `continue`, Spore encourages a purely functional iteration style via recursion and higher-order functions (`map`, `fold`, `filter`). The compiler guarantees tail-call optimization, making recursion safe and efficient.
 
-5. **Incremental elaboration**: The signature system is designed so that a simple pure function has zero overhead (`fn add(x: Int, y: Int) -> Int`), while complex functions progressively add clauses only as needed. This avoids the "all or nothing" annotation burden seen in many effect systems.
+5. **Incremental elaboration**: The signature system is designed so that a simple pure function has zero overhead (`fn add(x: I64, y: I64) -> I64`), while complex functions progressively add clauses only as needed. This avoids the "all or nothing" annotation burden seen in many effect systems.
 
 6. **Cost transparency**: The `cost` clause enables compile-time reasoning about resource consumption, supporting smart-contract use cases and agent-driven cost optimization.
 
@@ -789,7 +789,7 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 100u64      // typed suffix (reserved — not accepted by the reference lexer yet)
 ```
 
-**Implementation note:** The reference lexer parses integer literals without suffixes and the type checker gives them a default numeric type (**`I64`** in `sporec-typeck`). Float literals default to **`F64`**.
+**Implementation note:** The reference lexer parses integer literals without suffixes and the type checker gives them a default numeric type (**`I64`** in `sporec-typeck`). F64 literals default to **`F64`**.
 
 **Floats:**
 
@@ -1290,13 +1290,13 @@ Supported pattern forms:
 
 ### Type system
 
-**Primitive types:** Fixed-width numerics `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, and `F64`; `Bool`; UTF-8 text as `Str`. There is **no** separate `Char` type. **Implementation note:** The reference compiler’s `Ty` enum in `sporec-typeck` uses exactly those numeric widths (plus `Str`, `Bool`, `Unit`, `Never`, tuples, refinements, …); **unsuffixed integer literals default to `I64`** and float literals to **`F64`**. Many narrative examples in SEPs still say `Int` or `Float` for readability — treat them as informal shorthands for **`I64` / `F64`** until the examples are fully normalized. Narrower ranges are expressed with **refinement types** on a fixed-width base (for example `alias Port = I64 when self >= 1 && self <= 65535`).
+**Primitive types:** Fixed-width numerics `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, and `F64`; `Bool`; UTF-8 text as `Str`. There is **no** separate `Char` type. **Implementation note:** The reference compiler’s `Ty` enum in `sporec-typeck` uses exactly those numeric widths (plus `Str`, `Bool`, `Unit`, `Never`, tuples, refinements, …); **unsuffixed integer literals default to `I64`** and float literals to **`F64`**. `Int` and `Float` are not primitive names or authoritative shorthand in the language docs. Narrower ranges are expressed with **refinement types** on a fixed-width base (for example `alias Port = I64 when self >= 1 && self <= 65535`).
 
 **Collection types:** **`List[T]`** (default—always unbounded); **`Vec[T, max: N]`** (bounded, **rarely needed**—only when `N` belongs in the type; see SEP-0002); **`Map[K, V]`**, **`Set[T]`**, **`Array[T, N]`**
 
 **Special types:** `Option[T]`, `Result[T, E]`, `Ref[T]`, `Channel[T]`, `Unit`
 
-**Const generics:** `struct Array[T, const N: Int] { ... }`
+**Const generics:** `struct Array[T, const N: I64] { ... }`
 
 ```spore
 // Fixed-size array
@@ -1314,9 +1314,9 @@ let vec3: Array[F64, 3] = Array.new([1.0, 2.0, 3.0]);
 let identity: Matrix[F64, 3, 3] = Matrix.identity();
 ```
 
-**Refinement types:** `type PositiveInt = Int if |n| n > 0;`
+**Refinement types:** `type PositiveInt = I64 if |n| n > 0;`
 
-**Function types:** `fn(Int, Int) -> Int`
+**Function types:** `fn(I64, I64) -> I64`
 
 ### Concurrency primitives
 
@@ -1565,7 +1565,7 @@ Spore's syntax prioritizes scannability. The fixed operator set means readers ne
 
 ### Progressive disclosure
 
-Simple functions require zero ceremony — `fn add(a: Int, b: Int) -> Int { a + b }` has no clauses to learn. Effects, error sets, and the `cost [...]` clause are introduced only when the code actually needs them.
+Simple functions require zero ceremony — `fn add(a: I64, b: I64) -> I64 { a + b }` has no clauses to learn. Effects, error sets, and the `cost [...]` clause are introduced only when the code actually needs them.
 
 ## Agent experience impact
 
@@ -1804,7 +1804,7 @@ The parser can recover from common errors:
 1. **Missing semicolon**: Insert one after a statement and continue parsing.
 2. **Missing closing brace**: Match indentation heuristics to suggest where the brace should go.
 3. **Unknown keyword**: Suggest the closest valid keyword (e.g., `func` → `fn`, `for` → `map`/`fold`).
-4. **Angle brackets for generics**: Detect `List<Int>` and suggest `List[Int]`.
+4. **Angle brackets for generics**: Detect `List<I64>` and suggest `List[I64]`.
 5. **Missing `!` clause**: When a function body calls a failable function without `?`, suggest adding the error type to the signature.
 
 ## Drawbacks
@@ -1834,7 +1834,7 @@ We considered including a minimal loop construct (e.g., Rust's `loop` or a `fore
 - HOFs (`map`, `fold`, `filter`) cover the vast majority of iteration patterns.
 - A single iteration paradigm reduces cognitive load once learned.
 
-### Angle brackets for generics (`List<Int>`)
+### Angle brackets for generics (`List<I64>`)
 
 Rejected because:
 
@@ -1941,7 +1941,7 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 2. **Effect composition rules**: When a function calls two sub-functions with different `uses` sets, is the resulting set the union? How are effect aliases expanded for comparison?
 
-3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = Int if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
+3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = I64 if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
 
 4. **`throw` semantics**: Is `throw` syntactic sugar for `return Err(...)`, or does it have distinct unwinding semantics? The current spec treats it as sugar but this needs formalization.
 

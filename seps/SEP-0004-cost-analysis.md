@@ -16,7 +16,7 @@ superseded_by: null
 
 # SEP-0004: Cost Analysis & Decidability
 
-> **Executive Summary**: Introduces 4-dimensional cost analysis with CostVector(compute, alloc, io, parallel), where cost expressions are restricted to a decidable grammar (+, ×, ^const, log, max, min). Provides a three-tier escape mechanism (@unbounded for opt-out, @allow for local override, advisory warnings for gradual adoption) and formal cost inference rules for higher-order function propagation. Checked residual budgeting is defined over 4D vectors as an internal compiler relation (`before + candidate ≤ budget`), not as user-facing subtraction syntax. Targets O(n⁵) verification complexity.
+> **Executive Summary**: Introduces 4-dimensional cost analysis with CostVector(compute, alloc, io, parallel), where cost expressions are restricted to a decidable grammar (+, ×, ^const, log, max, min). Provides a three-tier escape mechanism (@unbounded for opt-out, @allows for local override, advisory warnings for gradual adoption) and formal cost inference rules for higher-order function propagation. Checked residual budgeting is defined over 4D vectors as an internal compiler relation (`before + candidate ≤ budget`), not as user-facing subtraction syntax. Targets O(n⁵) verification complexity.
 
 ## Summary
 
@@ -251,8 +251,8 @@ where `α` and `β` are project-configurable weights (default α = 2, β = 100).
 |-----------|----------|-------|
 | Integer `+`, `-`, `*` | 1 | |
 | Integer `/`, `%` | 2 | Division is slightly more expensive |
-| Float `+`, `-`, `*` | 2 | |
-| Float `/` | 3 | |
+| F64 `+`, `-`, `*` | 2 | |
+| F64 `/` | 3 | |
 | Comparison `==`, `!=`, `<`, `>` | 1 | |
 | Logical `&&`, `\|\|`, `!` | 1 | Max-path (short-circuit does not reduce cost) |
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | 1 | |
@@ -269,8 +269,8 @@ where `α` and `β` are project-configurable weights (default α = 2, β = 100).
 |-----------|------------|
 | Struct creation | field count |
 | List creation | element count + 1 header |
-| String creation | ⌈len / 8⌉ |
-| String concatenation | ⌈(len_a + len_b) / 8⌉ (new allocation) |
+| `Str` creation | ⌈len / 8⌉ |
+| `Str` concatenation | ⌈(len_a + len_b) / 8⌉ (new allocation) |
 | Enum / union | 1 (tag + max variant size) |
 | Deep copy | original cell count |
 | Borrow / reference | 0 |
@@ -1103,7 +1103,7 @@ WARNING [unbounded-cost] fibonacci's cost cannot be statically determined.
   Inferred complexity: O(2^n)
 
   Options:
-  (a) Add tighter refinements (`n: Int if n ≤ 30`) together with concrete `cost [...]` literals for small‑n paths
+  (a) Add tighter refinements (`n: I64 if n ≤ 30`) together with concrete `cost [...]` literals for small‑n paths
   (b) Mark as `@unbounded` (relinquish cost constraint)
   (c) Rewrite using structural recursion or tail recursion + iteration bound
 ```

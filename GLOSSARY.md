@@ -8,7 +8,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Add`** (SEP-0002): Compiler-known trait for the `+` operator, enabling operator overloading on user-defined types.
 
-**`@allow`** (SEP-0004): Annotation that locally suppresses a cost budget violation, used as a second-tier escape for cost analysis.
+**`@allows`** (SEP-0004): Annotation that locally suppresses a cost budget violation, used as a second-tier escape for cost analysis.
 
 **`@unbounded`** (SEP-0004): Annotation declaring that a function's cost is intentionally unanalyzed, opting out of cost verification entirely.
 
