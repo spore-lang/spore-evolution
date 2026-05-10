@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "catalog": "https://github.com/spore-lang/spore-evolution/schemas/contracts/catalog.json",
+  "catalog": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/catalog.json",
   "owner": {
     "repository": "spore-lang/spore-evolution",
     "path": "schemas/contracts"
@@ -12,7 +12,7 @@
       "version": 1,
       "status": "active",
       "file": "spore-registry-index-config.v1.schema.json",
-      "schema_id": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json",
+      "schema_id": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/spore-registry-index-config.v1.schema.json",
       "instances": [
         {
           "producer": "spore-registry",
