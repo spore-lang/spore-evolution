@@ -130,6 +130,19 @@ Platform code generation maps these types to machine representations; refinement
 
 **No informal scalar aliases.** Examples and normative text must write fixed-width scalar names (`I64`, `F64`, `U8`, and so on). A project may define its own `alias Int = I64`, but that is ordinary user code and not part of the language prelude.
 
+**Index kind.** `Index` is a compile-time non-negative size kind, not a runtime
+type. Index parameters such as `N: Index` may appear in indexed types and in
+`cost [...]` clauses. Ordinary runtime values (`I64`, `Str`, `List[T]`, records,
+and so on) do not become cost variables merely because they are in scope.
+
+```spore
+type Count[N: Index] = I64 when self >= 0
+```
+
+`Count[N]` is the bridge type for APIs that carry a runtime non-negative count
+while also exposing the compile-time index `N` to cost analysis. The runtime
+representation is still an integer; the verifier sees only the index parameter.
+
 ### 3.2 Type annotations on functions
 
 Function signatures **must** be fully annotated. Parameters, return type, error set, effect set, and `cost [c, a, i, p]` clause are all declared:
@@ -141,7 +154,7 @@ fn add(a: I64, b: I64) -> I64 {
 
 fn fetch_page(url: Str) -> Str ! NetworkError
 uses [NetConnect]
-cost [5000, 200, 5000, 2]
+cost [5000, 200, 5000, 0]
 {
     http_get(url)
 }
@@ -244,7 +257,7 @@ fn identity[T](x: T) -> T {
     x
 }
 
-fn map[A, B](list: List[A], f: Fn(item: A) -> B) -> List[B] {
+fn pair[A, B](left: A, right: B) -> (A, B) {
     // implementation
 }
 
@@ -260,7 +273,7 @@ At call sites, type arguments are inferred from the actual argument types:
 ```spore
 let nums: List[I64] = [1, 2, 3]
 let result = identity(42)          // T inferred as I64
-let strings = map(nums, show)      // A=I64, B=Str inferred
+let strings = nums.map(show)       // A=I64, B=Str inferred
 ```
 
 ### 3.7 Generic type application
@@ -341,7 +354,7 @@ trait Display {
 
 trait Serialize {
     fn serialize(self) -> Bytes ! SerializeError
-        cost [100, 20, 0, 1]
+        cost [100, 20, 0, 0]
 }
 ```
 
@@ -386,6 +399,12 @@ trait Collection {
 }
 ```
 
+Shared method names are resolved through trait and inherent impl lookup, not
+through free-function overloading. A call such as `xs.map(f)` first uses the
+receiver type of `xs`; if several imported traits still provide applicable
+methods with the same name, the call must use trait-qualified syntax. Spore does
+not use signature unions such as `List[T] | Str` to model these operations.
+
 #### Trait bounds
 
 Trait bounds constrain generic type parameters in `where` clauses:
@@ -393,7 +412,7 @@ Trait bounds constrain generic type parameters in `where` clauses:
 ```spore
 fn sort[T](list: List[T]) -> List[T]
 where T: Ord
-cost [500, 100, 0, 1]
+cost [500, 100, 0, 0]
 {
     // implementation
 }
@@ -401,7 +420,7 @@ cost [500, 100, 0, 1]
 fn serialize_all[T](items: List[T]) -> List[Bytes] ! SerializeError
 where T: Serialize + Display
 {
-    items |> map(|item| item.serialize())
+    items.map(|item| item.serialize())
 }
 ```
 
@@ -411,7 +430,7 @@ Multiple bounds use `+`:
 fn dedup_and_display[T](items: List[T]) -> Str
 where T: Eq + Hash + Display
 {
-    items |> unique() |> map(|x| x.display()) |> join(", ")
+    items.unique().map(|x| x.display()).join(", ")
 }
 ```
 
@@ -451,7 +470,7 @@ Traits may declare associated types — types determined by the implementing typ
 trait Iterator {
     type Item
     fn next(self) -> Option[Self.Item]
-        cost [10, 80, 0, 1]
+        cost [10, 80, 0, 0]
 }
 
 impl Iterator for LineReader {
@@ -480,7 +499,7 @@ where
     C: Collection,
     C.Item: Add[Output = I64]
 {
-    collection.iter() |> fold(0, |acc, item| acc + item)
+    collection.iter().fold(0, |acc, item| acc + item)
 }
 ```
 
@@ -571,80 +590,91 @@ where adapter: ExternalType as Printable
 
 Adapters are always scoped and explicit — they cannot cause global coherence violations.
 
-### 3.10 Const generics
+### 3.10 Index generics
 
-#### Const generic parameters
+#### Index parameters
 
-### List vs `Vec`
+`Index` parameters are compile-time non-negative size symbols. They are the
+only user-visible variables that may flow directly into `cost [...]`. This keeps
+cost checking parametric and compile-time: the verifier proves formulas over
+symbols such as `N`, not over arbitrary runtime values.
 
-**Naming invariant:** **`List[T]` is always unbounded** — the `List` constructor never carries a `max:` parameter. **`Vec[T, max: N]` is always bounded** — every `Vec` declares a compile-time cap `N` (const-generic), useful when the **type system** must know a fixed capacity (e.g. small matrices, SIMD lanes, rare “cap in the type” APIs).
+### Dynamic `List` vs indexed containers
 
-**Style rule:** **`List[T]` is the default** for almost all APIs, examples, and iteration. Model sizes and budgets with `cost [...]`, refinements, and runtime checks on `len` as usual—**do not** sprinkle `Vec[..., max: N]` unless you genuinely need `N` in the type.
+**Naming invariant:** **`List[T]` is always dynamic** — the `List` constructor
+never carries a length or capacity parameter. If an API needs predictable cost
+from a static size, use an indexed type:
 
-**`Vec`** is for const-generic layouts (see below)—not for everyday collections.
+- **`Count[N]`** for a runtime count value carrying index `N`.
+- **`Array[T, N]`** for fixed-length arrays.
+- **`Vec[T, max: N]`** for buffers with a static capacity upper bound.
 
-Const generics allow value-level parameters in type position. Spore commonly uses them for **`Matrix`**, **`Array[T, N]`**, and the optional **`Vec[T, max: N]`** packed buffer type:
+`List[T]` remains the default sequence type for ordinary programs. A `List[T]`
+can still be inspected at runtime, but its runtime length is not a CostExpr
+variable. APIs that need verified size-parametric cost should accept or return
+`Count`, `Array`, or `Vec`.
 
 ```spore
-struct Vec[T, max: I64] {
-    data: Array[T],
+struct Array[T, N: Index] {
+    data: <compiler representation>
+}
+
+struct Vec[T, max: N] {
+    data: Array[T, N],
     len: I64,
 }
 
-// Typical slicing stays on List — no Vec required:
-fn take[T](list: List[T], n: I64) -> List[T]
-{
-    // prefix of length ≤ n (empty if n ≤ 0); cost keyed off n and list.len()
-}
-
-struct Matrix[T, rows: I64, cols: I64] {
-    data: Array[Array[T]],
+struct Matrix[T, rows: R, cols: C]
+where R: Index, C: Index {
+    data: Array[Array[T, C], R],
 }
 ```
 
-#### Type-level arithmetic
+#### Index expressions
 
-Const generic parameters support arithmetic in type-level expressions, enabling compile-time dimensional checking (mostly for **`Matrix`** / **`Array`**, not for ordinary `List` code):
+Index parameters support a deliberately small expression language:
 
-```spore
-fn transpose[T, R: I64, C: I64](
-    matrix: Matrix[T, rows: R, cols: C],
-) -> Matrix[T, rows: C, cols: R] {
-    // implementation
-}
-
-// Optional: only when Vec's max must appear in the type (buffers with static M+N):
-fn concat_vec[T, M: I64, N: I64](
-    a: Vec[T, max: M],
-    b: Vec[T, max: N],
-) -> Vec[T, max: M + N] {
-    // implementation
-}
+```text
+IndexExpr ::= 0 | 1 | N
+            | IndexExpr + IndexExpr
+            | IndexExpr * IndexExpr
+            | max(IndexExpr, IndexExpr)
+            | min(IndexExpr, IndexExpr)
+            | log(IndexExpr)
+            | span(IndexExpr, IndexExpr)
 ```
 
-Supported arithmetic operations in type position: `+`, `-`, `*`, `/`, `%`, `min`, `max`. All arithmetic is evaluated at compile time. Division by zero and overflow are compile-time errors.
+`span(hi, lo)` is saturating difference: `max(hi - lo, 0)`. Ordinary subtraction
+and division are not IndexExpr operators. This keeps the cost verifier in a
+non-negative, monotone fragment while still supporting interval-length APIs.
 
 #### Interaction with cost
 
-Cost clauses usually refer to **runtime** sizes (`items.len`, parameters, refinements). **`List[T]`** is enough for those budgets—**no `Vec` required**:
+Cost clauses refer to Index parameters, not ordinary runtime values:
 
 ```spore
-fn linear_search[T](items: List[T], target: T) -> Option[I64]
+fn vec_linear_search[T, N: Index](
+    items: Vec[T, max: N],
+    target: T,
+) -> Option[I64]
 where T: Eq
-cost [items.len * 5, items.len, 0, 1]
+cost [N * 5, 0, 0, 0]
 {
-    // O(n) search; n = items.len
+    // Verified against the static capacity bound N.
 }
 
-fn sort_list[T](items: List[T]) -> List[T]
-where T: Ord
-cost [items.len * items.len * 2, items.len, 0, 1]
+fn vec_concat[T, M: Index, N: Index](
+    a: Vec[T, max: M],
+    b: Vec[T, max: N],
+) -> Vec[T, max: M + N]
+cost [M + N, M + N, 0, 0]
 {
-    // worst-case O(n²); n = items.len
+    // implementation
 }
 ```
 
-When you **do** use `Vec[T, max: N]`, the declared `N` can appear directly in `cost [...]` (parametric verification). That pattern is specialized; prefer `List` + len-indexed cost for most functions.
+For dynamic collections, write complexity prose or use runtime metering; do not
+write a runtime-length expression as a verified compile-time CostExpr.
 
 ### 3.11 Pattern matching
 
@@ -796,7 +826,7 @@ fn handle_result(result: Invoice ! TaxError | ValidationError) -> Str {
 ```spore
 fn process_payment(amount: Money, card: Card) -> Receipt ! PaymentFailed
 uses [PaymentGateway, AuditLog]
-cost [2000, 400, 200, 2]
+cost [2000, 400, 200, 0]
 {
     let validated = validate_card(card)
     @allows[charge, charge_with_retry]
@@ -816,7 +846,7 @@ cost [2000, 400, 200, 2]
 ```spore
 fn build_dashboard(org: Org) -> Dashboard ! DataError
 uses [Database, Cache, Analytics]
-cost [20000, 2000, 1000, 8]
+cost [20000, 2000, 1000, 0]
 {
     @allows[fetch_cached_metrics, compute_summary]
     let metrics = ?gather_metrics
@@ -1006,7 +1036,7 @@ struct Tree[T] {
 | Public constants | **Yes** | API surface |
 | Local variable types | No | Inferred from RHS: `let x = compute(...)` |
 | Generic type params at call sites | No | Inferred from arguments: `sort(my_list)` — T inferred from `my_list` |
-| Closure parameter types (in context) | No | Inferred: `.map(\|x\| x + 1)` — x inferred from Iterator.Item |
+| Closure parameter types (in context) | No | Inferred: `xs.map(\|x\| x + 1)` — x inferred from the receiver item type |
 | Intermediate expression types | No | Standard local inference |
 
 ### 3.18 Typed holes
@@ -1726,26 +1756,33 @@ match is exhaustive
 
 Guards weaken exhaustiveness: when guards are present, the compiler conservatively requires a catch-all arm.
 
-### 4.14 Const generic evaluation
+### 4.14 Index generic evaluation
 
-Const generic arithmetic is evaluated at compile time during type checking. The compiler maintains a simple evaluator for type-level integer expressions:
+Index expressions are evaluated or normalized during type checking. The
+compiler keeps them symbolic when a parameter is unknown and reduces them when
+all arguments are concrete:
 
 ```text
-eval(N)           = N                    (literal)
-eval(A + B)       = eval(A) + eval(B)    (addition)
-eval(A * B)       = eval(A) * eval(B)    (multiplication)
-eval(A - B)       = eval(A) - eval(B)    (subtraction)
-eval(A / B)       = eval(A) / eval(B)    (division, B ≠ 0)
-eval(min(A, B))   = min(eval(A), eval(B))
-eval(max(A, B))   = max(eval(A), eval(B))
+eval(0)             = 0
+eval(1)             = 1
+eval(N)             = N
+eval(A + B)         = eval(A) + eval(B)
+eval(A * B)         = eval(A) * eval(B)
+eval(min(A, B))     = min(eval(A), eval(B))
+eval(max(A, B))     = max(eval(A), eval(B))
+eval(log(A))        = ceil(log2(max(1, eval(A))))
+eval(span(A, B))    = max(eval(A) - eval(B), 0)
 ```
 
-Division by zero and integer overflow in type-level arithmetic are compile-time errors.
+Overflow in concrete Index arithmetic is a compile-time error. Ordinary
+subtraction and division are intentionally absent; `span` is the only
+saturating difference operator.
 
-When a const generic function is instantiated, the compiler substitutes concrete values and evaluates:
+When an indexed function is instantiated, the compiler substitutes concrete
+Index arguments where available:
 
 ```text
-concat_vec[I64, 3, 5](a, b) → Vec[I64, max: eval(3 + 5)] = Vec[I64, max: 8]
+vec_concat[I64, 3, 5](a, b) -> Vec[I64, max: eval(3 + 5)] = Vec[I64, max: 8]
 ```
 
 ### 4.15 Error set typing
@@ -2079,7 +2116,7 @@ Since this is the first formal type system specification (implemented by `sporec
 | Feature | Migration strategy |
 |---|---|
 | Refinement types (L0) | `Ty::Refined` exists in `sporec-typeck`; extend semantics/predicate classes as needed |
-| Const generics | Add `Ty::Const(value)` variant; extend `App` to accept const args |
+| Index generics | Add an `Index` kind and extend `App` to accept Index arguments |
 | Row-polymorphic effects | Extend EffectSet with effect variables alongside concrete strings |
 
 ## Unresolved questions

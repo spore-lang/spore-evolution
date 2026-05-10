@@ -79,8 +79,8 @@ Bob Nystrom's *"What Color is Your Function?"* (2015) identified how `async` spl
 
 ```spore
 // No async annotation needed—concurrency declared via the Spawn effect
-fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
-cost [urls.len * per_fetch + urls.len * 10, urls.len * 2, urls.len, urls.len]
+fn fetch_all[N: Index](urls: Vec[Url, max: N]) -> Vec[Response, max: N] ! NetError
+cost [N * per_fetch + N * 10, N * 2, N, N]
 uses [Spawn, NetConnect]
 {
     parallel_scope {
@@ -90,8 +90,8 @@ uses [Spawn, NetConnect]
 }
 
 // Pure function: no Spawn, no IO—compiler guarantees single-threaded
-fn transform(data: List[Item]) -> List[Item]
-cost [data.len * 3, data.len, 0, 1]
+fn transform[N: Index](data: Vec[Item, max: N]) -> Vec[Item, max: N]
+cost [N * 3, N, 0, 0]
 {
     data.map(|item| item.process())
 }
@@ -503,18 +503,19 @@ parallel_scope(on_error: .collect) {
 
 ### 4.2 Effect handlers for concurrency
 
-#### `Spawn` as an effect
+#### `spawn` and the `Spawn` effect
 
-`Spawn` is defined as a standard effect, not compiler magic:
+`spawn { ... }` is a built-in expression guarded by the standard `Spawn`
+effect. Conceptually, it performs the platform-provided `Spawn.spawn`
+operation, but the syntax and structured-scope checks are part of the language:
 
 ```spore
-// Built-in effect definition (conceptual; provided by Platform)
 effect Spawn {
     fn spawn[T](task: () -> T) -> Task[T]
 }
 ```
 
-Functions declare the effect via `uses [Spawn]`. Without this declaration, the compiler **statically rejects** any call to `spawn`.
+Functions declare the effect via `uses [Spawn]`. Without this declaration, the compiler **statically rejects** any `spawn { ... }` expression.
 
 #### Handler mechanism
 
@@ -724,13 +725,15 @@ uses [Spawn, FileRead, NetConnect]
 }
 ```
 
-#### Symbolic cost expressions for dynamic lanes
+#### Symbolic cost expressions for lane counts
 
-When the number of spawned tasks depends on runtime values, the compiler uses **symbolic cost expressions**:
+Verified lane bounds use Index parameters. Dynamic `List` lengths remain valid
+runtime data, but they are not CostExpr variables; use `Vec[..., max: N]` when
+the lane budget must be verified statically:
 
 ```spore
-fn fetch_all(urls: List[Url]) -> List[Response] ! NetError
-cost [urls.len * per_fetch + urls.len * 10, urls.len * 2, urls.len, urls.len]
+fn fetch_all[N: Index](urls: Vec[Url, max: N]) -> Vec[Response, max: N] ! NetError
+cost [N * per_fetch + N * 10, N * 2, N, N]
 uses [Spawn, NetConnect]
 {
     parallel_scope {
@@ -744,13 +747,15 @@ uses [Spawn, NetConnect]
 $ sporec --query-cost fetch_all
 {
   "function": "fetch_all",
-  "cost_symbolic": "urls.len × (5 + per_fetch) + urls.len",
-  "parallel_lanes": "urls.len",
-  "note": "lane count depends on runtime urls.len; no static upper bound"
+  "cost_symbolic": "N * (5 + per_fetch) + N",
+  "parallel_lanes": "N",
+  "note": "lane count is bounded by the Vec capacity index N"
 }
 ```
 
-To make the cost easier to reason about at compile time while keeping **`List`** as the carrier type, attach an explicit **`max_items`** refinement or enforce `urls.len()` at runtime / via `parallel_scope(lanes: …)`. For the rare case where the **type** itself must expose a numeric cap (`N`), use **`Vec[..., max: N]`** (SEP-0002)—most programs should stay on **`List`**.
+For dynamic `List` inputs, enforce runtime caps with ordinary checks or
+`parallel_scope(lanes: K)` and treat remaining work as runtime-metered rather
+than verified by CostExpr.
 
 ```spore
 fn bounded_fetch(urls: List[Url]) -> List[Response] ! NetError
@@ -758,7 +763,7 @@ cost [100 * per_fetch + 500, 800, 100 * per_fetch, 100]
 uses [Spawn, NetConnect]
 {
     parallel_scope(lanes: 10) {
-        // At most 10 parallel tasks; remaining queue — keep urls.len within policy via caller checks / refinements
+        // At most 10 parallel tasks; callers enforce any total input-count policy separately
         urls.each(|url| spawn { fetch(url) })
     }
 }
@@ -772,7 +777,7 @@ $ sporec --query-cost bounded_fetch
   "cost_declared": "four-slot `cost [...]` on `bounded_fetch` (see SEP-0001)",
   "status": "within_bound",
   "parallel_lanes_peak": 10,
-  "note": "prefer List[T] here; lanes capped at 10; caller bounds urls.len separately"
+  "note": "prefer List[T] here; lanes capped at 10; caller bounds total input count separately"
 }
 ```
 
