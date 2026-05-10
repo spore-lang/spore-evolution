@@ -35,7 +35,7 @@ FORBIDDEN_PATTERNS = (
     ),
     (
         re.compile(r"cost\s*<="),
-        "retired ASCII syntax `cost <=`; use `cost ≤`",
+        "retired ASCII syntax `cost <=`; use four-slot `cost [compute, alloc, io, parallel]`",
     ),
 )
 

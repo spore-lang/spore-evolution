@@ -6,9 +6,9 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Atomic effect** (SEP-0003): One of the 10 built-in intent-oriented atomic effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit. In compiler/tooling contexts, these effect names form the checked effect set.
 
-**`Add`** (SEP-0002): Compiler-known trait for the `+` operator, enabling operator overloading on user-defined types.
+**`Add`** (SEP-0002): Compiler-known trait for the `+` operator on types that explicitly implement addition.
 
-**`@allow`** (SEP-0004): Annotation that locally suppresses a cost budget violation, used as a second-tier escape for cost analysis.
+**`@allows`** (SEP-0002, SEP-0003, SEP-0005): Hole-level annotation that restricts which candidate functions may be used to fill a specific Hole. It cannot suppress resource checks.
 
 **`@unbounded`** (SEP-0004): Annotation declaring that a function's cost is intentionally unanalyzed, opting out of cost verification entirely.
 
@@ -38,9 +38,11 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Cost dimension** (SEP-0004): One of four orthogonal resource axes in a CostVector: compute, alloc, io, parallel.
 
-**Cost expression (CostExpr)** (SEP-0004): Arithmetic expression over cost variables, restricted to `+`, `×`, `^const`, `log`, `max`, `min` to ensure decidability.
+**Cost expression (CostExpr)** (SEP-0004): Arithmetic expression over compile-time Index symbols and `cost(f)` summaries. CostExpr does not reference ordinary runtime values.
 
 **CostVector** (SEP-0004): A 4-tuple `(compute(op), alloc(cell), io(call), parallel(lane))` representing multidimensional resource usage.
+
+**`Count[N]`** (SEP-0002, SEP-0009): Runtime non-negative count value that carries a compile-time Index parameter `N`. Cost analysis sees `N`, not the runtime integer.
 
 ## D
 
@@ -54,7 +56,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Display`** (SEP-0002): Compiler-known trait for user-facing string representation.
 
-**`Div`** (SEP-0002): Compiler-known trait for the `/` operator, enabling operator overloading on user-defined types.
+**`Div`** (SEP-0002): Compiler-known trait for the `/` operator on types that explicitly implement division.
 
 **Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (effect), K (cost), M (module), W (warning).
 
@@ -102,13 +104,15 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Import resolution** (SEP-0008): The process of mapping `import pkg.module` declarations to concrete module files and verifying symbol visibility.
 
+**Index** (SEP-0002, SEP-0004): Compile-time non-negative size kind used by cost analysis. Index parameters such as `N: Index` are the only variables that may appear directly in CostExpr.
+
 ## L
 
 **Lane** (SEP-0007): The parallel cost dimension — each `spawn` creates a new lane, tracked in CostVector's `parallel` field.
 
 ## M
 
-**`Mul`** (SEP-0002): Compiler-known trait for the `*` operator, enabling operator overloading on user-defined types.
+**`Mul`** (SEP-0002): Compiler-known trait for the `*` operator on types that explicitly implement multiplication.
 
 **Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and effect requirements.
 
@@ -150,7 +154,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` effect.
 
-**`Sub`** (SEP-0002): Compiler-known trait for the `-` operator, enabling operator overloading on user-defined types.
+**`Sub`** (SEP-0002): Compiler-known trait for the `-` operator on types that explicitly implement subtraction.
 
 **Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
 
@@ -163,6 +167,10 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 **Startup contract** (SEP-0008): The Platform-defined requirement on the startup function's parameters, return type, and effect boundary.
 
 **Startup function** (SEP-0008): The callable inside the selected entry module that satisfies the Platform's startup contract. Today this is usually `main`.
+
+**`Str`** (SEP-0002): The UTF-8 text primitive in Spore surface syntax (not `String`). Single Unicode scalars use length-1 `Str` values; there is no separate `Char` type (see implementation PR #113).
+
+**Default literals** (SEP-0002): In the reference compiler (`sporec-typeck`), unsuffixed integer literals synthesize as **`I64`** and float literals as **`F64`**, unless a signature or context fixes another width (see metavariables **ι** / **φ** in SEP-0002 for other fixed sizes).
 
 ## T
 

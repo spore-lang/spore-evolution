@@ -23,26 +23,41 @@ This SEP specifies the type system for the Spore programming language. Spore's t
 
 The concrete type representation is the `Ty` enum:
 
+Implementation note: **`EffectSet`** stores effect names as strings in current compiler internals (`BTreeSet<String>` in Rust). Surface syntax references those names as literal identifiers.
+
 ```text
-Ty ::= Int | Float | Bool | Str | Char | Unit | Never
+Ty ::= I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64 | F32 | F64
+      | Bool | Str | Unit | Never
+      | Tuple([Ty, …])
+      | Refined(Ty, var, predicate)
       | Named(name)
       | App(name, [Ty])
       | Record([(name, Ty)])
-      | Fn([Ty], Ty, EffectSet)
+      | Fn([Ty], Ty, EffectSet, ErrorSet)
       | Var(u32)
       | Hole(name)
       | Error
 ```
 
+**Reference compiler:** This matches the `Ty` enum shipped in `sporec-typeck` (see `crates/sporec-typeck/src/types.rs`): fixed-width numerics, no `Char`, plus `Tuple` and `Refined`. Single-quoted character literals are rejected in the lexer (**no `Char` type or literals**, `spore` PR #113). **Unsuffixed integer literals infer as `I64` and float literals as `F64`** unless a context forces another fixed width. `Int` and `Float` are not primitive names or informal aliases.
+
+**Platform-specific integers (e.g. process exit status).** The core type system does **not** fix a single machine type for exit codes or other host ABI surfaces. Those contracts live in the **Platform package** metadata and startup/exit specifications (see SEP-0008); this SEP only requires that the Spore signature matches whatever that Platform declares.
+
+**Formal judgments (mixed style).** Core rules in §4 use concrete `I64` / `F64` where they describe default scalar behavior. Where a rule must range over **all** integer or float widths, this SEP uses **ι** ∈ {`I8`, …, `U64`} and **φ** ∈ {`F32`, `F64`} as metavariables, with the default literal case still **ι = `I64`**, **φ = `F64`** unless stated otherwise.
+
 Key design decisions:
 
 - **Signatures are gravity centers** — function signatures must be richly typed and fully explicit; bodies are inferred.
-- **EffectSet = BTreeSet\<String\>** is encoded directly in function types, making effect tracking a first-class part of the type.
+- **EffectSet** is encoded directly in function types (see implementation note above), making effect tracking a first-class part of the type.
+- **Current implementation note**: the checker currently carries error sets with a
+  similarly plain set-backed internal representation. This wave specifies the
+  target canonicalization-first semantics layered on top of that representation,
+  without requiring a new dedicated `error` declaration surface.
 - **Bidirectional type inference** — top-down checking from signatures, bottom-up synthesis from expressions.
 - **Two-pass module checking** — `register_item` (collect all signatures) then `check_fn` (verify bodies).
-- **Generics via square-bracket application** — `List[Int]`, `Result[T, E]`.
+- **Generics via square-bracket application** — `List[I64]`, `Result[T, E]`.
 - **Type unification** with `Var` binding and substitution maps.
-- **Refinement types (future)** — L0 decidable predicates + L1 abstract interpretation without an SMT solver.
+- **Refinement types** — L0 decidable predicates ship in `sporec-typeck` (`Ty::Refined`); richer L1 abstract interpretation without an SMT solver remains future work.
 
 ## Motivation
 
@@ -51,7 +66,7 @@ Key design decisions:
 Spore is being co-developed by humans and AI Agents. Both audiences need precise, unambiguous rules for:
 
 1. **What programs are well-typed.** Agents generate code that must type-check. Vague rules produce vague code.
-2. **What information flows through signatures.** Signatures are the primary communication channel between components, between humans and Agents, and between Agents. They must encode types, effects, cost bounds, and error sets.
+2. **What information flows through signatures.** Signatures are the primary communication channel between components, between humans and Agents, and between Agents. They must encode types, effects, the four-slot cost clause, and error sets.
 3. **What the compiler guarantees.** Typed holes, structured diagnostics, and fill-suggestions all depend on a well-defined type lattice.
 4. **Where inference ends and annotation begins.** Signatures explicit, bodies inferred — but the boundary must be razor-sharp.
 
@@ -81,51 +96,65 @@ This section introduces Spore's type system from a user's perspective, with code
 
 ### 3.1 Primitive types
 
-Spore provides a small, fixed set of built-in primitive types:
+Spore provides a small, fixed set of built-in **numeric widths**, text, and logical primitives:
 
-| Type | Description | Default Literal |
+| Type | Description | Notes |
 |---|---|---|
-| `Int` | Arbitrary-precision integer | `42` |
-| `Float` | 64-bit IEEE 754 floating point | `3.14` |
+| `I8`, `I16`, `I32`, `I64` | Signed integers | Unsuffixed literals default to **`I64`** in `sporec-typeck` |
+| `U8`, `U16`, `U32`, `U64` | Unsigned integers | |
+| `F32`, `F64` | IEEE-754 binary floats | Literals default to `F64` in the reference checker |
 | `Bool` | Boolean | `true`, `false` |
-| `String` | UTF-8 string | `"hello"` |
-| `Char` | Unicode scalar value | `'a'` |
+| `Str` | UTF-8 string | Use `"x"` even for a single Unicode scalar; there is **no** `Char` type |
 | `Unit` | Zero-information type (like Rust `()`) | `()` |
 | `Never` | Bottom type — uninhabited, no values exist | (no literal) |
 
 ```spore
-let x: Int = 42              // arbitrary-precision integer
-let y: Float = 3.14          // 64-bit IEEE 754
+let x: I64 = 42              // default integer literal type (I64)
+let y: F64 = 3.14            // default float literal type (F64)
 let b: Bool = true           // boolean
-let s: String = "hello"      // UTF-8 string
-let c: Char = 'a'            // Unicode scalar value
+let s: Str = "hello"         // UTF-8 string
+let grapheme: Str = "世"     // still `Str`, not a separate character type
 let u: () = ()               // unit (zero-information type)
 ```
 
-All primitives are nominal — `Int` ≠ `Float` even when their bit patterns coincide.
+Distinct numeric widths are **not** interchangeable without an explicit conversion story (still evolving). `Str` is unrelated to any numeric width.
 
-**Numeric sub-types via refinement.** Rather than proliferating primitive numeric types (i8, u16, f32, …), Spore uses refinement types on `Int` and `Float`:
+**Narrower domains via refinement.** Bounds and lightweight predicates attach to a fixed-width base type (the reference compiler supports this for aliases such as `alias Port = I64 when …`):
 
 ```spore
-type U8  = Int when 0 <= self <= 255
-type I32 = Int when -2147483648 <= self <= 2147483647
-type F32 = Float when self.precision == 32
+alias NonNegativeI64 = I64 when self >= 0
+alias Port = I64 when self >= 1 && self <= 65535
 ```
 
-Platform effects determine the runtime representation; the type system reasons about logical constraints, and the codegen layer maps to machine types.
+Platform code generation maps these types to machine representations; refinements are checked in the decidable fragment described later in this SEP.
+
+**No informal scalar aliases.** Examples and normative text must write fixed-width scalar names (`I64`, `F64`, `U8`, and so on). A project may define its own `alias Int = I64`, but that is ordinary user code and not part of the language prelude.
+
+**Index kind.** `Index` is a compile-time non-negative size kind, not a runtime
+type. Index parameters such as `N: Index` may appear in indexed types and in
+`cost [...]` clauses. Ordinary runtime values (`I64`, `Str`, `List[T]`, records,
+and so on) do not become cost variables merely because they are in scope.
+
+```spore
+type Count[N: Index] = I64 when self >= 0
+```
+
+`Count[N]` is the bridge type for APIs that carry a runtime non-negative count
+while also exposing the compile-time index `N` to cost analysis. The runtime
+representation is still an integer; the verifier sees only the index parameter.
 
 ### 3.2 Type annotations on functions
 
-Function signatures **must** be fully annotated. Parameters, return type, error set, effect set, and cost bound are all declared:
+Function signatures **must** be fully annotated. Parameters, return type, error set, effect set, and `cost [c, a, i, p]` clause are all declared:
 
 ```spore
-fn add(a: Int, b: Int) -> Int {
+fn add(a: I64, b: I64) -> I64 {
     a + b
 }
 
-fn fetch_page(url: String) -> String ! NetworkError
+fn fetch_page(url: Str) -> Str ! NetworkError
 uses [NetConnect]
-cost <= 5000
+cost [5000, 200, 5000, 0]
 {
     http_get(url)
 }
@@ -134,40 +163,39 @@ cost <= 5000
 Local variables inside bodies do **not** need annotations — they are inferred:
 
 ```spore
-fn process(x: Int) -> Int {
-    let doubled = x * 2          // inferred: Int
-    let message = "result"       // inferred: String
-    doubled + 1                  // inferred: Int, checked against return type
+fn process(x: I64) -> I64 {
+    let doubled = x * 2          // inferred: I64
+    let message = "result"       // inferred: Str
+    doubled + 1                  // inferred: I64, checked against return type
 }
 ```
 
 ### 3.3 Struct and enum types
 
-> **Note (N7):** Product types use the `struct` keyword: `struct Point { x: Float, y: Float }`. The `type` keyword is reserved for sum types/ADTs. The examples below use `type` with record syntax for historical reasons; canonical Spore uses `struct` for product types.
-
-Structs are nominal product types:
+**Structs** (`struct`) are nominal product types. **`type`** with variants defines sealed sums (ADTs).
 
 ```spore
-type Point = {
-    x: Float,
-    y: Float,
+struct Point {
+    x: F64,
+    y: F64,
 }
 
 let p = Point { x: 1.0, y: 2.0 }
 let dist = sqrt(p.x * p.x + p.y * p.y)
-```
 
-Enums are sealed sum types with exhaustive pattern matching:
-
-```spore
 type Shape =
-    | Circle { radius: Float }
-    | Rectangle { width: Float, height: Float }
+    Circle { radius: F64 }
+    | Rectangle { width: F64, height: F64 }
+    | Triangle { a: F64, b: F64, c: F64 }
 
-fn area(shape: Shape) -> Float {
+fn area(shape: Shape) -> F64 {
     match shape {
         Circle { radius }           => 3.14159 * radius * radius,
         Rectangle { width, height } => width * height,
+        Triangle { a, b, c } => {
+            let sper = (a + b + c) / 2.0;
+            sqrt(sper * (sper - a) * (sper - b) * (sper - c))
+        },
     }
 }
 ```
@@ -177,13 +205,13 @@ fn area(shape: Shape) -> Float {
 Anonymous records are the structural escape hatch. They have no declared name and are compatible by field shape, not by declaration site.
 
 ```spore
-fn greet(person: { name: String, age: Int }) -> String {
+fn greet(person: { name: Str, age: I64 }) -> Str {
     "Hello, " ++ person.name ++ " (age " ++ show(person.age) ++ ")"
 }
 
 // Any value with matching fields satisfies this:
 let alice = { name: "Alice", age: 30, role: "Engineer" }
-greet(alice)   // OK: alice has name: String and age: Int (extra fields ignored)
+greet(alice)   // OK: alice has name: Str and age: I64 (extra fields ignored)
 ```
 
 **Rules for anonymous records**:
@@ -191,13 +219,13 @@ greet(alice)   // OK: alice has name: String and age: Int (extra fields ignored)
 1. **Width subtyping**: A record with extra fields satisfies a type expecting fewer fields.
 2. **Exact field matching**: Field names and types must match exactly (no implicit conversion).
 3. **No trait implementation**: Anonymous records cannot implement traits or effects — nominal types are required for that.
-4. **Nominal types do NOT satisfy anonymous record types**: `type Stats = { count: Int }` is nominal and is NOT compatible with `{ count: Int }`.
+4. **Nominal types do NOT satisfy anonymous record types**: `struct Stats { count: I64 }` is nominal and is NOT compatible with `{ count: I64 }`.
 
 ```spore
 // Named types do NOT satisfy anonymous record types:
-type Stats = { count: Int, total: Float }
+struct Stats { count: I64, total: F64 }
 let named = Stats { count: 10, total: 95.5 }
-// summarize(data: named)  // ERROR: Stats is nominal, not { count: Int, total: Float }
+// summarize(data: named)  // ERROR: Stats is nominal, not { count: I64, total: F64 }
 
 // Explicit conversion required:
 summarize(data: { count: named.count, total: named.total })   // OK
@@ -205,12 +233,12 @@ summarize(data: { count: named.count, total: named.total })   // OK
 
 ### 3.5 Function types with effects
 
-Function types carry a **EffectSet** — the set of effects the function requires:
+Function types carry an **EffectSet** and an **ErrorSet** — the effects they require and the errors they may propagate:
 
 ```spore
-type Logger = Fn(msg: String) -> () uses [FileWrite]
+type Logger = Fn(msg: Str) -> () uses [FileWrite]
 
-fn with_logging(f: Fn(x: Int) -> Int, x: Int) -> Int
+fn with_logging(f: Fn(x: I64) -> I64, x: I64) -> I64
 uses [FileWrite]
 {
     log("calling f")
@@ -229,7 +257,7 @@ fn identity[T](x: T) -> T {
     x
 }
 
-fn map[A, B](list: List[A], f: Fn(item: A) -> B) -> List[B] {
+fn pair[A, B](left: A, right: B) -> (A, B) {
     // implementation
 }
 
@@ -243,9 +271,9 @@ where T: Ord
 At call sites, type arguments are inferred from the actual argument types:
 
 ```spore
-let nums: List[Int] = [1, 2, 3]
-let result = identity(42)          // T inferred as Int
-let strings = map(nums, show)      // A=Int, B=String inferred
+let nums: List[I64] = [1, 2, 3]
+let result = identity(42)          // T inferred as I64
+let strings = nums.map(show)       // A=I64, B=Str inferred
 ```
 
 ### 3.7 Generic type application
@@ -253,15 +281,15 @@ let strings = map(nums, show)      // A=Int, B=String inferred
 Named generic types use square-bracket application in type position:
 
 ```spore
-type Pair[A, B] = {
+struct Pair[A, B] {
     first: A,
     second: B,
 }
 
-let p: Pair[Int, String] = Pair { first: 1, second: "hello" }
+let p: Pair[I64, Str] = Pair { first: 1, second: "hello" }
 
 type Result[T, E] =
-    | Ok { value: T }
+    Ok { value: T }
     | Err { error: E }
 ```
 
@@ -270,12 +298,12 @@ type Result[T, E] =
 **Newtypes** create zero-cost nominal wrappers. The new type is distinct from its underlying type:
 
 ```spore
-type UserId = String       // nominal wrapper: UserId ≠ String
-type Email = String        // nominal: Email ≠ UserId ≠ String
-type Celsius = Float       // nominal: Celsius ≠ Fahrenheit
-type Fahrenheit = Float
+type UserId = Str       // nominal wrapper: UserId ≠ Str
+type Email = Str        // nominal: Email ≠ UserId ≠ Str
+type Celsius = F64       // nominal: Celsius ≠ Fahrenheit
+type Fahrenheit = F64
 
-fn format_temp(temp: Celsius) -> String {
+fn format_temp(temp: Celsius) -> Str {
     show(temp) ++ "°C"
 }
 
@@ -283,26 +311,26 @@ let c: Celsius = 100.0
 let f: Fahrenheit = 212.0
 format_temp(temp: c)    // OK
 format_temp(temp: f)    // ERROR: expected Celsius, got Fahrenheit
-format_temp(temp: 98.6) // ERROR: expected Celsius, got Float
+format_temp(temp: 98.6) // ERROR: expected Celsius, got F64
 ```
 
 Newtypes may have refinements:
 
 ```spore
-type Port = Int when 1 <= self <= 65535
-type NonEmptyString = String when self.len() > 0
-type Latitude = Float when -90.0 <= self <= 90.0
+type Port = I64 when 1 <= self <= 65535
+type NonEmptyStr = Str when self.len() > 0
+type Latitude = F64 when -90.0 <= self <= 90.0
 ```
 
 **Type aliases** are transparent — interchangeable with their definition:
 
 ```spore
-alias StringList = List[String]
+alias TextList = List[Str]
 alias Callback[T] = Fn(event: T) -> Unit
 alias Result[T] = T ! GenericError
 
-type UserId = String       // newtype: UserId ≠ String (nominal)
-alias UserName = String    // alias: UserName == String (transparent)
+type SessionId = Str       // newtype: SessionId ≠ Str (nominal)
+alias Label = Str    // alias: Label == Str (transparent)
 ```
 
 ### 3.9 Trait system
@@ -321,12 +349,12 @@ trait Ord: Eq {
 }
 
 trait Display {
-    fn display(self) -> String
+    fn display(self) -> Str
 }
 
 trait Serialize {
     fn serialize(self) -> Bytes ! SerializeError
-    cost serialize <= 100
+        cost [100, 20, 0, 0]
 }
 ```
 
@@ -351,7 +379,7 @@ impl Ord for Point {
 }
 
 impl Display for Shape {
-    fn display(self) -> String {
+    fn display(self) -> Str {
         match self {
             Circle { radius }           => "Circle(r=" ++ show(radius) ++ ")",
             Rectangle { width, height } => "Rect(" ++ show(width) ++ "x" ++ show(height) ++ ")",
@@ -366,10 +394,16 @@ Default method implementations are supported:
 ```spore
 trait Collection {
     type Item
-    fn len(self) -> Int
+    fn len(self) -> I64
     fn is_empty(self) -> Bool { self.len() == 0 }   // default method
 }
 ```
+
+Shared method names are resolved through trait and inherent impl lookup, not
+through free-function overloading. A call such as `xs.map(f)` first uses the
+receiver type of `xs`; if several imported traits still provide applicable
+methods with the same name, the call must use trait-qualified syntax. Spore does
+not use signature unions such as `List[T] | Str` to model these operations.
 
 #### Trait bounds
 
@@ -378,7 +412,7 @@ Trait bounds constrain generic type parameters in `where` clauses:
 ```spore
 fn sort[T](list: List[T]) -> List[T]
 where T: Ord
-cost <= 500
+cost [500, 100, 0, 0]
 {
     // implementation
 }
@@ -386,17 +420,17 @@ cost <= 500
 fn serialize_all[T](items: List[T]) -> List[Bytes] ! SerializeError
 where T: Serialize + Display
 {
-    items |> map(|item| item.serialize())
+    items.map(|item| item.serialize())
 }
 ```
 
 Multiple bounds use `+`:
 
 ```spore
-fn dedup_and_display[T](items: List[T]) -> String
+fn dedup_and_display[T](items: List[T]) -> Str
 where T: Eq + Hash + Display
 {
-    items |> unique() |> map(|x| x.display()) |> join(", ")
+    items.unique().map(|x| x.display()).join(", ")
 }
 ```
 
@@ -436,12 +470,12 @@ Traits may declare associated types — types determined by the implementing typ
 trait Iterator {
     type Item
     fn next(self) -> Option[Self.Item]
-    cost next <= 10
+        cost [10, 80, 0, 0]
 }
 
 impl Iterator for LineReader {
-    type Item = String
-    fn next(self) -> Option[String] {
+    type Item = Str
+    fn next(self) -> Option[Str] {
         self.read_line()
     }
 }
@@ -451,7 +485,7 @@ trait Collection {
     type Iter: Iterator where Iter.Item == Self.Item
 
     fn iter(self) -> Self.Iter
-    fn len(self) -> Int
+    fn len(self) -> I64
     fn is_empty(self) -> Bool { self.len() == 0 }
 }
 ```
@@ -460,12 +494,12 @@ Associated types eliminate extra type parameters on trait users:
 
 ```spore
 // Clean — associated types:
-fn sum_all[C](collection: C) -> Int
+fn sum_all[C](collection: C) -> I64
 where
     C: Collection,
-    C.Item: Add[Output = Int]
+    C.Item: Add[Output = I64]
 {
-    collection.iter() |> fold(0, |acc, item| acc + item)
+    collection.iter().fold(0, |acc, item| acc + item)
 }
 ```
 
@@ -519,9 +553,9 @@ Spore provides compiler-known traits for common operations:
 Derivable traits can be auto-implemented by the compiler for types whose fields all implement the trait:
 
 ```spore
-type Point = {
-    x: Float,
-    y: Float,
+struct Point {
+    x: F64,
+    y: F64,
 } deriving [Eq, Clone, Debug, Hash]
 ```
 
@@ -534,20 +568,20 @@ You can only implement a trait for a type if you own either the trait or the typ
 impl Display for Point { ... }
 
 // OK: you own MyTrait, so you can implement it for any type
-impl MyTrait for String { ... }
+impl MyTrait for Str { ... }
 
-// ERROR: you own neither Display nor String
-impl Display for String { ... }   // orphan rule violation
+// ERROR: you own neither Display nor Str
+impl Display for Str { ... }   // orphan rule violation
 ```
 
 **Adapter escape mechanism** for implementing foreign traits on foreign types:
 
 ```spore
 adapter ExternalType as Printable {
-    fn display(self) -> String { ... }
+    fn display(self) -> Str { ... }
 }
 
-fn use_external(x: ExternalType) -> String
+fn use_external(x: ExternalType) -> Str
 where adapter: ExternalType as Printable
 {
     x.display()
@@ -556,77 +590,91 @@ where adapter: ExternalType as Printable
 
 Adapters are always scoped and explicit — they cannot cause global coherence violations.
 
-### 3.10 Const generics
+### 3.10 Index generics
 
-#### Const generic parameters
+#### Index parameters
 
-Const generics allow value-level parameters in type position, central to Spore's bounded collections and cost-aware types:
+`Index` parameters are compile-time non-negative size symbols. They are the
+only user-visible variables that may flow directly into `cost [...]`. This keeps
+cost checking parametric and compile-time: the verifier proves formulas over
+symbols such as `N`, not over arbitrary runtime values.
+
+### Dynamic `List` vs indexed containers
+
+**Naming invariant:** **`List[T]` is always dynamic** — the `List` constructor
+never carries a length or capacity parameter. If an API needs predictable cost
+from a static size, use an indexed type:
+
+- **`Count[N]`** for a runtime count value carrying index `N`.
+- **`Array[T, N]`** for fixed-length arrays.
+- **`Vec[T, max: N]`** for buffers with a static capacity upper bound.
+
+`List[T]` remains the default sequence type for ordinary programs. A `List[T]`
+can still be inspected at runtime, but its runtime length is not a CostExpr
+variable. APIs that need verified size-parametric cost should accept or return
+`Count`, `Array`, or `Vec`.
 
 ```spore
-type Vec[T, max: Int] = {
-    data: Array[T],
-    len: Int,
+struct Array[T, N: Index] {
+    data: <compiler representation>
 }
 
-fn take[T, N: Int](list: List[T], count: N) -> Vec[T, max: N]
-where N <= list.max
-{
-    // implementation
+struct Vec[T, max: N] {
+    data: Array[T, N],
+    len: I64,
 }
 
-type Matrix[T, rows: Int, cols: Int] = {
-    data: Array[Array[T]],
+struct Matrix[T, rows: R, cols: C]
+where R: Index, C: Index {
+    data: Array[Array[T, C], R],
 }
 ```
 
-#### Type-level arithmetic
+#### Index expressions
 
-Const generic parameters support arithmetic in type-level expressions, enabling compile-time dimensional checking:
+Index parameters support a deliberately small expression language:
 
-```spore
-fn concat[T, M: Int, N: Int](
-    a: Vec[T, max: M],
-    b: Vec[T, max: N],
-) -> Vec[T, max: M + N] {
-    // implementation
-}
-
-fn transpose[T, R: Int, C: Int](
-    matrix: Matrix[T, rows: R, cols: C],
-) -> Matrix[T, rows: C, cols: R] {
-    // implementation
-}
-
-fn flatten[T, N: Int, M: Int](
-    nested: Vec[Vec[T, max: M], max: N],
-) -> Vec[T, max: N * M] {
-    // implementation
-}
+```text
+IndexExpr ::= 0 | 1 | N
+            | IndexExpr + IndexExpr
+            | IndexExpr * IndexExpr
+            | max(IndexExpr, IndexExpr)
+            | min(IndexExpr, IndexExpr)
+            | log(IndexExpr)
+            | span(IndexExpr, IndexExpr)
 ```
 
-Supported arithmetic operations in type position: `+`, `-`, `*`, `/`, `%`, `min`, `max`. All arithmetic is evaluated at compile time. Division by zero and overflow are compile-time errors.
+`span(hi, lo)` is saturating difference: `max(hi - lo, 0)`. Ordinary subtraction
+and division are not IndexExpr operators. This keeps the cost verifier in a
+non-negative, monotone fragment while still supporting interval-length APIs.
 
 #### Interaction with cost
 
-Const generics interact naturally with the cost system. A function's cost may depend on its const generic parameters:
+Cost clauses refer to Index parameters, not ordinary runtime values:
 
 ```spore
-fn linear_search[T, N: Int](items: Vec[T, max: N], target: T) -> Option[Int]
+fn vec_linear_search[T, N: Index](
+    items: Vec[T, max: N],
+    target: T,
+) -> Option[I64]
 where T: Eq
-cost <= N * 5
+cost [N * 5, 0, 0, 0]
 {
-    // O(N) search, cost scales linearly
+    // Verified against the static capacity bound N.
 }
 
-fn sort_bounded[T, N: Int](items: Vec[T, max: N]) -> Vec[T, max: N]
-where T: Ord
-cost <= N * N * 2
+fn vec_concat[T, M: Index, N: Index](
+    a: Vec[T, max: M],
+    b: Vec[T, max: N],
+) -> Vec[T, max: M + N]
+cost [M + N, M + N, 0, 0]
 {
-    // O(N²) worst case
+    // implementation
 }
 ```
 
-Calling `sort_bounded` on a `Vec[T, max: 100]` implies cost ≤ 20000 — the compiler verifies this parametrically.
+For dynamic collections, write complexity prose or use runtime metering; do not
+write a runtime-length expression as a verified compile-time CostExpr.
 
 ### 3.11 Pattern matching
 
@@ -635,7 +683,7 @@ Spore requires **full, exhaustive pattern matching** on all enums. The compiler 
 #### Exhaustiveness checking
 
 ```spore
-fn describe(shape: Shape) -> String {
+fn describe(shape: Shape) -> Str {
     match shape {
         Circle { radius }           => "circle with radius " ++ show(radius),
         Rectangle { width, height } => show(width) ++ "x" ++ show(height) ++ " rectangle",
@@ -662,7 +710,7 @@ Patterns can be nested to match deeply into data structures:
 
 ```spore
 type Expr =
-    | Literal { value: Int }
+    Literal { value: I64 }
     | BinOp { op: Op, left: Expr, right: Expr }
     | UnaryOp { op: Op, operand: Expr }
 
@@ -684,7 +732,7 @@ fn simplify(expr: Expr) -> Expr {
 Nested Option/Result matching:
 
 ```spore
-fn handle(value: Option[Result[Int, String]]) -> Int {
+fn handle(value: Option[Result[I64, Str]]) -> I64 {
     match value {
         Some(Ok(n))    => n,
         Some(Err(msg)) => panic("error: " ++ msg),
@@ -698,7 +746,7 @@ fn handle(value: Option[Result[Int, String]]) -> Int {
 Guards add boolean conditions to pattern branches:
 
 ```spore
-fn classify_temperature(temp: Float) -> String {
+fn classify_temperature(temp: F64) -> Str {
     match temp {
         t if t < -40.0  => "extreme cold",
         t if t < 0.0    => "freezing",
@@ -737,7 +785,7 @@ fn is_simple_shape(shape: Shape) -> Bool {
 Pattern matching works in `let` bindings:
 
 ```spore
-fn distance(a: Point, b: Point) -> Float {
+fn distance(a: Point, b: Point) -> F64 {
     let Point { x: x1, y: y1 } = a
     let Point { x: x2, y: y2 } = b
     sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
@@ -750,7 +798,7 @@ fn distance(a: Point, b: Point) -> Float {
 - `..` in struct patterns matches remaining fields.
 
 ```spore
-fn get_name(person: Person) -> String {
+fn get_name(person: Person) -> Str {
     let Person { name, .. } = person
     name
 }
@@ -758,10 +806,11 @@ fn get_name(person: Person) -> String {
 
 #### Pattern matching on error types
 
-Pattern matching integrates with Spore's row-typed error sets for exhaustive error handling:
+Pattern matching integrates with Spore's closed error sets for exhaustive error
+handling:
 
 ```spore
-fn handle_result(result: Invoice ! TaxError | ValidationError) -> String {
+fn handle_result(result: Invoice ! TaxError | ValidationError) -> Str {
     match result {
         Ok(invoice) => "Invoice #" ++ show(invoice.id),
         Err(TaxError { region, reason }) => "Tax error in " ++ show(region) ++ ": " ++ reason,
@@ -777,7 +826,7 @@ fn handle_result(result: Invoice ! TaxError | ValidationError) -> String {
 ```spore
 fn process_payment(amount: Money, card: Card) -> Receipt ! PaymentFailed
 uses [PaymentGateway, AuditLog]
-cost <= 2000
+cost [2000, 400, 200, 0]
 {
     let validated = validate_card(card)
     @allows[charge, charge_with_retry]
@@ -797,7 +846,7 @@ cost <= 2000
 ```spore
 fn build_dashboard(org: Org) -> Dashboard ! DataError
 uses [Database, Cache, Analytics]
-cost <= 20000
+cost [20000, 2000, 1000, 0]
 {
     @allows[fetch_cached_metrics, compute_summary]
     let metrics = ?gather_metrics
@@ -823,13 +872,13 @@ Error: @allows violation
 `Never` is the bottom type — it has no values and is a subtype of every type. It is the return type of functions that do not return (diverging functions).
 
 ```spore
-fn abort(msg: String) -> Never {
+fn abort(msg: Str) -> Never {
     panic(msg)
 }
 
-fn safe_divide(a: Int, b: Int) -> Int {
+fn safe_divide(a: I64, b: I64) -> I64 {
     if b == 0 {
-        abort("division by zero")   // Never coerces to Int
+        abort("division by zero")   // Never coerces to I64
     } else {
         a / b
     }
@@ -854,16 +903,48 @@ fn safe_unwrap[T](opt: Option[T]) -> T {
 - Exhaustive match arms that provably never execute
 - Error-only functions that always raise
 
-### 3.14 Row-type error sets
+### 3.14 Canonicalized error sets
 
-Spore's `! Err1 | Err2` is a **closed, row-typed error union**. Error types are themselves enum variants (ADTs), and the `!` syntax computes unions automatically across call chains:
+Spore's `! Err1 | Err2` is a **closed error set** written in surface form but
+checked with **canonicalization-first semantics**. Error types are nominal ADTs;
+the checker resolves each written item to a canonical identity, removes
+duplicates, and compares sets using that canonical form across call chains.
+
+Current implementation note: the shipping checker already supports the
+`! E1 | E2` surface and stores propagated error requirements in a plain set-like
+internal form. This section defines the **target behavior of this wave**:
+canonical subset/equivalence checks, redundancy diagnostics, and conservative
+hashing. It does **not** require a new top-level `error Alias = ...` syntax.
+
+```text
+canonicalize(E_written):
+  1. resolve each written error item to its canonical nominal identity
+  2. drop duplicates and canonically equivalent spellings
+  3. order the result by a stable canonical key for comparison / diagnostics
+```
+
+Two written error clauses are **equivalent** when their canonicalized sets are
+equal, even if their source spelling differs. A caller is **compatible** with a
+callee when `canonicalize(E_callee) ⊆ canonicalize(E_caller)`.
 
 ```spore
-fn parse(input: String) -> Ast ! SyntaxError | EncodingError
+alias ParseFailure = config.errors.ParseError
+
+fn parse(input: Str) -> Ast ! config.errors.ParseError
+fn parse_again(input: Str) -> Ast ! ParseFailure | config.errors.ParseError
+```
+
+`parse_again` is semantically equivalent to `! config.errors.ParseError`; the
+second item is redundant and should be diagnosed as such.
+
+Error sets still compose automatically via `?` propagation:
+
+```spore
+fn parse(input: Str) -> Ast ! SyntaxError | EncodingError
 fn validate(ast: Ast) -> ValidAst ! TypeError | RangeError
 
 // Error sets union automatically via `?` propagation:
-fn compile(input: String) -> ValidAst ! SyntaxError | EncodingError | TypeError | RangeError {
+fn compile(input: Str) -> ValidAst ! SyntaxError | EncodingError | TypeError | RangeError {
     let ast = parse(input)?
     validate(ast)?
 }
@@ -872,17 +953,27 @@ fn compile(input: String) -> ValidAst ! SyntaxError | EncodingError | TypeError 
 Each error type carries structured data:
 
 ```spore
-type SyntaxError = {
-    line: Int,
-    column: Int,
-    message: String,
-    snippet: String,
+struct SyntaxError {
+    line: I64,
+    column: I64,
+    message: Str,
+    snippet: Str,
 }
 ```
 
-**Error set subtyping**: A function with error set `! A` can be called where `! A | B` is expected — the caller's error set is a superset.
+**Canonical subset rule**: A function with error set `! A` can be called where
+`! A | B` is expected when `canonicalize({A}) ⊆ canonicalize({A, B})`.
 
-**`?` operator**: Propagates errors, automatically widening the error set. If `f()` returns `T ! E1` and `g()` returns `T ! E2`, calling both with `?` in the same function requires the enclosing function to declare `! E1 | E2` (or a superset).
+**`?` operator**: Propagates errors by canonical subset check. If `f()` returns
+`T ! E1` and `g()` returns `T ! E2`, calling both with `?` in the same function
+requires the enclosing function to declare a canonical superset of
+`canonicalize({E1, E2})`.
+
+**Redundancy diagnostics**: If a declaration writes duplicate or canonically
+equivalent error items, the compiler should keep checking against the
+canonicalized set but emit a structured redundancy diagnostic. User-facing text
+should stay engineering-oriented, e.g. "redundant error item `ParseFailure`:
+already covered by `config.errors.ParseError`".
 
 ### 3.15 Recursive types
 
@@ -890,30 +981,30 @@ Enums and structs may be recursive. The compiler detects and supports this:
 
 ```spore
 type Expr =
-    | Literal { value: Int }
+    Literal { value: I64 }
     | BinOp { op: Op, left: Expr, right: Expr }
     | UnaryOp { op: Op, operand: Expr }
     | IfExpr { cond: Expr, then_branch: Expr, else_branch: Expr }
 
 type JsonValue =
-    | JsonNull
+    JsonNull
     | JsonBool { value: Bool }
-    | JsonNumber { value: Float }
-    | JsonString { value: String }
+    | JsonNumber { value: F64 }
+    | JsonString { value: Str }
     | JsonArray { elements: List[JsonValue] }
-    | JsonObject { fields: List[{ key: String, value: JsonValue }] }
+    | JsonObject { fields: List[{ key: Str, value: JsonValue }] }
 ```
 
 **Infinite-size check**: The compiler rejects types that would require infinite memory without indirection:
 
 ```spore
 // ERROR: infinite-size type (struct directly contains itself)
-type Bad = {
+struct Bad {
     next: Bad,   // Bad contains Bad with no indirection
 }
 
 // OK: indirection via List breaks the cycle
-type Tree[T] = {
+struct Tree[T] {
     value: T,
     children: List[Tree[T]],   // List provides indirection
 }
@@ -923,7 +1014,7 @@ type Tree[T] = {
 
 | Context | Typing Discipline | Rationale |
 |---|---|---|
-| Named types (`type X = ...`) | **Nominal** | `UserId ≠ String` even if same shape |
+| Named types (`struct` / `type` with variants) | **Nominal** | `UserId ≠ Str` even if same representation |
 | Enums | **Nominal** | Sealed, exhaustiveness-checked |
 | Traits / effects | **Nominal** | Explicit `impl` required |
 | Effects | **Nominal** (always) | Security boundary — no structural coincidence |
@@ -939,13 +1030,13 @@ type Tree[T] = {
 | Function return type | **Yes** | Agent reads signatures for synthesis; human reads for understanding |
 | Error sets (`! ...`) | **Yes** | Error contract — must be visible |
 | Effect sets (`uses [...]`) | **Yes** | Security boundary — must be visible |
-| Cost bounds (`cost <=`) | **Yes** | Performance contract — must be visible |
+| Cost clause (`cost [c, a, i, p]`) | **Yes** | Performance contract — must be visible |
 | Struct/type field types | **Yes** | Data definition — must be explicit |
 | Trait method signatures | **Yes** | Interface contract |
 | Public constants | **Yes** | API surface |
 | Local variable types | No | Inferred from RHS: `let x = compute(...)` |
 | Generic type params at call sites | No | Inferred from arguments: `sort(my_list)` — T inferred from `my_list` |
-| Closure parameter types (in context) | No | Inferred: `.map(\|x\| x + 1)` — x inferred from Iterator.Item |
+| Closure parameter types (in context) | No | Inferred: `xs.map(\|x\| x + 1)` — x inferred from the receiver item type |
 | Intermediate expression types | No | Standard local inference |
 
 ### 3.18 Typed holes
@@ -953,8 +1044,8 @@ type Tree[T] = {
 Holes are unfilled positions in code. The type checker infers their expected type from context and reports it:
 
 ```spore
-fn example(x: Int, y: String) -> Bool {
-    let a: Int = ?h1          // hole ?h1 must produce Int
+fn example(x: I64, y: Str) -> Bool {
+    let a: I64 = ?h1          // hole ?h1 must produce I64
     let b = if a > 0 {
         ?h2                   // hole ?h2 must produce Bool (from return type)
     } else {
@@ -967,7 +1058,7 @@ fn example(x: Int, y: String) -> Bool {
 The compiler reports:
 
 ```text
-Hole ?h1: expected type Int
+Hole ?h1: expected type I64
 Hole ?h2: expected type Bool
 ```
 
@@ -975,20 +1066,20 @@ Hole ?h2: expected type Bool
 
 ### 4.1 Type grammar
 
-The internal type representation is the `Ty` enum, defined in `spore-typeck/src/types.rs`:
+The internal type representation is the `Ty` enum, defined in `crates/sporec-typeck/src/types.rs`:
 
 ```text
-τ ::= Int                          // integer primitive
-    | Float                        // floating-point primitive
+τ ::= I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64 | F32 | F64
     | Bool                         // boolean primitive
-    | Str                          // string primitive (displays as String)
-    | Char                         // Unicode scalar value
-    | Unit                         // unit type
+    | Str                          // UTF-8 string (`Str` in surface syntax)
+    | Unit                         // unit type (also `()`); empty tuple syntax normalizes here
     | Never                        // bottom type (uninhabited)
+    | Tuple([τ₁, …, τₙ])          // tuple type (n ≥ 2; empty tuple is Unit)
+    | Refined(τ, var, predicate) // refinement (decidable fragment)
     | Named(n)                     // named type / type parameter
     | App(n, [τ₁, …, τₖ])         // generic type application
     | Record([(f₁, τ₁), …])       // anonymous record (structural)
-    | Fn([τ₁, …, τₙ], τᵣ, C)     // function type with effect set
+    | Fn([τ₁, …, τₙ], τᵣ, C, E)  // function type with effect and error sets
     | Var(id)                      // unification variable
     | Hole(name)                   // typed hole placeholder
     | Error                        // error sentinel (recovery)
@@ -998,12 +1089,13 @@ Where:
 
 - `n` ranges over identifiers (strings).
 - `id` ranges over `u32` (unique unification variable IDs).
-- `C` is a **EffectSet** = `BTreeSet<String>`, the set of effect names the function requires.
+- `C` is an **EffectSet** = `BTreeSet<String>`, the set of effect names the function requires.
+- `E` is an **ErrorSet**, the closed union of error types declared with `!`.
 - `f` ranges over field names (strings) in anonymous records.
 
 **Never type.** `Ty::Never` is the bottom type — a subtype of all types. It is produced by diverging expressions (`panic`, non-terminating recursion). During unification, `unify(τ, Never) = ok` for all `τ`.
 
-**Record type.** `Ty::Record` represents anonymous structural records. Width subtyping applies: `Record([(a, Int), (b, String), (c, Bool)])` is a subtype of `Record([(a, Int), (b, String)])`.
+**Record type.** `Ty::Record` represents anonymous structural records. Width subtyping applies: `Record([(a, I64), (b, Str), (c, Bool)])` is a subtype of `Record([(a, I64), (b, Str)])`.
 
 **Error sentinel.** `Ty::Error` is produced when type resolution fails (e.g., unknown type name). It unifies with anything, allowing the checker to continue after errors and report multiple diagnostics.
 
@@ -1015,10 +1107,10 @@ Where:
 pub type EffectSet = BTreeSet<String>;
 ```
 
-A `EffectSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`:
+An `EffectSet` is a sorted set of effect names. It appears as the third component of `Ty::Fn`; the fourth component is the function's `ErrorSet`:
 
 ```text
-Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
+Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … }, { err₁, err₂, … })
 ```
 
 **EffectSet rules:**
@@ -1031,10 +1123,11 @@ Fn([τ₁, …, τₙ], τᵣ, { cap₁, cap₂, … })
 **Formal effect checking rule:**
 
 ```text
-Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f)
+Γ ⊢ f : Fn([σ₁, …, σₙ], τᵣ, C_f, E_f)
 C_caller ⊇ C_f
-─────────────────────────────────────────
-Γ; C_caller ⊢ f(e₁, …, eₙ) : τᵣ
+canonicalize(E_f) ⊆ canonicalize(E_caller)
+────────────────────────────────────────────────────────────
+Γ; C_caller; E_caller ⊢ f(e₁, …, eₙ) : τᵣ
 ```
 
 If `C_f ⊄ C_caller`, the checker emits:
@@ -1072,13 +1165,21 @@ The core type system uses bidirectional typing with effect context.
   ─────────────────
   Γ; S ⊢ x ⇒ T
 
-[Literal-Int]
+[Literal-I64]
   ─────────────────
-  Γ; S ⊢ n ⇒ Int
+  Γ; S ⊢ n ⇒ I64
+
+  (Default unsuffixed integer literal per §3.1; a checking context may instead fix another **ι** ∈ {`I8`, …, `U64`}.)
+
+[Literal-F64]
+  ─────────────────
+  Γ; S ⊢ c ⇒ F64
+
+  (Default unsuffixed float literal per §3.1; a checking context may instead fix another **φ** ∈ {`F32`, `F64`}.)
 
 [Literal-Str]
   ─────────────────
-  Γ; S ⊢ s ⇒ String
+  Γ; S ⊢ s ⇒ Str
 
 [Literal-Bool]
   ─────────────────
@@ -1185,14 +1286,14 @@ Spore uses **bidirectional type checking** with two modes:
 
 #### Inference rules (core subset)
 
-**Literals (synthesis):**
+**Literals (synthesis):** default widths are §3.1 (`I64`, `F64`). For a non-default fixed width, read those conclusions as **ι** / **φ** when a context, annotation, or suffix fixes another member of the same families.
 
 ```text
 ─────────────────
-Γ ⊢ n ⇒ Int          (integer literal)
+Γ ⊢ n ⇒ I64          (integer literal)
 
 ─────────────────
-Γ ⊢ f ⇒ Float        (float literal)
+Γ ⊢ c ⇒ F64        (float literal)
 
 ─────────────────
 Γ ⊢ s ⇒ Str          (string literal)
@@ -1212,11 +1313,12 @@ x : τ ∈ Γ
 **Function application (synthesis):**
 
 ```text
-Γ ⊢ f ⇒ Fn([σ₁, …, σₙ], τᵣ, C)
+Γ ⊢ f ⇒ Fn([σ₁, …, σₙ], τᵣ, C, E)
 Γ ⊢ eᵢ ⇐ σᵢ   for i ∈ 1..n
 C ⊆ C_current
-──────────────────────────────────
-Γ; C_current ⊢ f(e₁, …, eₙ) ⇒ τᵣ
+canonicalize(E) ⊆ canonicalize(E_current)
+────────────────────────────────────────────────────
+Γ; C_current; E_current ⊢ f(e₁, …, eₙ) ⇒ τᵣ
 ```
 
 **Let binding (synthesis):**
@@ -1385,7 +1487,7 @@ S.fields = [(f₁, τ₁), …, (fₙ, τₙ)]
 
 ### 4.7 Anonymous record types
 
-Anonymous records are represented as `Ty::Record(Vec<(String, Ty)>)`. Record construction synthesizes the type from field expressions:
+Anonymous records are represented as `Ty::Record(Vec<(InternedFieldName, Ty)>)` (field labels stored as interned UTF-8 identifiers in the implementation). Record construction synthesizes the type from field expressions:
 
 ```text
 Γ ⊢ e₁ ⇒ τ₁  …  Γ ⊢ eₖ ⇒ τₖ
@@ -1411,14 +1513,14 @@ fields₁ ⊇ fields₂  (by field name)
 Record(fields₁) <: Record(fields₂)
 ```
 
-**Nominal types do NOT satisfy anonymous record types.** `Named("Point")` and `Record([(x, Float), (y, Float)])` are distinct types even if `Point` has the same fields.
+**Nominal types do NOT satisfy anonymous record types.** `Named("Point")` and `Record([(x, F64), (y, F64)])` are distinct types even if `Point` has the same fields.
 
 ### 4.8 Function types
 
-Function types are `Ty::Fn(params, ret, EffectSet)`:
+Function types are `Ty::Fn(params, ret, EffectSet, ErrorSet)`:
 
 ```text
-Fn([σ₁, …, σₙ], τᵣ, C)
+Fn([σ₁, …, σₙ], τᵣ, C, E)
 ```
 
 A function value is a first-class value. Looking up a function name in the registry when it appears as a bare expression produces its function type:
@@ -1427,8 +1529,8 @@ A function value is a first-class value. Looking up a function name in the regis
 Expr::Var(name) => {
     if let Some(ty) = self.env.lookup(name) {
         ty.clone()
-    } else if let Some((params, ret, caps)) = self.registry.functions.get(name) {
-        Ty::Fn(params.clone(), Box::new(ret.clone()), caps.clone())
+    } else if let Some((params, ret, caps, errs)) = self.registry.functions.get(name) {
+        Ty::Fn(params.clone(), Box::new(ret.clone()), caps.clone(), errs.clone())
     } else {
         self.err(format!("undefined variable `{name}`"));
         Ty::Error
@@ -1439,31 +1541,55 @@ Expr::Var(name) => {
 **Display format for function types:**
 
 ```text
-(Int, String) -> Bool
-(Int) -> Int uses [FileRead, NetConnect]
+(I64, Str) -> Bool
+(I64) -> I64 uses [FileRead, NetConnect]
 ```
 
 ### 4.9 Subtyping
 
 Spore primarily uses **equality-based** type compatibility via unification, with targeted subtyping for specific cases:
 
-- `Int ≠ Float` — no implicit numeric widening.
-- `Named("UserId") ≠ Named("String")` — newtypes are distinct.
+- `I64 ≠ F64` — no implicit numeric widening.
+- `Named("UserId") ≠ Named("Str")` — newtypes are distinct.
 - `Ty::Error` unifies with anything (error recovery only).
 - `Ty::Hole(name)` unifies with anything (hole placeholder only).
 - `Ty::Never` unifies with anything (`Never <: τ` for all `τ`).
-- Width subtyping for anonymous records: `{ a: Int, b: String, c: Bool } <: { a: Int, b: String }`.
+- Width subtyping for anonymous records: `{ a: I64, b: Str, c: Bool } <: { a: I64, b: Str }`.
 - Effect set subtyping: `C₁ ⊆ C₂ ⟹ Fn(ps, r, C₁) <: Fn(ps, r, C₂)` (a function needing fewer effects is more general).
 
 ### 4.10 Binary and unary operator typing
 
-**Arithmetic operators** (`+`, `-`, `*`, `/`):
+**Reading guide.** §3.1 fixes **default** literal widths (**`I64`**, **`F64`**). The first rules below state operator typing for those defaults explicitly. **Width metavariables** reuse the Summary: **ι** ∈ {`I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`} and **φ** ∈ {`F32`, `F64`}. Family rules apply to every fixed width; defaults remain the special case **ι = `I64`**, **φ = `F64`** when no other constraint fixes a width.
+
+**Arithmetic operators** (`+`, `-`, `*`, `/`, `%`) — default scalar widths (§3.1):
 
 ```text
 Γ ⊢ e₁ ⇒ τ    Γ ⊢ e₂ ⇒ τ
-τ ∈ {Int, Float}
+τ ∈ {I64, F64}
 ────────────────────────────
 Γ ⊢ e₁ ⊕ e₂ ⇒ τ
+```
+
+**Arithmetic — all fixed integer and float widths:**
+
+```text
+Γ ⊢ e₁ ⇒ ι    Γ ⊢ e₂ ⇒ ι    ⊕ ∈ {+, -, *, /, %}
+────────────────────────────
+Γ ⊢ e₁ ⊕ e₂ ⇒ ι
+
+Γ ⊢ e₁ ⇒ φ    Γ ⊢ e₂ ⇒ φ    ⊕ ∈ {+, -, *, /, %}
+────────────────────────────
+Γ ⊢ e₁ ⊕ e₂ ⇒ φ
+```
+
+(Both operands unify to the **same** `Ty`; there is no implicit widening between widths—see §4.9.)
+
+**`Str` concatenation** (`+` only):
+
+```text
+Γ ⊢ e₁ ⇒ Str    Γ ⊢ e₂ ⇒ Str
+────────────────────────────
+Γ ⊢ e₁ + e₂ ⇒ Str
 ```
 
 **Comparison operators** (`==`, `!=`, `<`, `<=`, `>`, `>=`):
@@ -1474,6 +1600,8 @@ Spore primarily uses **equality-based** type compatibility via unification, with
 Γ ⊢ e₁ ⊗ e₂ ⇒ Bool
 ```
 
+(Relational operators require comparable operands; the reference checker unifies the two operand types. For documentation-only emphasis, **numeric** comparisons are exactly the instances where `τ = ι` or `τ = φ`.)
+
 **Boolean operators** (`&&`, `||`):
 
 ```text
@@ -1482,12 +1610,32 @@ Spore primarily uses **equality-based** type compatibility via unification, with
 Γ ⊢ e₁ ∧∨ e₂ ⇒ Bool
 ```
 
-**Unary negation** (`-`):
+**Unary negation** (`-`) — default scalars:
 
 ```text
-Γ ⊢ e ⇒ τ    τ ∈ {Int, Float}
+Γ ⊢ e ⇒ τ    τ ∈ {I64, F64}
 ───────────────────────────────
 Γ ⊢ -e ⇒ τ
+```
+
+**Unary negation — all numeric widths:**
+
+```text
+Γ ⊢ e ⇒ τ    τ = ι  or  τ = φ
+───────────────────────────────
+Γ ⊢ -e ⇒ τ
+```
+
+**Bitwise operators** (surface: `&`, `|`, `^`, `<<`, `>>`, and unary `~`; integers only):
+
+```text
+Γ ⊢ e₁ ⇒ ι    Γ ⊢ e₂ ⇒ ι    ⊙ ∈ {&, |, ^, <<, >>}
+────────────────────────────
+Γ ⊢ e₁ ⊙ e₂ ⇒ ι
+
+Γ ⊢ e ⇒ ι
+──────────────
+Γ ⊢ ~e ⇒ ι
 ```
 
 **Logical not** (`!`):
@@ -1507,16 +1655,16 @@ Refinement types are not yet implemented but are a planned extension organized i
 L0 refinements are predicates the compiler can fully evaluate at compile time:
 
 ```spore
-type Port = Int when 1 <= self <= 65535
-type Percentage = Float when 0.0 <= self <= 100.0
-type NonEmptyString = String when self.len() > 0
+type Port = I64 when 1 <= self <= 65535
+type Percentage = F64 when 0.0 <= self <= 100.0
+type NonEmptyString = Str when self.len() > 0
 ```
 
 The decidable predicate language includes:
 
 - Numeric comparisons: `<`, `<=`, `==`, `!=`, `>=`, `>`
 - Arithmetic on constants: `self + 1 <= 100`
-- String / collection length: `self.len() > 0`
+- **Str** / collection length: `self.len() > 0`
 - Boolean connectives: `&&`, `||`, `!`
 - Const equality: `self == "production" || self == "staging"`
 
@@ -1536,7 +1684,7 @@ When the compiler cannot statically evaluate the predicate (e.g., value comes fr
 L1 uses flow-sensitive abstract interpretation to propagate refinement information:
 
 ```spore
-fn process_port(raw: Int) -> Port ! InvalidPort {
+fn process_port(raw: I64) -> Port ! InvalidPort {
     if raw < 1 || raw > 65535 {
         raise InvalidPort { value: raw }
     }
@@ -1561,7 +1709,7 @@ Traits are registered in a `TraitRegistry` alongside the `TypeRegistry`. Each tr
 
 - Trait name
 - Supertrait requirements (e.g., `Ord: Eq`)
-- Method signatures (name, parameter types, return type, EffectSet)
+- Method signatures (name, parameter types, return type, EffectSet, ErrorSet)
 - Associated type declarations
 - Default method implementations (if any)
 
@@ -1608,26 +1756,33 @@ match is exhaustive
 
 Guards weaken exhaustiveness: when guards are present, the compiler conservatively requires a catch-all arm.
 
-### 4.14 Const generic evaluation
+### 4.14 Index generic evaluation
 
-Const generic arithmetic is evaluated at compile time during type checking. The compiler maintains a simple evaluator for type-level integer expressions:
+Index expressions are evaluated or normalized during type checking. The
+compiler keeps them symbolic when a parameter is unknown and reduces them when
+all arguments are concrete:
 
 ```text
-eval(N)           = N                    (literal)
-eval(A + B)       = eval(A) + eval(B)    (addition)
-eval(A * B)       = eval(A) * eval(B)    (multiplication)
-eval(A - B)       = eval(A) - eval(B)    (subtraction)
-eval(A / B)       = eval(A) / eval(B)    (division, B ≠ 0)
-eval(min(A, B))   = min(eval(A), eval(B))
-eval(max(A, B))   = max(eval(A), eval(B))
+eval(0)             = 0
+eval(1)             = 1
+eval(N)             = N
+eval(A + B)         = eval(A) + eval(B)
+eval(A * B)         = eval(A) * eval(B)
+eval(min(A, B))     = min(eval(A), eval(B))
+eval(max(A, B))     = max(eval(A), eval(B))
+eval(log(A))        = ceil(log2(max(1, eval(A))))
+eval(span(A, B))    = max(eval(A) - eval(B), 0)
 ```
 
-Division by zero and integer overflow in type-level arithmetic are compile-time errors.
+Overflow in concrete Index arithmetic is a compile-time error. Ordinary
+subtraction and division are intentionally absent; `span` is the only
+saturating difference operator.
 
-When a const generic function is instantiated, the compiler substitutes concrete values and evaluates:
+When an indexed function is instantiated, the compiler substitutes concrete
+Index arguments where available:
 
 ```text
-concat[Int, 3, 5](a, b) → Vec[Int, max: eval(3 + 5)] = Vec[Int, max: 8]
+vec_concat[I64, 3, 5](a, b) -> Vec[I64, max: eval(3 + 5)] = Vec[I64, max: 8]
 ```
 
 ### 4.15 Error set typing
@@ -1642,18 +1797,20 @@ Fn([σ₁, …, σₙ], τᵣ, C, E)    where E = {Err₁, …, Errₖ}
 
 ```text
 Γ ⊢ e ⇒ Fn([…], τ, C, E_callee)
-E_callee ⊆ E_caller
+canonicalize(E_callee) ⊆ canonicalize(E_caller)
 ──────────────────────────────────
 Γ; E_caller ⊢ e(…)? ⇒ τ
 ```
 
-If `E_callee ⊄ E_caller`, the checker emits:
+If `canonicalize(E_callee) ⊄ canonicalize(E_caller)`, the checker emits:
 
 ```text
 error: function may raise [Err1] which is not in the declared error set
 ```
 
-**Error set union**: When multiple `?` calls appear in a function body, the function's error set must be a superset of the union of all callees' error sets.
+**Canonical error union**: When multiple `?` calls appear in a function body,
+the function's error set must be a superset of the canonical union of all
+callees' error sets.
 
 ### 4.16 Never type in the type system
 
@@ -1680,11 +1837,11 @@ The compiler validates recursive types during registration:
 3. If a cycle has no indirection, emit an infinite-size error.
 
 ```text
-type A = { field: B }
-type B = { field: A }    // ERROR: infinite size (A → B → A with no indirection)
+struct A { field: B }
+struct B { field: A }    // ERROR: infinite size (A → B → A with no indirection)
 
-type A = { field: List[B] }
-type B = { field: A }    // OK: List provides indirection
+struct A { field: List[B] }
+struct B { field: A }    // OK: List provides indirection
 ```
 
 ## Human experience impact
@@ -1694,12 +1851,12 @@ type B = { field: A }    // OK: List provides indirection
 - **Clear error messages.** Because types are nominal and simple, error messages can say "expected `Celsius`, got `Fahrenheit`" rather than showing structural type dumps.
 - **Minimal annotation burden.** Only function signatures require full annotation; local variables and closures are inferred. Humans write types where they matter (API boundaries) and skip them where they don't (implementation details).
 - **Predictable behavior.** No implicit conversions, no SFINAE, no surprising type-level computation. If it compiles, the types mean what they say.
-- **Refinement types (future) catch bugs early.** `Port` being `Int if 1 <= self <= 65535` means invalid values are caught at compile time, not at runtime.
+- **Refinement types (future) catch bugs early.** `Port` being `I64 if 1 <= self <= 65535` means invalid values are caught at compile time, not at runtime.
 
 ### Negative
 
 - **Explicit annotation requirement.** Requiring full function signatures is more annotation than TypeScript or Python. However, this is a deliberate trade-off — signatures are the gravity center for both humans and Agents.
-- **Nominal strictness.** Newtypes like `Celsius ≠ Float` require explicit conversions. This prevents accidental misuse but adds ceremony for simple cases.
+- **Nominal strictness.** Newtypes like `Celsius ≠ F64` require explicit conversions. This prevents accidental misuse but adds ceremony for simple cases.
 
 ### Cognitive model
 
@@ -1742,25 +1899,30 @@ All types implement `Display` with a canonical format:
 
 | Type | Display |
 |---|---|
-| `Ty::Int` | `Int` |
-| `Ty::Float` | `Float` |
+| `Ty::I32` (etc.) | `I32`, `I64`, … |
+| `Ty::F64` (etc.) | `F64`, `F32`, … |
 | `Ty::Bool` | `Bool` |
-| `Ty::Str` | `String` |
-| `Ty::Char` | `Char` |
+| `Ty::Str` | `Str` |
 | `Ty::Unit` | `()` |
 | `Ty::Never` | `Never` |
+| `Ty::Tuple([τ₁, τ₂])` | `(...)` / tuple spelling used by printer |
+| `Ty::Refined(τ, …)` | surface refinement form |
 | `Ty::Named("Foo")` | `Foo` |
-| `Ty::App("List", [Int])` | `List[Int]` |
-| `Ty::Record([(x, Int), (y, Float)])` | `{ x: Int, y: Float }` |
-| `Ty::Fn([Int], Bool, {})` | `(Int) -> Bool` |
-| `Ty::Fn([Int], Bool, {"Net"})` | `(Int) -> Bool uses [Net]` |
+| `Ty::App("List", [I64])` | `List[I64]` |
+| `Ty::Record([(x, I64), (y, F64)])` | `{ x: I64, y: F64 }` |
+| `Ty::Fn([I64], Bool, {}, {})` | `(I64) -> Bool` |
+| `Ty::Fn([I64], Bool, {"Net"}, {})` | `(I64) -> Bool uses [Net]` |
 | `Ty::Var(3)` | `?T3` |
 | `Ty::Hole("h1")` | `?h1` |
 | `Ty::Error` | `<error>` |
 
 ### Snapshot hashes
 
-Function signatures (parameter types, return type, error set, EffectSet, cost bound, generic constraints) are included in snapshot hashes. Body changes and `@allows` annotations are excluded. This ensures:
+Function signatures (parameter types, return type, error set, EffectSet, cost
+bound, generic constraints) are included in snapshot hashes. Body changes and
+`@allows` annotations are excluded. For error sets, the hash policy is
+intentionally conservative: written surface spelling still participates even when
+two clauses are canonically equivalent. This ensures:
 
 - API-breaking changes require explicit `--permit`.
 - Implementation refactoring does not break downstream consumers.
@@ -1773,7 +1935,7 @@ Type diagnostics participate in the shared diagnostics protocol described in SEP
 {
   "code": "E0301",
   "severity": "error",
-  "message": "type mismatch: expected `Int`, found `String`",
+  "message": "type mismatch: expected `I64`, found `Str`",
   "primary_span": {
     "file": "main.sp",
     "range": {
@@ -1790,13 +1952,15 @@ Type diagnostics participate in the shared diagnostics protocol described in SEP
 
 | Category | Example message |
 |---|---|
-| Type mismatch | `type mismatch in function 'add': expected 'Int', got 'String'` |
+| Type mismatch | `type mismatch in function 'add': expected 'I64', got 'Str'` |
 | Undefined variable | `undefined variable 'x'` |
 | Arity mismatch | `function 'add' expects 2 arguments, got 3` |
 | Missing effect | `missing effects [NetConnect]: caller does not declare them` |
+| Missing propagated error | `function may raise [ParseError] which is not in the declared error set` |
+| Redundant error item | `redundant error item 'ParseFailure': already covered by 'config.errors.ParseError'` |
 | Non-exhaustive match | `non-exhaustive match: missing variant 'Triangle'` |
-| Cannot negate type | `cannot negate type 'String'` |
-| Cannot apply `!` | `cannot apply '!' to type 'Int'` |
+| Cannot negate type | `cannot negate type 'Str'` |
+| Cannot apply `!` | `cannot apply '!' to type 'I64'` |
 | Unknown field | `struct 'Point' has no field 'z'` |
 
 ### Dual-channel diagnostics
@@ -1814,8 +1978,8 @@ For each hole, the checker reports the type-system facts that feed the shared SE
 
 ```text
 Hole ?h1 in function `example`:
-  expected type: Int
-  available bindings: x: Int, y: String
+  expected type: I64
+  available bindings: x: I64, y: Str
   suggested fills: compute_value, default_int
 ```
 
@@ -1827,7 +1991,7 @@ Hole ?h1 in function `example`:
 
 3. **No higher-kinded types.** GATs + associated types cover most use cases, but abstracting over container kinds generically (functor-map over any container) requires either code generation or per-container implementations.
 
-4. **Refinement types are unimplemented.** The L0 + L1 refinement vision is specified but not yet in the compiler. Users cannot currently express bounded numeric types or flow-sensitive narrowing.
+4. **Refinement types are only partially implemented.** L0-style aliases (`alias Port = I64 when …`) work in the reference compiler, but the full refinement vision in later sections (flow-sensitive narrowing, transitive proof obligations) is not complete.
 
 5. **Annotation overhead.** Requiring full function signatures is more annotation than TypeScript or Python. This is a deliberate trade-off — signatures are the gravity center for both humans and Agents.
 
@@ -1885,7 +2049,7 @@ Hole ?h1 in function `example`:
 **Considered for future.** Making EffectSets row-polymorphic would allow:
 
 ```spore
-fn apply[C](f: Fn(x: Int) -> Int uses C, x: Int) -> Int uses C
+fn apply[C](f: Fn(x: I64) -> I64 uses C, x: I64) -> I64 uses C
 ```
 
 This is compatible with the current design but not yet implemented. The string-based `BTreeSet` representation would need to be extended with effect variables.
@@ -1912,7 +2076,7 @@ Spore's type system is most directly influenced by Rust:
 ### Liquid Haskell
 
 - Refinement types attached to base types.
-- Spore adopts the refinement syntax (`type Port = Int when ...`) but replaces the SMT backend with decidable predicates (L0) and abstract interpretation (L1).
+- Spore adopts the refinement syntax (`alias Port = I64 when ...` / `type Port = I64 when ...`) but replaces the SMT backend with decidable predicates (L0) and abstract interpretation (L1).
 
 ### TypeScript
 
@@ -1935,31 +2099,31 @@ Spore implements a simplified version: no higher-rank polymorphism, no impredica
 
 ### This is the initial type system specification
 
-Since this is the first formal type system specification (v0.1 → SEP), there is no prior specification to be backward-compatible with. The implemented `Ty` enum and checker in `spore-typeck` serve as the de facto baseline.
+Since this is the first formal type system specification (implemented by `sporec-typeck`), there is no older SEP to be backward-compatible with. The `Ty` enum in the reference compiler is the de facto baseline documented in §§3.1–4.1 above.
 
 ### Compatibility commitments
 
-1. **Ty enum stability.** The variants `Int`, `Float`, `Bool`, `Str`, `Char`, `Unit`, `Never`, `Named`, `App`, `Record`, `Fn`, `Var`, `Hole`, `Error` are stable. New variants may be added but existing variants will not be removed or renamed without a new SEP.
+1. **Ty enum stability.** The variants `I8`…`U64`, `F32`, `F64`, `Bool`, `Str`, `Unit`, `Never`, `Tuple`, `Refined`, `Named`, `App`, `Record`, `Fn`, `Var`, `Hole`, `Error` are stable in the reference implementation. New variants may be added but existing variants will not be removed or renamed without a new SEP. (`Char` was removed from the language and toolchain in `spore` PR #113.)
 
 2. **EffectSet representation.** `BTreeSet<String>` is the current representation. Future SEPs may introduce effect variables for row-polymorphic effects, but the concrete string-based API will remain supported.
 
 3. **Two-pass checking.** The `register_item` → `check_fn` architecture is stable. Future passes (e.g., trait resolution, cost checking) will be added after these two, not replace them.
 
-4. **Display format.** The canonical type display format (`Int`, `List[Int]`, `(Int) -> Bool uses [Net]`, `{ x: Int, y: Float }`) is stable and may be relied upon by tools and diagnostics.
+4. **Display format.** The canonical type display format (`I64`, `List[I64]`, `(I64) -> Bool uses [Net]`, `{ x: I64, y: F64 }`, etc.) is stable and may be relied upon by tools and diagnostics.
 
 ### Migration path for future features
 
 | Feature | Migration strategy |
 |---|---|
-| Refinement types (L0) | Add `Ty::Refined(Box<Ty>, Predicate)` variant; extend `resolve_type` |
-| Const generics | Add `Ty::Const(value)` variant; extend `App` to accept const args |
+| Refinement types (L0) | `Ty::Refined` exists in `sporec-typeck`; extend semantics/predicate classes as needed |
+| Index generics | Add an `Index` kind and extend `App` to accept Index arguments |
 | Row-polymorphic effects | Extend EffectSet with effect variables alongside concrete strings |
 
 ## Unresolved questions
 
-1. **EffectSet in unification.** Currently, function type unification ignores EffectSets (the `_` in `Fn(p1, r1, _), Fn(p2, r2, _)`). Should EffectSets participate in unification, or remain checked separately? Separate checking is simpler but could miss effect mismatches in higher-order function arguments.
+1. **EffectSet in unification.** Currently, function type unification ignores EffectSets and ErrorSets (the `_` placeholders in `Fn(p1, r1, _, _), Fn(p2, r2, _, _)`). Should those sets participate in unification, or remain checked separately? Separate checking is simpler but could miss higher-order mismatches unless call-site validation stays strict.
 
-2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[Int]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
+2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[I64]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
 
 3. **Refinement type representation.** Where do refinement predicates live in the `Ty` enum? Options:
    - (a) `Ty::Refined(Box<Ty>, Predicate)` — a wrapper around any base type.
@@ -1980,4 +2144,7 @@ The following questions from earlier drafts are now resolved by this specificati
 
 2. **Never type semantics.** ✅ Resolved — `unify(τ, Never) = ok` for all `τ` (§4.16). Never is handled as a bottom type directly within the unifier.
 
-3. **Error type representation.** ✅ Resolved — error sets are a component of `Ty::Fn`, making it `Fn(params, ret, EffectSet, ErrorSet)` (§4.15). Error set unions are computed during `?` propagation.
+3. **Error type representation.** ✅ Resolved — error sets are a component of
+`Ty::Fn`, making it `Fn(params, ret, EffectSet, ErrorSet)` (§4.15). `?`
+propagation uses canonical subset/union semantics, while signature hashing stays
+conservative over the written error clause.

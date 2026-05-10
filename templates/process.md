@@ -7,7 +7,7 @@ authors:
   - Your Name
 created: YYYY-MM-DD
 requires: []
-discussion: "https://github.com/spore-lang/spore-evolution/discussions/123"
+discussion: "https://github.com/spore-lang/spore-evolution/discussions"
 pr: null
 superseded_by: null
 ---

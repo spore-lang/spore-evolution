@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS_ROOT = ROOT / "schemas" / "contracts"
 CATALOG_PATH = CONTRACTS_ROOT / "catalog.json"
-CATALOG_URL = "https://github.com/spore-lang/spore-evolution/schemas/contracts/catalog.json"
+CATALOG_URL = "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/catalog.json"
 CATALOG_VERSION = 1
 OWNER = {
     "repository": "spore-lang/spore-evolution",

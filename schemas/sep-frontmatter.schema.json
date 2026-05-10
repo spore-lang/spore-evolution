@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/spore-lang/spore-evolution/schemas/sep-frontmatter.schema.json",
+  "$id": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/sep-frontmatter.schema.json",
   "title": "SEP front matter",
   "type": "object",
   "required": [

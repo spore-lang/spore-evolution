@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/spore-registry-index-config.v1.schema.json",
   "title": "Spore registry sparse index config",
   "description": "Versioned sparse index configuration published by spore-registry and owned canonically by spore-evolution/schemas/contracts.",
   "type": "object",
@@ -22,11 +22,11 @@
     },
     "schema": {
       "type": "string",
-      "const": "https://github.com/spore-lang/spore-evolution/schemas/contracts/spore-registry-index-config.v1.schema.json"
+      "const": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/spore-registry-index-config.v1.schema.json"
     },
     "schema_catalog": {
       "type": "string",
-      "const": "https://github.com/spore-lang/spore-evolution/schemas/contracts/catalog.json"
+      "const": "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/catalog.json"
     },
     "dl": {
       "type": "string",
