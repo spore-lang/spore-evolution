@@ -4,7 +4,7 @@ title: "SEP-0001: Core Syntax & Signatures"
 status: Draft
 type: Standards Track
 authors:
-  - Spore maintainers
+  - Zhan Rongrui
 created: 2026-03-31
 requires: []
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/1"

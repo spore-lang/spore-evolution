@@ -4,7 +4,7 @@ title: "Draft SEP: Script Mode & Inline Script Metadata"
 status: Draft
 type: Standards Track
 authors:
-  - Spore maintainers
+  - Zhan Rongrui
 created: 2026-04-12
 requires:
   - 1

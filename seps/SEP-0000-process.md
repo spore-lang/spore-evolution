@@ -1,14 +1,14 @@
 ---
 sep: 0
 title: "SEP-0000: Spore Enhancement Proposal Process"
-status: Draft
+status: Accepted
 type: Process
 authors:
-  - Spore maintainers
+  - Zhan Rongrui
 created: 2026-03-31
 requires: []
-discussion: null
-pr: null
+discussion: "https://github.com/spore-lang/spore-evolution/discussions/41"
+pr: "https://github.com/spore-lang/spore-evolution/pull/42"
 superseded_by: null
 ---
 
@@ -259,6 +259,12 @@ Each SEP should have a champion responsible for:
 
 ### Maintainers
 
+During the bootstrap phase, the `spore-lang` organization owner acts as sole maintainer and
+exercises final decision authority for accepting, rejecting, or withdrawing SEPs.
+
+As the project grows, this role may be distributed to a maintainer team.
+Any change to the decision model described in this section requires a Process SEP.
+
 For now, `spore-lang` maintainers are responsible for:
 
 - deciding when a proposal is ready for review
@@ -363,6 +369,13 @@ Accepted SEPs should not be silently rewritten to mean something substantially d
 - small clarifications may be merged as ordinary edits
 - significant semantic changes should go through a new SEP
 - superseding SEPs should link to the older document they replace
+
+### Amending this document
+
+Non-semantic clarification edits to SEP-0000 itself may be merged directly by the
+maintainer. Substantive changes that alter the decision model, the lifecycle, the
+SEP type taxonomy, or the required section templates must go through a new Process
+SEP that supersedes or amends this document.
 
 ## Drawbacks
 

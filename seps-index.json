@@ -5,15 +5,15 @@
       "path": "seps/SEP-0000-process.md",
       "sep": 0,
       "title": "SEP-0000: Spore Enhancement Proposal Process",
-      "status": "Draft",
+      "status": "Accepted",
       "type": "Process",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [],
-      "discussion": null,
-      "pr": null,
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/41",
+      "pr": "https://github.com/spore-lang/spore-evolution/pull/42",
       "superseded_by": null
     },
     {
@@ -23,7 +23,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [],
@@ -38,7 +38,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -55,7 +55,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -72,7 +72,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -90,7 +90,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -109,7 +109,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -130,7 +130,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -149,7 +149,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-03-31",
       "requires": [
@@ -189,7 +189,7 @@
       "status": "Draft",
       "type": "Standards Track",
       "authors": [
-        "Spore maintainers"
+        "Zhan Rongrui"
       ],
       "created": "2026-04-12",
       "requires": [

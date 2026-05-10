@@ -4,7 +4,7 @@ title: "SEP-0006: Compiler Architecture"
 status: Draft
 type: Standards Track
 authors:
-  - Spore maintainers
+  - Zhan Rongrui
 created: 2026-03-31
 requires:
   - 1
