@@ -8,7 +8,7 @@ authors:
 created: 2026-03-31
 requires: []
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/41"
-pr: null
+pr: "https://github.com/spore-lang/spore-evolution/pull/42"
 superseded_by: null
 ---
 
