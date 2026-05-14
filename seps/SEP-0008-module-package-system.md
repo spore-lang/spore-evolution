@@ -8,7 +8,9 @@ authors:
 created: 2026-03-31
 requires:
   - 1
+  - 2
   - 3
+  - 4
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/8"
 pr: null
 superseded_by: null
@@ -2010,23 +2012,32 @@ The module system does not require wholesale adoption:
 
 1. **Hash truncation for display**: How many hex characters should be shown in human-facing output? 8? 16? Full 64? Should there be a configurable default?
 
-2. **~~Cross-package `pub(pkg)` boundaries in workspaces~~**: Resolved — `pub(pkg)` restricts visibility to the current package (member) only. Items must be promoted to `pub` for cross-member access.
+2. **Effect granularity**: The current design uses coarse-grained effect names (e.g., `FileRead`, `NetConnect`). Should fine-grained effects (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
 
-3. **Effect granularity**: The current design uses coarse-grained effect names (e.g., `FileRead`, `NetConnect`). Should fine-grained effects (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
+3. **Platform versioning**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
 
-4. **Platform versioning**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
+4. **Module-level cost budgets**: The current design tracks cost per-function only. Should modules declare aggregate cost ceilings? What are the semantics when a module's total cost exceeds a declared budget?
 
-5. **Module-level cost budgets**: The current design tracks cost per-function only. Should modules declare aggregate cost ceilings? What are the semantics when a module's total cost exceeds a declared budget?
+5. **Diamond dependencies with different `impl` hashes**: When two transitive dependencies require the same module with the same `sig` but different `impl` hashes, the current design allows both to coexist. Should the linker deduplicate? Should the developer be warned? What are the binary size implications?
 
-6. **Alias chain depth**: Alias chains (alias → alias) are currently forbidden. Should single-level chains be permitted for ergonomic re-exports, or does the restriction stand?
+6. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are effect requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
 
-7. **Diamond dependencies with different `impl` hashes**: When two transitive dependencies require the same module with the same `sig` but different `impl` hashes, the current design allows both to coexist. Should the linker deduplicate? Should the developer be warned? What are the binary size implications?
+7. **Conditional compilation**: The `[features]` mechanism in `spore.toml` enables optional dependencies, but the interaction between features and content hashes is underspecified. Does enabling a feature change the `sig` hash?
 
-8. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are effect requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
+8. **Offline-first workflows**: How should `spore add` and `spore update` behave when offline? Should the local cache be sufficient for all operations, or are some operations inherently online?
 
-9. **Conditional compilation**: The `[features]` mechanism in `spore.toml` enables optional dependencies, but the interaction between features and content hashes is underspecified. Does enabling a feature change the `sig` hash?
+### Resolved questions
 
-10. **Offline-first workflows**: How should `spore add` and `spore update` behave when offline? Should the local cache be sufficient for all operations, or are some operations inherently online?
+1. **File-to-module mapping**: Resolved by SEP-0001 and this SEP. Each `.sp`
+   file is one module, the module path is derived from the filesystem, and
+   there is no `module` keyword in v0.1.
+
+2. **Cross-package `pub(pkg)` boundaries in workspaces**: Resolved —
+   `pub(pkg)` restricts visibility to the current package/member only. Items
+   must be promoted to `pub` for cross-member access.
+
+3. **Alias chain depth**: Resolved for v0.1. Alias chains remain forbidden; a
+   `pub alias` must point directly to the original item.
 
 ---
 
@@ -2053,7 +2064,7 @@ fn_decl        ::= visibility? 'fn' IDENT generic_params? '(' params ')' '->' ty
 generic_params ::= '[' IDENT (',' IDENT)* ']'
 params         ::= (param (',' param)*)?
 param          ::= IDENT ':' type
-error_clause   ::= '!' '[' type (',' type)* ']'
+error_clause   ::= '!' type ('|' type)*
 cost_clause    ::= 'cost' '[' expr ',' expr ',' expr ',' expr ']'
 uses_clause    ::= 'uses' cap_list
 

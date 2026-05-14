@@ -451,7 +451,7 @@ trait Serialize {
     fn serialize(self) -> Bytes ! SerializeError
 }
 
-effect HttpClient = NetConnect | Clock
+effect HttpClient = NetConnect | Clock;
 
 fn fetch_page(url: Url) -> Response ! NetworkError
 uses [HttpClient]
@@ -1851,7 +1851,10 @@ struct B { field: A }    // OK: List provides indirection
 - **Clear error messages.** Because types are nominal and simple, error messages can say "expected `Celsius`, got `Fahrenheit`" rather than showing structural type dumps.
 - **Minimal annotation burden.** Only function signatures require full annotation; local variables and closures are inferred. Humans write types where they matter (API boundaries) and skip them where they don't (implementation details).
 - **Predictable behavior.** No implicit conversions, no SFINAE, no surprising type-level computation. If it compiles, the types mean what they say.
-- **Refinement types (future) catch bugs early.** `Port` being `I64 if 1 <= self <= 65535` means invalid values are caught at compile time, not at runtime.
+- **Refinement types catch bugs early.** `Port` being
+  `I64 when self >= 1 && self <= 65535` means invalid values are caught by the
+  checker or by explicit validation paths rather than being left as untyped
+  integers.
 
 ### Negative
 
@@ -2121,30 +2124,46 @@ Since this is the first formal type system specification (implemented by `sporec
 
 ## Unresolved questions
 
-1. **EffectSet in unification.** Currently, function type unification ignores EffectSets and ErrorSets (the `_` placeholders in `Fn(p1, r1, _, _), Fn(p2, r2, _, _)`). Should those sets participate in unification, or remain checked separately? Separate checking is simpler but could miss higher-order mismatches unless call-site validation stays strict.
+1. **EffectSet and ErrorSet unification.** Currently, function type unification
+   treats effect and error sets as separately checked components. A future
+   type-system revision must decide whether higher-order function unification
+   should include those sets directly or keep the current call-site validation
+   split.
 
-2. **Generic syntax: square brackets vs angle brackets.** The implemented `Ty::App` uses parenthesized syntax in the AST (`List[I64]`), but some spec examples use angle brackets (`List<T>`). This SEP uses square brackets as the intended syntax; a separate SEP should finalize the concrete syntax.
+2. **Trait and impl checker rollout.** §4.12 specifies the semantic direction
+   for trait method signatures, default methods, and `impl` blocks. The
+   remaining work is to align the reference checker phases with that model
+   without changing the SEP-0001 surface grammar.
 
-3. **Refinement type representation.** Where do refinement predicates live in the `Ty` enum? Options:
-   - (a) `Ty::Refined(Box<Ty>, Predicate)` — a wrapper around any base type.
-   - (b) Store refinements in the `TypeRegistry` alongside the base type, not in `Ty` itself.
-   - (c) Treat refined types as named types (`Port = Named("Port")`) with predicates stored separately.
+3. **Row-polymorphic effects.** Should effect sets support variables (for
+   example `uses [C]`) so higher-order functions can preserve their argument's
+   effect requirements? This is a possible advanced extension layered on top of
+   the flat effect-set model in SEP-0003.
 
-4. **Trait method type checking.** The two-pass architecture registers function signatures but does not yet handle trait method signatures, default methods, or `impl` blocks. How should these be integrated into `register_item` and `check_fn`? (See §4.12 for the specified approach.)
-
-5. **Row-polymorphic effects.** Should effect sets support variables (e.g., `uses [C]` where `C` is an effect set variable)? This would enable generic higher-order functions that preserve their argument's effect requirements.
-
-6. **Variance.** Generic type parameters need variance annotations (covariant, contravariant, invariant) for soundness when subtyping is introduced. Should variance be inferred or declared?
+4. **Variance.** Generic type parameters need variance annotations or inference
+   for soundness if broader subtyping is introduced. This remains tied to the
+   future subtyping story.
 
 ### Resolved questions
 
 The following questions from earlier drafts are now resolved by this specification:
 
-1. **Occurs check.** ✅ Resolved — the unifier includes an occurs check (§4.4). Cyclic substitutions like `Var(0) ↦ List[Var(0)]` are rejected.
+1. **Occurs check.** Resolved — the unifier includes an occurs check (§4.4).
+   Cyclic substitutions like `Var(0) ↦ List[Var(0)]` are rejected.
 
-2. **Never type semantics.** ✅ Resolved — `unify(τ, Never) = ok` for all `τ` (§4.16). Never is handled as a bottom type directly within the unifier.
+2. **Never type semantics.** Resolved — `unify(τ, Never) = ok` for all `τ`
+   (§4.16). Never is handled as a bottom type directly within the unifier.
 
-3. **Error type representation.** ✅ Resolved — error sets are a component of
+3. **Error type representation.** Resolved — error sets are a component of
 `Ty::Fn`, making it `Fn(params, ret, EffectSet, ErrorSet)` (§4.15). `?`
 propagation uses canonical subset/union semantics, while signature hashing stays
 conservative over the written error clause.
+
+4. **Generic syntax.** Resolved by SEP-0001: generic application uses square
+   brackets, for example `List[I64]` and `Result[T, E]`. Angle-bracket examples
+   are non-canonical and should be migrated.
+
+5. **L0 refinement representation.** Resolved for the reference compiler:
+   `Ty::Refined` is the compiler representation for current L0 refinements.
+   Richer predicate classes may extend that model without reopening the surface
+   syntax.

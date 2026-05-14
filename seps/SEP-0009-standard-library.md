@@ -767,14 +767,19 @@ This is a new specification — no backward compatibility concerns. However:
 
 1. **Mutable state API**: Should `Ref[T]` be in the prelude or `std.state`? Currently referenced in SEP-0001 but not fully specified here.
 
-2. **Concurrency primitives**: `Task[T]`, `Chan[T]`, `select` are defined in SEP-0007 — should they be re-exported via `std.concurrent` or remain as language primitives?
+2. **Concurrency primitives**: `Task[T]`, `Channel[T]`, and `select` are defined in SEP-0007 — should they be re-exported via `std.concurrent` or remain as language primitives?
 
 3. **String encoding**: Should `Str` expose byte-level access, or only scalar-oriented indexing? Current spec assumes UTF-8; there is no `Char` type (length-1 `Str` values instead).
 
-4. **Numeric tower**: The reference implementation exposes fixed widths (`I8`…`U64`, `F32`, `F64`). Stdlib APIs should choose explicit widths at each boundary rather than relying on abstract scalar aliases.
+4. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
 
-5. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
+5. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
 
-6. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
+6. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `I64` ↔ `i64`, `Str` ↔ UTF-8 buffer)
 
-7. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `I64` ↔ `i64`, `Str` ↔ UTF-8 buffer)
+### Resolved questions
+
+1. **Numeric tower**: Resolved by SEP-0002 and SEP-0001. The language surface
+   uses fixed-width numeric types (`I8` through `U64`, plus `F32` and `F64`),
+   and stdlib APIs should choose explicit widths at each boundary rather than
+   relying on abstract scalar aliases.

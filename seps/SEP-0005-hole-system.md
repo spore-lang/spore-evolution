@@ -7,6 +7,7 @@ authors:
   - Zhan Rongrui
 created: 2026-03-31
 requires:
+  - 1
   - 2
   - 3
   - 4
@@ -1426,6 +1427,8 @@ These are runtime markers with no compiler support. They provide no type informa
 
 ## Unresolved questions
 
+### Design questions
+
 1. **Cross-module hole dependencies**: The current dependency graph is scoped to a single module. How should holes that depend on partial functions in other modules be represented? The `partial` marker propagates, but the graph does not yet span modules.
 
 2. **Type holes**: This SEP covers value holes (`?name`). Type holes (`?T_Name` in uppercase positions) are mentioned but not fully specified. Should they be part of this SEP or a separate one?
@@ -1438,10 +1441,14 @@ These are runtime markers with no compiler support. They provide no type informa
 
 6. **Partial function exports**: The current design marks partial functions in module exports. Should importers be able to depend on partial functions (receiving symbolic values), or should partial functions be hidden from external modules?
 
-7. **DAG visualization**: The specification includes ASCII DAG output. Should a standard visual format (DOT/Graphviz, Mermaid) be part of the protocol?
+7. **DAG visualization**: The specification includes ASCII DAG output. Should a standard visual format (DOT/Graphviz, Mermaid) be part of the protocol, or should visualization remain an editor/tooling concern outside the stable machine payload?
 
 8. **Dynamic priority adjustment**: Should the filling order adapt based on Agent performance history (e.g., prioritize holes similar to ones the Agent has successfully filled before)?
 
 9. **Cost dependency precision**: Cost dependencies currently assume sequential execution within a block. For branches, should cost dependencies be path-sensitive?
 
-10. **serde migration**: The hand-rolled JSON serializer should eventually be replaced. When should this migration happen, and should it be a breaking change to the internal API?
+### Implementation follow-up
+
+The hand-rolled JSON serializer should eventually be replaced with serde or a
+schema-driven encoder. That migration should preserve the external v0.x payload
+contract unless a future SEP deliberately version-bumps the hole-report schema.

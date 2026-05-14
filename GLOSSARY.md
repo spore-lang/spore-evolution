@@ -20,7 +20,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## C
 
-**Declared effects** (SEP-0003): The effect names explicitly written on a function, module, or manifest surface.
+**Declared effects** (SEP-0003): The effect names explicitly written on a function or platform/manifest surface.
 
 **Effect ceiling** (SEP-0003, SEP-0008): The maximum set of effects available to a scope. Function-level `uses [...]` clauses are standardized today; broader module/project ceilings remain reserved follow-up design space.
 
@@ -32,7 +32,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Channel[T]`** (SEP-0007): Bounded channel type for inter-task message passing, parameterized by the message type.
 
-**Content-addressed package** (SEP-0008): Package identified by SHA-256 hash of its normalized source, enabling reproducible builds and cache deduplication.
+**Content-addressed package** (SEP-0008): Package identified by BLAKE3 hashes of its normalized signatures and implementations, enabling reproducible builds and cache deduplication.
 
 **Cost budget** (SEP-0004): The declared cost bound on a function, verified at compile time against inferred cost of the function body.
 
@@ -72,9 +72,9 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the effect system.
 
-**Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written as `effect FileIO = FileRead | FileWrite`.
+**Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written as `effect FileIO = FileRead | FileWrite;`.
 
-**Effect handler** (SEP-0008): Platform-provided implementation of an effect's operations, connecting `foreign fn` declarations to native code.
+**Effect handler** (SEP-0003, SEP-0008): Implementation of an effect's operations. SEP-0003 owns handler semantics; SEP-0008 explains Platform-provided handlers and host adapters.
 
 **Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant1(T), Variant2 }`.
 
@@ -114,7 +114,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Mul`** (SEP-0002): Compiler-known trait for the `*` operator on types that explicitly implement multiplication.
 
-**Module** (SEP-0008): A single Spore source file that declares its own visibility boundaries and effect requirements.
+**Module** (SEP-0008): A single Spore source file whose module path is derived from its filesystem path. Function-level signatures inside the module declare effects.
 
 ## N
 
@@ -146,7 +146,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 **`Serialize`** (SEP-0002): Compiler-known trait for converting a typed value into a serialized format.
 
-**`select`** (SEP-0007): Expression that awaits the first of multiple tasks to complete, enabling concurrent race patterns.
+**`select`** (SEP-0007): Expression that waits for the first ready channel arm or timeout arm, enabling concurrent race patterns.
 
 **SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to Spore, following a structured review process.
 
@@ -180,7 +180,7 @@ Unified terminology index for Spore. Each term links to the SEP where it is auth
 
 ## U
 
-**`uses` clause** (SEP-0003): Annotation on a function or module declaring required effects, written as `uses [Effect1, Effect2]`.
+**`uses` clause** (SEP-0003): Annotation on a function declaring required effects, written as `uses [Effect1, Effect2]`.
 
 ## V
 

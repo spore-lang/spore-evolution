@@ -1,68 +1,94 @@
 # spore-evolution
 
-Proposal repository for the Spore programming project.
+Proposal portal for the Spore programming project.
 
-This repository is the long-lived home for major language, tooling, and process proposals that affect Spore as a whole.
+This repository is the long-lived home for Spore Enhancement Proposals (SEPs):
+process decisions, language design records, tooling protocols, package-system
+design, and other cross-cutting changes that affect Spore as a whole.
 
-## Release-safety notice
+## Read this first
 
-The SEPs in this repository are design records and proposal texts. They are not,
-by themselves, the current implementation truth, a compatibility guarantee, or a
-public release contract for Spore.
+The SEPs in this repository are design records. They are not, by themselves, the
+current implementation truth, a compatibility guarantee, or a public release
+contract for Spore.
 
-All numbered SEPs are currently `Draft`. During this bootstrap phase, readers
-should expect some examples and terminology to lag behind the implementation.
 For current release behavior, installation guidance, supported syntax, and
-implementation status, use the implementation repository first: `spore/README.md`
-and `spore/docs/DESIGN.md`.
+implementation status, start with the implementation repository:
+`spore/README.md` and `spore/docs/DESIGN.md`.
 
-**Authoritative surface typing (as of the alignment pass):** default unsuffixed literals are **`I64`** (integer) and **`F64`** (float); UTF-8 text is **`Str`**; there is **no `Char`**. Full rules, metavariables **ι** / **φ** for other widths, and “Platform decides” ABI details are in [SEP-0002 §3.1 / Summary](seps/SEP-0002-type-system.md).
+This repository is authoritative for proposal history and accepted design
+direction. During the bootstrap phase, Draft SEPs may still include target
+behavior, future protocol shapes, or examples that are ahead of the compiler.
 
-## What lives here
+**Current surface typing baseline:** default unsuffixed literals are **`I64`**
+for integers and **`F64`** for floats; UTF-8 text is **`Str`**; there is no
+`Char` type. SEP-0002 owns the full type-system rules and metavariables for
+other fixed widths.
 
-- `drafts/` — unnumbered proposal drafts under active discussion
-- `seps/` — numbered SEP documents and historical process records
-- `templates/` — authoring templates for new proposals
-- `schemas/` — machine-readable rules for SEP metadata and shared machine contracts
-- `scripts/` — repository validation and automation helpers
+## SEP status
 
-## Current entry points
+| SEP | Title | Status | Role |
+|---|---|---|---|
+| [SEP-0000](seps/SEP-0000-process.md) | Spore Enhancement Proposal Process | Accepted | Repository process and lifecycle |
+| [SEP-0001](seps/SEP-0001-core-syntax.md) | Core Syntax & Signatures | Accepted | Root surface grammar and signature layout |
+| [SEP-0002](seps/SEP-0002-type-system.md) | Type System | Draft | Type semantics and checking |
+| [SEP-0003](seps/SEP-0003-effect-system.md) | Effect System | Draft | Effect algebra, handlers, and diagnostics |
+| [SEP-0004](seps/SEP-0004-cost-analysis.md) | Cost Analysis & Decidability | Draft | Four-slot cost model and verification |
+| [SEP-0005](seps/SEP-0005-hole-system.md) | Hole System & Agent Protocol | Draft | Typed holes and agent-facing reports |
+| [SEP-0006](seps/SEP-0006-compiler-architecture.md) | Compiler Architecture | Draft | Compiler pipeline and diagnostics |
+| [SEP-0007](seps/SEP-0007-concurrency-model.md) | Concurrency Model | Draft | Structured concurrency semantics |
+| [SEP-0008](seps/SEP-0008-module-package-system.md) | Module & Package System | Draft | Modules, manifests, platforms, and packages |
+| [SEP-0009](seps/SEP-0009-standard-library.md) | Standard Library Surface | Draft | Prelude, core modules, and platform libraries |
 
-- [`VISION.md`](VISION.md) — design philosophy and core principles
-- [`ROADMAP.md`](ROADMAP.md) — long-term plan organized by system area
-- [`seps/SEP-0000-process.md`](seps/SEP-0000-process.md) — the draft SEP process
-- [`seps-index.json`](seps-index.json) — generated machine-readable SEP index
-- [`templates/standards-track.md`](templates/standards-track.md) — Standards Track template
-- [`templates/process.md`](templates/process.md) — Process template
-- [`templates/informational.md`](templates/informational.md) — Informational template
+The generated machine-readable index is [`seps-index.json`](seps-index.json).
 
-## What is an SEP?
+## Reading path
 
-**SEP** stands for **Spore Enhancement Proposal**.
+Read [VISION.md](VISION.md) first for the design philosophy. Then use SEPs in
+dependency order:
 
-An SEP is the design record for changes to Spore semantics, standard-library
-surface, tooling protocols, cross-cutting system design, or the project process itself.
+1. [SEP-0000](seps/SEP-0000-process.md) for how decisions are made.
+2. [SEP-0001](seps/SEP-0001-core-syntax.md) for accepted syntax forms.
+3. [SEP-0002](seps/SEP-0002-type-system.md) through [SEP-0004](seps/SEP-0004-cost-analysis.md) for core static semantics.
+4. [SEP-0005](seps/SEP-0005-hole-system.md) and [SEP-0006](seps/SEP-0006-compiler-architecture.md) for tool and compiler surfaces.
+5. [SEP-0007](seps/SEP-0007-concurrency-model.md) through [SEP-0009](seps/SEP-0009-standard-library.md) for larger system layers.
+
+Use [GLOSSARY.md](GLOSSARY.md) when checking cross-SEP terminology.
+
+## Repository layout
+
+- `drafts/` - unnumbered proposal drafts under active discussion
+- `seps/` - numbered SEP documents and historical process records
+- `templates/` - authoring templates for new proposals
+- `schemas/` - machine-readable rules for SEP metadata and shared contracts
+- `scripts/` - repository validation and automation helpers
+
+## Authoring
+
+**SEP** stands for **Spore Enhancement Proposal**. An SEP records changes to
+Spore semantics, standard-library surface, tooling protocols, cross-cutting
+system design, or the project process itself.
+
 For the decision threshold, lifecycle, and authoring rules, see
-[`seps/SEP-0000-process.md`](seps/SEP-0000-process.md).
+[SEP-0000](seps/SEP-0000-process.md). New proposals should start from the
+matching template:
 
-## Status
+- [Standards Track](templates/standards-track.md)
+- [Process](templates/process.md)
+- [Informational](templates/informational.md)
 
-The process in this repository is still being bootstrapped.
+## Validation
 
-`SEP-0000` is intentionally a draft. We expect to revise the process, template, and metadata rules before treating them as settled.
+Run the repository checks before opening a PR:
 
-## Tooling direction
+```bash
+uv run scripts/validate_sep_documents.py
+uv run scripts/check_sep_index.py
+uv run scripts/check_terminology_consistency.py
+```
 
-The current first-pass automation stack is:
+If SEP metadata changed, regenerate the committed index first:
 
-- Shared local/CI hook runner: `prek`
-- Markdown lint: `rumdl`
-- Prose and terminology lint: `Vale`
-- Link checking: `lychee`
-- Spelling: `typos`
-- Front matter schema validation: `check-jsonschema`
-- Machine-readable SEP index: committed `seps-index.json`, checked for drift in local hooks and CI
-- SEP-specific repository rules: minimal repo-local Python checks
-- CI platform: GitHub Actions
-
-The static site stack is intentionally deferred for now. We want to stabilize the proposal workflow and quality gates first, then choose the publishing stack separately.
+```bash
+uv run scripts/check_sep_index.py --fix
+```

@@ -1900,8 +1900,8 @@ Suppression is limited to **warnings only** — errors and notes cannot be suppr
 | **impl hash** | Hash of module implementation content; determines whether to recompile this module |
 | **sig hash** | Hash of module public interface; determines whether downstream dependents need rechecking |
 | **hole** | Source-code placeholder (`?name`) for unfinished implementation, carrying type information |
-| **effect** | A declared system permission (e.g., `Network`, `FileSystem`) required to perform certain operations |
-| **effect ceiling** | Project-level maximum effect set; no module may exceed it |
+| **effect** | A declared capability such as `NetConnect`, `FileRead`, or `Spawn` required to perform certain operations |
+| **effect ceiling** | Reserved module/project policy concept; function-level `uses [...]` checking is the stable surface |
 | **cost annotation** | A declared four-slot upper bound (`cost [compute, alloc, io, parallel]`) |
 | **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
 | **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |

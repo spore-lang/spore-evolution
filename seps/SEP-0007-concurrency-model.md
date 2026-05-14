@@ -8,6 +8,7 @@ authors:
 created: 2026-03-31
 requires:
   - 1
+  - 2
   - 3
   - 4
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/7"
@@ -333,7 +334,7 @@ uses [Channel, Spawn]
 Server entrypoints that accept inbound connections declare `NetListen`; the inner request handler below only needs outbound `NetConnect` plus domain-specific effects.
 
 ```spore
-effect HttpHandler = Spawn | NetConnect | DbRead | Clock
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock;
 
 fn handle_request(req: Request) -> Response ! DbError | Timeout
 cost [5000, 800, 200, 3]
@@ -1335,7 +1336,7 @@ uses [Spawn, Channel, ...]
 ### A.9 Complete example: HTTP handler
 
 ```spore
-effect HttpHandler = Spawn | NetConnect | DbRead | Clock
+effect HttpHandler = Spawn | NetConnect | DbRead | Clock;
 
 fn handle_request(req: Request) -> Response ! DbError | Timeout
 cost [5000, 800, 200, 3]

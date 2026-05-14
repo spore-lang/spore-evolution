@@ -7,6 +7,7 @@ authors:
   - Zhan Rongrui
 created: 2026-03-31
 requires:
+  - 1
   - 2
   - 3
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/4"
@@ -1137,7 +1138,7 @@ WARNING [unbounded-cost] fibonacci's cost cannot be statically determined.
   Inferred complexity: O(2^n)
 
   Options:
-  (a) Add tighter refinements (`n: I64 if n ≤ 30`) together with concrete `cost [...]` literals for small‑n paths
+  (a) Add a tighter refinement (`type SmallN = I64 when self <= 30`) together with concrete `cost [...]` literals for small-n paths
   (b) Mark as `@unbounded` (relinquish cost constraint)
   (c) Rewrite using structural recursion or tail recursion + iteration bound
 ```
@@ -1377,22 +1378,29 @@ WARNING [cost-drift] function merge_sort: actual cost exceeds prediction.
 
 ## Unresolved questions
 
-1. **Tail-call optimization and cost.** TCO changes stack space consumption but not computation cost. Should the cost model distinguish a "stack depth" dimension? Current decision: no — TCO is a codegen optimization that does not affect cost analysis.
+1. **Memoization and cost.** Should the compiler auto-detect memoizable recursion and adjust cost (e.g., `fibonacci` from O(2ⁿ) to O(n))? Current leaning: no auto-memoization, but the compiler suggests it in warnings.
 
-2. **Memoization and cost.** Should the compiler auto-detect memoizable recursion and adjust cost (e.g., `fibonacci` from O(2ⁿ) to O(n))? Current leaning: no auto-memoization, but the compiler suggests it in warnings.
+2. **Cost drift detection.** The mechanism, tolerance threshold, and CI integration are specified in the "Cost drift detection" section above. The remaining unresolved question is the design of a full runtime cost sampling framework — specifically, how to keep instrumentation overhead below 1% in production builds.
 
-3. **Cost drift detection.** The mechanism, tolerance threshold, and CI integration are specified in the "Cost drift detection" section above. The remaining unresolved question is the design of a full runtime cost sampling framework — specifically, how to keep instrumentation overhead below 1% in production builds.
+3. **Probabilistic cost bounds.** Randomized algorithms (e.g., QuickSort with random pivot) have expected rather than worst-case cost. Should Spore support an **`expected`** cost metadata channel alongside worst-case four-slot bounds? Deferred to future work.
 
-4. **Probabilistic cost bounds.** Randomized algorithms (e.g., QuickSort with random pivot) have expected rather than worst-case cost. Should Spore support an **`expected`** cost metadata channel alongside worst-case four-slot bounds? Deferred to future work.
+4. **Recursion depth limits.** Should the compiler enforce a compile-time recursion depth ceiling? Current decision: only `@unbounded` functions use runtime `with_cost_limit`. Whether to add a compile-time depth annotation (e.g., `max_depth ≤ 1000`) is unresolved.
 
-5. **Polymorphic cost (partially resolved).** The call-site instantiation approach is now specified in §4.17: `cost(f)` is substituted at each call site where `f` is concrete. Signature-level patterns such as `cost [N * cost(f) + N, N, 0, 0]` are first-class CostExprs when `N: Index`.
+5. **Interaction with concurrency.** The parallel dimension `P` (lane) is defined, but runtime budget behavior across `parallel_scope` / `spawn` boundaries needs further specification. In particular, how does `with_cost_limit` behave across child tasks?
 
-6. **Recursion depth limits.** Should the compiler enforce a compile-time recursion depth ceiling? Current decision: only `@unbounded` functions use runtime `with_cost_limit`. Whether to add a compile-time depth annotation (e.g., `max_depth ≤ 1000`) is unresolved.
+6. **Amortized analysis.** Operations like dynamic array append are O(1) amortized but O(n) worst-case. The current system can only express worst-case bounds. Whether to extend CostExpr with amortized semantics (potentially through a separate `amortized [...]` metadata channel parallel to worst-case `cost [...]`) is deferred.
 
-7. **Interaction with concurrency.** The parallel dimension `P` (lane) is defined but its interaction with async/await and structured concurrency needs further specification. In particular, how does `with_cost_limit` behave across spawn boundaries?
+7. **Standard library cost annotations.** The standard library must be annotated with cost bounds for the system to be useful. What is the process for auditing and annotating existing library functions? Should the compiler ship with a built-in cost database for the standard library?
 
-8. **Amortized analysis.** Operations like dynamic array append are O(1) amortized but O(n) worst-case. The current system can only express worst-case bounds. Whether to extend CostExpr with amortized semantics (potentially through a separate `amortized [...]` metadata channel parallel to worst-case `cost [...]`) is deferred.
+8. **max/min nesting depth limit.** The current default is 8 levels. Is this sufficient for all practical use cases? Should the limit be configurable, and what is the impact on compilation time when it is raised?
 
-9. **Standard library cost annotations.** The standard library must be annotated with cost bounds for the system to be useful. What is the process for auditing and annotating existing library functions? Should the compiler ship with a built-in cost database for the standard library?
+### Resolved questions
 
-10. **max/min nesting depth limit.** The current default is 8 levels. Is this sufficient for all practical use cases? Should the limit be configurable, and what is the impact on compilation time when it is raised?
+1. **Tail-call optimization and cost.** TCO changes stack space consumption but
+   not the four declared cost dimensions. The cost model does not add a separate
+   stack-depth dimension; TCO remains a codegen/runtime optimization.
+
+2. **Polymorphic cost.** The call-site instantiation approach is specified in
+   §4.17: `cost(f)` is substituted at each call site where `f` is concrete.
+   Signature-level patterns such as `cost [N * cost(f) + N, N, 0, 0]` are
+   first-class CostExprs when `N: Index`.

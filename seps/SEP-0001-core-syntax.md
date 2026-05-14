@@ -1,7 +1,7 @@
 ---
 sep: 1
 title: "SEP-0001: Core Syntax & Signatures"
-status: Draft
+status: Accepted
 type: Standards Track
 authors:
   - Zhan Rongrui
@@ -14,11 +14,31 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no statements or loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → uses → cost → spec → body), pattern matching as the primary control flow, and a clean separation between pure computation and effectful operations. Traits define type interfaces while effects track external operations; the compiler infers purity and determinism from the declared effect set. The `spec` clause embeds typechecked behavioral contracts (examples and properties) directly in function signatures, making intent visible to the compiler, documentation, and hole-reporting tooling.
+> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → spec → body), pattern matching as the primary control flow, and a clean separation between syntax ownership and semantic ownership. This SEP is the syntactic root for later SEPs: it fixes the surface forms that type, effect, cost, hole, concurrency, module, and standard-library SEPs assign deeper meaning to.
 
 ## Summary
 
-This proposal defines the complete core syntax and function signature system for the Spore programming language v0.1. Spore is an expression-based, statically typed language with effect tracking, explicit resource cost tracking, and guaranteed tail-call optimization. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a novel function signature system that encodes generic constraints (`where`), effect requirements (`uses`), error sets (`!`), and a four-slot **`cost [compute, alloc, io, parallel]`** clause as composable signature metadata. Spore deliberately eliminates loops in favor of recursion and higher-order functions, uses square brackets for generics (`List[I64]`), auto-infers effect properties from the `uses` set, and provides a pipe operator (`|>`) for readable data-flow composition.
+This proposal defines the core syntax and function signature surface for the Spore programming language v0.1. Spore is an expression-based, statically typed language with explicit error, cost, effect, and specification clauses. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a regular function signature structure that encodes generic constraints (`where`), error sets (`!`), a four-slot **`cost [compute, alloc, io, parallel]`** clause, effect requirements (`uses`), and behavioral `spec` metadata.
+
+This SEP deliberately owns the **surface grammar** and cross-SEP signature layout, not every semantic rule attached to that grammar. SEP-0002 owns type meaning and checking, SEP-0003 owns effect algebra and handler semantics, SEP-0004 owns cost verification, SEP-0005 owns the hole protocol, SEP-0007 owns concurrency semantics, SEP-0008 owns module/package resolution, and SEP-0009 owns the standard-library surface. SEP-0001 remains dependency-free so those later SEPs can depend on a stable syntactic root without creating cycles.
+
+## Normative scope and dependency boundaries
+
+SEP-0001 is the root syntax SEP. Later SEPs may add semantics to forms defined here, but they should not re-specify incompatible grammar.
+
+| Surface area | SEP-0001 owns | Semantic owner |
+|---|---|---|
+| Function declarations | clause order, delimiters, optional body shape | SEP-0002 for type checking, SEP-0004 for cost, SEP-0003 for effects |
+| Type syntax | identifiers, generic brackets, tuple/function/refinement syntax forms | SEP-0002 |
+| Error clauses and `?` / `throw` syntax | spelling and placement | SEP-0002 for error-set typing and propagation |
+| `effect`, `handler`, `perform`, `handle` | declaration and expression grammar | SEP-0003 |
+| `cost [...]` | clause placement and expression syntax envelope | SEP-0004 |
+| Holes (`?name`) | expression grammar | SEP-0005 |
+| `parallel_scope`, `spawn`, `select`, `await` | expression grammar | SEP-0007 |
+| `import`, `alias`, visibility | declaration grammar | SEP-0008 |
+| Prelude and library names | examples only | SEP-0009 |
+
+When this SEP includes a guide-level example using a type, effect, cost value, module path, or standard-library item, that example is illustrative unless this SEP explicitly says it is the normative grammar for that form.
 
 ## Motivation
 
@@ -28,7 +48,7 @@ Spore aims to occupy a unique design point:
 
 1. **Human-first readability**: Expression-based syntax with familiar curly braces and semicolons reduces the learning curve for developers coming from Rust, TypeScript, or Kotlin, while the pipe operator and pattern matching enable expressive functional composition.
 
-2. **Agent-friendly structure**: A fixed operator set (no custom operators), regular grammar, and explicit function metadata (`uses`, `cost`, `where`) make Spore code trivially parseable by AI agents and static analysis tools. Every function signature is a structured contract.
+2. **Agent-friendly structure**: A fixed operator set (no custom operators), regular grammar, and explicit function metadata (`where`, `cost`, `uses`) make Spore code trivially parseable by AI agents and static analysis tools. Every function signature is a structured contract.
 
 3. **Effect safety by default**: Rather than bolting on an effect system after the fact, Spore makes effect requirements a first-class part of function signatures. The compiler infers properties like `pure` and `deterministic` from the declared `uses` set, eliminating manual annotation burden while maintaining full transparency.
 
@@ -188,7 +208,13 @@ let result = data
 // With additional arguments:
 x |> f(y, z)    // equivalent to: f(x, y, z)
 x |> f(_, y)    // equivalent to: f(x, y)
+f(_, y)         // equivalent to: |x| f(x, y)
 ```
+
+The `_` placeholder form is a general call-position partial application form:
+any call argument written as `_` is converted into a lambda parameter. Pipe use
+is only the most common spelling because `x |> f(_, y)` reads as "send `x` into
+the placeholder".
 
 ### Ranges and slices
 
@@ -330,8 +356,8 @@ The full signature order is:
 ```text
 fn name[T](params) -> ReturnType ! ErrorSet
 where T: Bound
-uses [Effect1, Effect2]
 cost [compute, alloc, io, parallel]
+uses [Effect1, Effect2]
 spec {
     example "...": ...
     property "...": |param: Type| ...
@@ -368,8 +394,8 @@ spec {
 // 4. Side-effectful function with intent examples
 /// @idempotent
 fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! NetworkTimeout | AuthExpired
-uses [NetConnect, FileRead, Clock]
 cost [8500, 200, 800, 4]
+uses [NetConnect, FileRead, Clock]
 spec {
     example "returns report on success" {
         let report = sync_user_data(UserId(1), MockSource.success());
@@ -395,27 +421,27 @@ This section is the **normative surface syntax** for these forms. SEP-0002 and S
 ```spore
 // trait: type interface
 trait Display {
-    fn show(self) -> Str
+    fn show(self) -> Str;
 }
 
 trait Serialize {
-    fn serialize(self) -> Bytes ! SerializeError
+    fn serialize(self) -> Bytes ! SerializeError;
 }
 
 // effect: external world operations
 effect Console {
-    fn println(msg: Str) -> ()
-    fn read_line() -> Str ! IoError
+    fn println(msg: Str) -> ();
+    fn read_line() -> Str ! IoError;
 }
 
 // effect alias (uses | for union)
-effect HttpClient = NetConnect | Clock
-effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
+effect HttpClient = NetConnect | Clock;
+effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit;
 ```
 
 Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. The settled handler grammar is `handler <Effect> as <HandlerName>(...) { ... }` for declarations and `handle { ... } with { ... }` for installation: the `with` block may contain inline effect arms via `on Effect.op(...) => ...` and/or named handler installations via `use HandlerName { ... }`. SEP-0003 defines the effect algebra and handler semantics; this SEP fixes the corresponding surface syntax.
 
-The `uses` clause declares what effects a function requires. The compiler **auto-infers** effect properties from this set:
+The `uses` clause declares what effects a function requires. SEP-0003 owns the full effect algebra and property inference rules; at the syntax level, the key shape is a bracketed list of atomic effect names or aliases. For example, SEP-0003 may derive properties like these from the written set:
 
 | `uses` set | Inferred properties |
 |---|---|
@@ -423,7 +449,7 @@ The `uses` clause declares what effects a function requires. The compiler **auto
 | `uses [FileRead]` | `deterministic` |
 | Contains `Random` or `Clock` | neither `pure` nor `deterministic` |
 
-The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
+Properties such as `pure`, `deterministic`, and `total` are derived by semantic passes, not by the grammar itself. The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
 
 The `uses` clause can mix atomic effect names with named effect aliases:
 
@@ -443,7 +469,7 @@ uses [CLI]
 
 ### Behavioral specification (`spec` clause)
 
-Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `uses`, and `cost`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
+Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `cost`, and `uses`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
 
 ```spore
 fn add(a: I64, b: I64) -> I64
@@ -492,7 +518,10 @@ spec {
 Key design properties:
 
 - **Spec metadata survives hole bodies**: A function with `{ ?hole }` still retains its `spec` items for type checking, documentation, and HoleReport output. However, executing those spec items still calls the function body, so a hole remains a runtime error until the body is filled.
-- **Current amendment scope**: This amendment defines `spec` for ordinary function declarations and `impl` methods with bodies. Trait-method `spec` syntax and inheritance semantics are deferred to a later amendment.
+- **Current amendment scope**: This amendment defines the placement of `spec`
+  for ordinary function declarations, trait method signatures, and `impl`
+  methods with bodies. Trait-method `spec` inheritance and contract merging are
+  deferred to the type-system / trait semantics layer.
 - **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
 
 ### Struct and type definitions
@@ -530,10 +559,10 @@ type BinaryTree[T] =
     | Empty;
 
 // Refinement type
-type PositiveInt = I64 if |n| n > 0;
-type Percentage = F64 if |p| p >= 0.0 && p <= 100.0;
-type I32 = I64 if |n| n >= -2147483648 && n <= 2147483647;
-type U8 = I64 if |n| n >= 0 && n <= 255;
+type PositiveInt = I64 when self > 0;
+type Percentage = F64 when self >= 0.0 && self <= 100.0;
+type I32 = I64 when self >= -2147483648 && self <= 2147483647;
+type U8 = I64 when self >= 0 && self <= 255;
 ```
 
 Field punning allows omitting the value when the variable name matches the field name, both in construction and pattern matching:
@@ -582,6 +611,10 @@ let html = f"<div>
     <p>{body}</p>
 </div>";
 ```
+
+Format strings (`f"..."`) and template strings (`t"..."`) both accept embedded
+Spore expressions. Template-library behavior, escaping policy beyond the shared
+string literal rules, and sanitization belong to SEP-0009.
 
 ### Lambdas
 
@@ -645,7 +678,7 @@ fn event_loop(rx1: Channel.Receiver[I64], rx2: Channel.Receiver[Str]) {
         message from rx2 => {
             print(f"Got string: {message}");
         },
-        timeout 1000 => {
+        timeout(1000) => {
             print("Timed out — stopping");
             return;
         },
@@ -693,9 +726,9 @@ The complete reserved keyword table:
 | `perform` | Invoke an effect operation |
 | `impl` | Trait implementation block |
 | `pub` / `pub(pkg)` | Visibility modifiers (public / package-visible) |
-| `module` | Module definition |
 | `import` | Module import |
 | `alias` | Type alias |
+| `when` | Refinement predicate introducer |
 | `where` | Generic type constraints |
 | `uses` | Effect requirement declaration |
 | `cost` | Four-slot cost vector clause |
@@ -715,7 +748,8 @@ The complete reserved keyword table:
 | `in` | Reserved |
 | `mut` | Reserved |
 | `static` | Reserved |
-| `async` / `await` | Async task operations |
+| `async` | Reserved |
+| `await` | Reserved spelling for postfix `.await` |
 | `move` | Reserved |
 | `ref` | Reserved |
 | `self` | Current instance in trait/handler methods (regular identifier) |
@@ -726,7 +760,6 @@ The complete reserved keyword table:
 | `unsafe` | Reserved |
 | `extern` | Reserved |
 | `macro` | Reserved |
-| `mod` | Reserved (use `module`) |
 | `true` / `false` | Boolean literals |
 | `Some` / `None` | Option type constructors |
 | `Ok` / `Err` | Result type constructors |
@@ -785,11 +818,14 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 0xFF        // hexadecimal
 0o755       // octal
 0b1010_1100 // binary
-42i32       // typed suffix (reserved — not accepted by the reference lexer yet)
-100u64      // typed suffix (reserved — not accepted by the reference lexer yet)
+42i32       // explicitly typed signed integer
+255u8       // explicitly typed unsigned integer
 ```
 
-**Implementation note:** The reference lexer parses integer literals without suffixes and the type checker gives them a default numeric type (**`I64`** in `sporec-typeck`). F64 literals default to **`F64`**.
+Unsuffixed integer literals default to **`I64`** unless a checking context fixes
+another integer width. Suffixes are accepted for every fixed-width integer:
+`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, and `u64`. Suffix overflow is a
+type-checking error, not a separate grammar form.
 
 **Floats:**
 
@@ -799,10 +835,11 @@ The assignment operator `=` appears only in `let` bindings and is not an express
 1.0e-10
 2.5e+3
 1_000.5
-3.14f32     // typed suffix (reserved — not accepted by the reference lexer yet)
+3.14f32
 ```
 
-**Implementation note:** Unsuffixed floats become `F64` in `sporec-typeck`.
+Unsuffixed floats default to **`F64`** unless a checking context fixes another
+float width. Suffixes are accepted for `f32` and `f64`.
 
 **Booleans:** `true`, `false`
 
@@ -894,7 +931,7 @@ TypeDecl        = [ Visibility ] "type" Ident [ TypeParams ]
 
 TypeDefBody     = VariantList                  (* sum type *)
                 | TypeExpr                     (* type alias *)
-                | TypeExpr "if" LambdaExpr ;   (* refinement type *)
+                | TypeExpr "when" Expr ;       (* refinement type; predicate may reference `self` *)
 
 VariantList     = [ "|" ] Variant { "|" Variant } ;
 Variant         = Ident [ "(" FieldList ")" ]
@@ -906,8 +943,10 @@ TraitDecl       = [ Visibility ] "trait" Ident [ TypeParams ]
                   [ ":" BoundList ]
                   "{" { TraitItem } "}" ;
 
+BoundList       = Ident { "," Ident } ;
+
 TraitItem       = AssocType
-                | FunctionDecl ;              (* may have default body *)
+                | TraitFunctionSig ( ";" | Block ) ;
 
 AssocType       = "type" Ident ";" ;
 
@@ -916,7 +955,8 @@ AssocType       = "type" Ident ";" ;
 EffectDecl      = [ Visibility ] "effect" Ident [ TypeParams ]
                   ( EffectBlock | "=" EffectAlias ";" ) ;
 
-EffectBlock     = "{" { FunctionDecl } "}" ;
+EffectBlock     = "{" { EffectOpDecl } "}" ;
+EffectOpDecl    = FunctionHeader ";" ;
 
 EffectAlias     = Ident { "|" Ident } ;
 
@@ -947,15 +987,19 @@ ConstDecl       = [ Visibility ] "const" Ident ":" TypeExpr "=" Expr ";" ;
 
 (* ─── Function Declaration ────────────────────────── *)
 
-FunctionDecl    = [ DocComment ]
+FunctionDecl    = FunctionSig Block ;
+
+FunctionSig     = FunctionHeader [ SpecClause ] ;
+
+TraitFunctionSig = FunctionHeader [ SpecClause ] ;
+
+FunctionHeader  = [ DocComment ]
                   [ Visibility ] "fn" Ident [ TypeParams ]
                   "(" [ ParamList ] ")" [ "->" TypeExpr ]
                   [ ErrorClause ]
                   [ WhereClause ]
-                  [ UsesClause ]
                   [ CostClause ]
-                  [ SpecClause ]
-                  Block ;
+                  [ UsesClause ] ;
 
 DocComment      = { "///" CommentText } ;
 
@@ -982,6 +1026,7 @@ CostExpr        = IntLiteral
                 | CostExpr "*" CostExpr
                 | CostExpr "+" CostExpr
                 | FunctionCall ;               (* e.g., log2(n) *)
+FunctionCall    = Ident "(" [ ArgList ] ")" ;
 
 (* ─── Spec Clause ─────────────────────────────────── *)
 
@@ -1047,7 +1092,7 @@ UnaryExpr       = ( "-" | "!" | "~" ) UnaryExpr
                 | PostfixExpr ;
 
 PostfixExpr     = PrimaryExpr { PostfixOp } ;
-PostfixOp       = "?" | "." Ident | "." Ident "(" [ ArgList ] ")"
+PostfixOp       = "?" | "." "await" | "." Ident | "." Ident "(" [ ArgList ] ")"
                 | "(" [ ArgList ] ")" | "[" Expr "]"
                 | "[" [ Expr ] ".." [ Expr ] "]"
                 | "[" [ Expr ] "..=" Expr "]" ;
@@ -1080,8 +1125,8 @@ ThrowExpr       = "throw" Expr ;
 SpawnExpr       = "spawn" Block ;
 
 SelectExpr      = "select" "{" { SelectArm } "}" ;
-SelectArm       = Ident "from" Expr "=>" Block ","
-                | "timeout" IntLiteral "=>" Block "," ;
+SelectArm       = Ident "from" Expr "=>" Expr ","
+                | "timeout" "(" Expr ")" "=>" Expr "," ;
 
 ParallelScopeExpr = "parallel_scope" Block ;
 
@@ -1142,12 +1187,13 @@ HoleExpr        = "?"
 Literal         = IntLiteral | FloatLiteral | BoolLiteral
                 | StringLiteral ;
 
-IntLiteral      = DecimalInt | HexInt | OctalInt | BinaryInt ;
-DecimalInt      = [ "-" ] Digit { Digit | "_" } [ IntSuffix ] ;
-HexInt          = "0x" HexDigit { HexDigit | "_" } [ IntSuffix ] ;
-OctalInt        = "0o" OctDigit { OctDigit | "_" } [ IntSuffix ] ;
-BinaryInt       = "0b" BinDigit { BinDigit | "_" } [ IntSuffix ] ;
-IntSuffix       = "i32" | "i64" | "u8" | "u32" | "u64" ;
+IntLiteral      = ( DecimalInt | HexInt | OctalInt | BinaryInt ) [ IntSuffix ] ;
+DecimalInt      = [ "-" ] Digit { Digit | "_" } ;
+HexInt          = "0x" HexDigit { HexDigit | "_" } ;
+OctalInt        = "0o" OctDigit { OctDigit | "_" } ;
+BinaryInt       = "0b" BinDigit { BinDigit | "_" } ;
+IntSuffix       = "i8" | "i16" | "i32" | "i64"
+                | "u8" | "u16" | "u32" | "u64" ;
 
 FloatLiteral    = [ "-" ] Digit { Digit | "_" } "." Digit { Digit | "_" }
                   [ ( "e" | "E" ) [ "+" | "-" ] Digit { Digit } ]
@@ -1161,16 +1207,21 @@ StringLiteral   = '"' { StringChar } '"'
                 | 'f"' { FStringPart } '"'
                 | 't"' { TStringPart } '"' ;
 
-FStringPart     = StringChar | "{" Expr "}" ;
-TStringPart     = StringChar | "{" Ident "}" ;
+FStringPart     = FStringText | "{" Expr "}" ;
+TStringPart     = FStringText | "{" Expr "}" ;
 
 EscapeSeq       = "\\" ( "n" | "t" | "r" | "\\" | '"' | "0"
                 | "u{" HexDigit { HexDigit } "}" ) ;
+StringChar      = EscapeSeq | ? any Unicode scalar except `"` or `\` ? ;
+FStringText     = EscapeSeq | ? any Unicode scalar except `"`, `\`, `{`, or `}` ? ;
+RawChar         = ? any Unicode scalar except `"` ? ;
+CommentText     = ? any text until line end ? ;
 
 (* ─── Identifier ──────────────────────────────────── *)
 
 Ident           = ( Letter | "_" ) { Letter | Digit | "_" } ;
-Letter          = "a".."z" | "A".."Z" | UnicodeLetterExceptAscii ;
+Letter          = "a".."z" | "A".."Z" | UnicodeLetter ;
+UnicodeLetter   = ? any Unicode scalar with the Unicode Letter property ? ;
 Digit           = "0".."9" ;
 HexDigit        = Digit | "a".."f" | "A".."F" ;
 OctDigit        = "0".."7" ;
@@ -1184,8 +1235,8 @@ The function signature system is the heart of Spore's design. The clauses appear
 ```text
 fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 [where <GenericName>: <Constraint>, ...]
-[uses [<Effect>, ...]]
 [cost [<compute_expr>, <alloc_expr>, <io_expr>, <parallel_expr>]]
+[uses [<Effect>, ...]]
 [spec { <examples and properties> }]
 {
     <body>
@@ -1206,15 +1257,15 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
 3. **`where T: Bound, U: Bound`** — Generic constraints. The canonical form is a single `where` clause with comma-separated constraints. Spore does not use `+` multi-bound syntax.
 
-4. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
+4. **`cost [c, a, i, p]`** — A four-slot cost vector (`compute`, `alloc`, `io`, `parallel`). Each slot may reference parameters or use the currently supported linear `O(n)` forms.
+
+5. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
    - `uses []` → `pure`, `deterministic`, `total`
    - `uses [FileRead]` → `deterministic`
    - If `uses` contains `Random` or `Clock` → not deterministic
    - `total` is inferred by the compiler's termination checker
 
    **Implication chain:** `pure` ⊃ `deterministic` — a pure function is necessarily deterministic (same inputs always produce same outputs). A deterministic function is not necessarily pure (it may perform IO that doesn't introduce non-determinism). `total` is orthogonal: a function can be total without being pure.
-
-5. **`cost [c, a, i, p]`** — A four-slot cost vector (`compute`, `alloc`, `io`, `parallel`). Each slot may reference parameters or use the currently supported linear `O(n)` forms.
 
 6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as typechecked test metadata. When the enclosing function body is executable, `spore test` evaluates the `spec` block by calling the function by name. If the body still contains an unfilled hole, the `spec` block remains available to the compiler and HoleReport output, but executing it still reaches the hole and errors.
 
@@ -1223,9 +1274,11 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 
    For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `#[allow(missing_spec)]`.
 
-   This amendment does not define trait-method `spec` inheritance or contract merging; that behavior is reserved for a future SEP.
+   This amendment fixes where trait-method `spec` may appear, but does not
+   define trait-method `spec` inheritance or contract merging. That behavior is
+   reserved for the type-system / trait semantics layer.
 
-**Clause ordering** is not enforced by the grammar but is enforced by the formatter: `where` → `uses` → `cost` → `spec`.
+**Clause ordering** is not enforced by the parser's recovery mode, but the canonical source form and formatter order are: `where` → `cost` → `uses` → `spec`.
 
 **`self` in trait and handler methods:** The `self` identifier is a regular parameter name used as the first parameter in trait method signatures. It is not a keyword with special scoping rules.
 
@@ -1290,6 +1343,8 @@ Supported pattern forms:
 
 ### Type system
 
+This subsection is a syntax-facing overview. SEP-0002 is authoritative for primitive types, inference, refinement checking, trait resolution, and type display.
+
 **Primitive types:** Fixed-width numerics `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, and `F64`; `Bool`; UTF-8 text as `Str`. There is **no** separate `Char` type. **Implementation note:** The reference compiler’s `Ty` enum in `sporec-typeck` uses exactly those numeric widths (plus `Str`, `Bool`, `Unit`, `Never`, tuples, refinements, …); **unsuffixed integer literals default to `I64`** and float literals to **`F64`**. `Int` and `Float` are not primitive names or authoritative shorthand in the language docs. Narrower ranges are expressed with **refinement types** on a fixed-width base (for example `alias Port = I64 when self >= 1 && self <= 65535`).
 
 **Collection types:** **`List[T]`** (default—always unbounded); **`Vec[T, max: N]`** (bounded, **rarely needed**—only when `N` belongs in the type; see SEP-0002); **`Map[K, V]`**, **`Set[T]`**, **`Array[T, N]`**
@@ -1314,7 +1369,7 @@ let vec3: Array[F64, 3] = Array.new([1.0, 2.0, 3.0]);
 let identity: Matrix[F64, 3, 3] = Matrix.identity();
 ```
 
-**Refinement types:** `type PositiveInt = I64 if |n| n > 0;`
+**Refinement types:** `type PositiveInt = I64 when self > 0;`
 
 **Function types:** `fn(I64, I64) -> I64`
 
@@ -1330,7 +1385,7 @@ Spore provides structured concurrency:
 
 ### Hole syntax
 
-Holes (`?`, `?name`, `?name : Type`) enable incremental development. A function with holes type-checks but cannot be compiled for real execution — only simulated. The compiler can suggest implementations based on available bindings and the `@allows` annotation.
+Holes (`?`, `?name`, `?name : Type`) enable incremental development. A function with holes is partial: checking and hole reporting can succeed, while executable build/run paths surface the partial code until the hole is filled. SEP-0005 owns the exact partial-function status, reporting protocol, and fill workflow.
 
 #### `@allows` annotation
 
@@ -1377,7 +1432,7 @@ At minimum, the shared hole object includes:
 - `expected_type` / `type_inferred_from`
 - `function` / `enclosing_signature`
 - `bindings` / `binding_dependencies`
-- `effects`, `errors_to_handle`, `cost_budget`
+- `available_effects`, `errors_to_handle`, `cost_budget`
 - `candidates`, `dependent_holes`, `confidence`, `error_clusters`
 
 When a function has both a `spec` block and a hole body, that shared hole object may surface the `spec` items as additional behavioral context for tooling. The authoritative transport and evolution rules remain in SEP-0005 so SEP-0001 does not accidentally freeze a stale field layout.
@@ -1575,7 +1630,7 @@ Spore is designed with AI code generation agents as first-class consumers:
 
 - **Fixed operator set**: Agents never need to resolve custom operators or precedence ambiguities.
 - **Regular grammar**: No significant whitespace, no optional semicolons, no implicit returns outside blocks. Every syntactic form is delimited by explicit tokens.
-- **Keyword-introduced clauses**: `where`, `uses`, `cost`, `!` are unambiguous clause starters.
+- **Keyword-introduced clauses**: `where`, `cost`, `uses`, `!` are unambiguous clause starters.
 
 ### Structured metadata
 
@@ -1697,7 +1752,7 @@ The regular, keyword-delimited syntax supports straightforward LSP provider impl
 - **Hover information**: Function signatures (including `uses`, `cost`, `spec` summary, inferred properties) can be displayed in full. The `spec` block is surfaced as a "behavioral contract" section showing example count and property count.
 - **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available effects. Inside `spec { }`, suggest `example` and `property` as the only valid item keywords.
 - **Diagnostics**: Missing match arms, undeclared effects, cost violations, incomplete error handling, missing spec on public functions, and spec failures can all be reported as structured diagnostics.
-- **Signature help**: The ordered clause structure (`where` → `uses` → `cost` → `spec`) enables progressive parameter info display.
+- **Signature help**: The ordered clause structure (`where` → `cost` → `uses` → `spec`) enables progressive parameter info display.
 
 ### Serialization
 
@@ -1937,40 +1992,49 @@ As this is the initial v0.1 specification, there are no backward compatibility c
 
 ## Unresolved questions
 
-1. **Exact cost model semantics**: What units does `cost` measure? CPU cycles? Abstract "work units"? How does the compiler verify cost bounds, especially for recursive functions?
+SEP-0001 has no unresolved questions that block accepting the root syntax
+surface. The following decisions are accepted here because they affect grammar
+or signature layout:
 
-2. **Effect composition rules**: When a function calls two sub-functions with different `uses` sets, is the resulting set the union? How are effect aliases expanded for comparison?
+1. **`throw`** is a core expression form. SEP-0001 owns only its spelling and
+   placement; SEP-0002 owns its error-channel typing and lowering.
 
-3. **Refinement type checking**: How deeply does the compiler verify refinement predicates (`type Positive = I64 if |n| n > 0`)? Is this compile-time only, or does it generate runtime checks?
+2. **Placeholder partial application** is a general call-position form:
+   `f(_, y)` creates a lambda over the placeholder argument. Pipe use such as
+   `x |> f(_, y)` is a direct application of that same rule.
 
-4. **`throw` semantics**: Is `throw` syntactic sugar for `return Err(...)`, or does it have distinct unwinding semantics? The current spec treats it as sugar but this needs formalization.
+3. **Interpolation boundaries** are fixed for v0.1: both `f"..."` and `t"..."`
+   embed Spore expressions. SEP-0009 owns template rendering and sanitization.
 
-5. **Module system details**: How do circular module dependencies behave? What is the exact resolution order for qualified names?
+4. **String patterns** are literal patterns only. Regex, prefix, suffix, or
+   other string-pattern forms require a future syntax SEP.
 
-6. **`self` method dispatch**: How does the compiler resolve method calls on `self` — is it static dispatch (monomorphized) or dynamic dispatch (vtable)? This affects performance characteristics.
+5. **Behavioral `spec` blocks** are accepted on ordinary function declarations,
+   trait method signatures, and `impl` methods. Trait-method contract
+   inheritance or merging is not part of SEP-0001.
 
-7. **Format string security**: What sanitization, if any, applies to `f"..."` expressions to prevent injection attacks? How do `t"..."` template objects interact with the effect system?
+6. **Negative examples** are not part of the v0.1 `spec` grammar. `example` and
+   `property` items evaluate to `Bool`.
 
-8. **Tail-call optimization scope**: Is TCO guaranteed only for direct self-recursion, or for mutual recursion and continuation-passing style as well?
+### Delegated to dependent SEPs
 
-9. **Partial application**: The pipe operator supports `x |> f(_, y)` placeholder syntax. Should Spore support general partial application beyond pipe contexts?
-
-10. **Pattern matching on strings**: The current spec shows string literal patterns. Should Spore support regex patterns or prefix/suffix matching in `match` arms?
-
-11. **Standard effect taxonomy evolution**: SEP-0003 now defines the initial built-in effect vocabulary (`Console`, `FileRead`, `FileWrite`, `NetConnect`, `NetListen`, `Env`, `Spawn`, `Clock`, `Random`, `Exit`). Future SEPs may extend it, but changes should preserve the intent-oriented classification.
-
-12. **Error-set surface aliases**: This slice standardizes canonicalized error-set
-equivalence and subset checks without introducing a dedicated `error Alias = ...`
-surface. Should a later SEP add user-declared error-set aliases, or should Spore
-continue relying on existing nominal type names plus canonicalization?
-
-13. **`property` with `uses`**: If a property calls a function that has side effects, what effect scope applies? Current proposal: property items inherit the enclosing function's `uses` set.
-
-14. **Future trait-level behavioral contracts**: Should a later SEP allow `spec` blocks on trait methods, and if so how should implementations inherit or refine them? This amendment leaves trait-level `spec` syntax and semantics unspecified.
-
-15. **`example` execution order**: Should `example` items run in declaration order (default) or allow parallel execution via `--parallel-spec`?
-
-16. **Negative examples**: Should `spec` support expressing that a call should fail at compile time (type error)? This would enable testing the type system itself but requires a different mechanism.
+- **Type and refinement semantics**: SEP-0002 owns primitive type meaning,
+  type inference, refinement checking, method dispatch, and error-set
+  canonicalization.
+- **Effect composition and taxonomy**: SEP-0003 owns effect-set union,
+  alias expansion, handler discharge, and future effect vocabulary changes.
+- **Cost units and verification**: SEP-0004 owns cost dimensions, units,
+  recursion analysis, and verification algorithms.
+- **Hole reporting and partial-function status**: SEP-0005 owns HoleReport
+  fields, dependency graphs, and agent workflow.
+- **Compiler/runtime guarantees**: SEP-0006 owns formatter enforcement,
+  diagnostics, lowering, and TCO implementation details.
+- **Concurrency behavior**: SEP-0007 owns `spawn`, `await`, `select`, task
+  lifetime, cancellation, and channel semantics.
+- **Module resolution**: SEP-0008 owns circular dependencies, import resolution,
+  package manifests, and content-addressed hashing.
+- **Standard-library names and behavior**: SEP-0009 owns prelude items,
+  collection APIs, string helpers, and platform-facing library modules.
 
 ## Appendix A: Small-step operational semantics
 
@@ -1992,7 +2056,6 @@ v ::= n                           (integer literal)
     | f                           (float literal)
     | true | false                (boolean)
     | "s"                         (string literal)
-    | 'c'                         (char literal)
     | ()                          (unit)
     | S { f₁: v₁, ..., fₙ: vₙ } (struct instance)
     | V(v₁, ..., vₙ)             (enum variant instance)

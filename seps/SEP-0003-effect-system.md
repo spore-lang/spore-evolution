@@ -7,6 +7,7 @@ authors:
   - Zhan Rongrui
 created: 2026-03-31
 requires:
+  - 1
   - 2
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/3"
 pr: null
@@ -160,10 +161,10 @@ The `basic-cli` Platform currently maps its package modules to built-in effects 
 The `effect` keyword creates a **named alias** that expands into a flat set of atomic effects:
 
 ```spore
-effect FileIO = FileRead | FileWrite
-effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
-effect Server = NetListen | FileRead | FileWrite | Clock | Random
-effect HttpClient = NetConnect | Clock
+effect FileIO = FileRead | FileWrite;
+effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit;
+effect Server = NetListen | FileRead | FileWrite | Clock | Random;
+effect HttpClient = NetConnect | Clock;
 ```
 
 Aliases expand recursively and flatten:
@@ -182,7 +183,7 @@ filesystem/network bundle.
 ### Using effects in practice
 
 ```spore
-effect HttpClient = NetConnect | Clock
+effect HttpClient = NetConnect | Clock;
 
 fn query_api(url: Url) -> Data ! NetworkError
 uses [HttpClient]
@@ -812,8 +813,8 @@ effect FileWrite {
 }
 
 effect Env {
-    fn get(name: Str) -> Option[Str]
-    fn vars() -> List[(Str, Str)]
+    fn get(name: Str) -> Option[Str];
+    fn vars() -> List[(Str, Str)];
 }
 ```
 
@@ -822,7 +823,7 @@ Declaring `uses [FileRead]` authorizes the effect, but operations remain explici
 Effect aliases are part of the committed v0.1 surface:
 
 ```spore
-effect FileIO = FileRead | FileWrite
+effect FileIO = FileRead | FileWrite;
 ```
 
 This expands semantically to the union of the two effects and does not define a new operation surface of its own.
@@ -1175,36 +1176,28 @@ enum Ty {
 
 ## Unresolved questions
 
-### 1. Effect subtraction syntax
+### 1. Effect identity, scoping, and imports
 
-Should Spore support a subtraction syntax such as `uses [All \ Spawn]`? This depends on the definition of the universal set **E**, which may vary across platforms. Current decision: **not supported**. Developers must enumerate effects explicitly.
+Third-party packages may define new atomic effects. The remaining design
+question is how those names are made globally unambiguous across packages:
+qualified module paths, package-qualified names, or another identity layer tied
+to the module/package system in SEP-0008.
 
-### 2. Platform effect ceilings
+### 2. Fine-grained effect policy
 
-How does a module-level `platform [Web]` declaration interact with function-level `uses` clauses? Two options:
+The language-level model currently uses coarse intent-oriented effects such as
+`FileRead`, `FileWrite`, `Console`, and `NetConnect`. More granular policies
+such as path-scoped filesystem access or separate console read/write permissions
+remain a future extension. SEP-0008 currently treats those as manifest/platform
+policy rather than core effect algebra.
 
-- **Intersection model:** The effective effect set is `S_function ∩ S_platform`.
-- **Constraint model:** The compiler checks `S_function ⊆ S_platform` and rejects violations.
+### 3. Effect evolution and deprecation
 
-The constraint model (static rejection) is preferred but needs formal specification.
+When an atomic effect is deprecated, renamed, or split, the language needs a
+migration story: diagnostics, compatibility aliases, possible `@deprecated`
+metadata, and any automated rewrites.
 
-### 3. Effect scoping and imports
-
-Can third-party libraries define new atomic effects? If so, how are they scoped and imported? Should there be a namespace mechanism (`mylib::MyEffect`)?
-
-### 4. Granularity of file-system effects
-
-Is `FileRead` / `FileWrite` the right granularity, or should effects be path-scoped (e.g., `FileRead("/etc/config")`)? Path-scoping adds expressiveness but complicates the set algebra.
-
-### 5. Granularity of `Console` effect
-
-Should `Console` be split further (e.g., `ConsoleRead` for stdin vs `ConsoleWrite` for stdout/stderr)? A single `Console` is simpler and covers the common case where terminal I/O is bidirectional, but finer granularity may be useful for sandboxing scenarios where a program should print output but not read input.
-
-### 6. Effect evolution and deprecation
-
-When an atomic effect is deprecated or split (e.g., `FileIO` split into `FileRead` + `FileWrite`), what migration tooling is needed? Should the compiler support `@deprecated` annotations on effect definitions?
-
-### 7. Interaction with generics
+### 4. Interaction with generics
 
 How do generic type parameters interact with effect sets? For example:
 
@@ -1216,9 +1209,17 @@ fn apply[T, R](f: (T) -> R, x: T) -> R {
 
 This currently works only with pure `f`. If `f` has effects, should `apply` need to declare them? Without effect polymorphism, the answer is that `apply` must be specialised for each effect set, which may require monomorphisation or overloading.
 
-### 8. Runtime effect tokens
+### 5. Runtime effect tokens
 
 Should effect tokens have a runtime representation (e.g., for dependency injection in tests), or are they purely a compile-time concept? A hybrid model where effects are erased by default but can be reified for testing purposes may be desirable.
+
+### Resolved or delegated questions
+
+- **Effect subtraction syntax** is not part of v0.1. Spore does not support
+  `uses [All \ Spawn]`; developers enumerate effects explicitly.
+- **Platform ceilings** are delegated to SEP-0008. If standardized, the expected
+  model is static constraint checking (`S_function ⊆ S_platform`), not
+  silently intersecting a function's declared effect set.
 
 ---
 
