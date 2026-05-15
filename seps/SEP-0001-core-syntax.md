@@ -311,8 +311,12 @@ fn get_config() -> Config {
 }
 
 // Retry with tail recursion (TCO guaranteed)
-fn fetch_with_retry(url: Str, max_retries: I64) -> Data ! NetworkError {
-    fn retry(url: Str, attempts: I64, max: I64) -> Data ! NetworkError {
+fn fetch_with_retry(url: Str, max_retries: I64) -> Data ! NetworkError
+    uses [NetConnect, Clock]
+{
+    fn retry(url: Str, attempts: I64, max: I64) -> Data ! NetworkError
+        uses [NetConnect, Clock]
+    {
         match fetch(url) {
             Ok(data) => data,
             Err(NetworkError.Timeout) if attempts < max => {
@@ -670,7 +674,9 @@ let (tx1, rx1) = Channel.new[I64](buffer: 1);
 let (tx2, rx2) = Channel.new[Str](buffer: 1);
 
 // Recursive event loop (TCO guaranteed)
-fn event_loop(rx1: Channel.Receiver[I64], rx2: Channel.Receiver[Str]) {
+fn event_loop(rx1: Channel.Receiver[I64], rx2: Channel.Receiver[Str])
+    uses [Console]
+{
     select {
         value from rx1 => {
             print(f"Got integer: {value}");
@@ -760,10 +766,16 @@ The complete reserved keyword table:
 | `unsafe` | Reserved |
 | `extern` | Reserved |
 | `macro` | Reserved |
+| `on` | Inline effect arm introducer inside `handle … with { … }` |
+| `from` | Channel receive binder in `select` arms (`value from rx`) |
+| `use` | Named handler binding inside `handle … with { … }` |
+| `timeout` | Timeout arm in `select` expressions |
 | `true` / `false` | Boolean literals |
 | `Some` / `None` | Option type constructors |
 | `Ok` / `Err` | Result type constructors |
 | `Result` / `Option` / `Ref` | Built-in parameterized types |
+
+**Attributes.** Function-level attributes use the `@name(args)` form — a decorator-style prefix placed before `fn` (and before any doc comment). Examples: `@allows(validate, sanitize)`, `@allow(missing_spec)`. The `@` sigil is not a standalone operator; the full attribute form is parsed as part of `FunctionHeader`.
 
 #### Operators
 
@@ -940,10 +952,8 @@ Variant         = Ident [ "(" FieldList ")" ]
 (* ─── Trait ────────────────────────────────────────── *)
 
 TraitDecl       = [ Visibility ] "trait" Ident [ TypeParams ]
-                  [ ":" BoundList ]
+                  [ ":" BoundExpr ]
                   "{" { TraitItem } "}" ;
-
-BoundList       = Ident { "," Ident } ;
 
 TraitItem       = AssocType
                 | TraitFunctionSig ( ";" | Block ) ;
@@ -993,7 +1003,16 @@ FunctionSig     = FunctionHeader [ SpecClause ] ;
 
 TraitFunctionSig = FunctionHeader [ SpecClause ] ;
 
-FunctionHeader  = [ DocComment ]
+(* ─── Attributes ─────────────────────────────────── *)
+
+Attribute       = "@" Ident [ "(" [ AttrArgList ] ")" ] ;
+AttrArgList     = AttrArg { "," AttrArg } [ "," ] ;
+AttrArg         = Ident | StringLiteral | IntLiteral ;
+
+(* ─── Function Declaration ────────────────────────── *)
+
+FunctionHeader  = { Attribute }
+                  [ DocComment ]
                   [ Visibility ] "fn" Ident [ TypeParams ]
                   "(" [ ParamList ] ")" [ "->" TypeExpr ]
                   [ ErrorClause ]
@@ -1015,7 +1034,8 @@ Param           = Ident ":" TypeExpr ;
 ErrorClause     = "!" TypeExpr { "|" TypeExpr } ;
 
 WhereClause     = "where" WhereConstraint { "," WhereConstraint } ;
-WhereConstraint = Ident ":" Ident ;
+WhereConstraint = Ident ":" BoundExpr ;
+BoundExpr       = Ident { "+" Ident } ;
 
 UsesClause      = "uses" "[" [ EffectList ] "]" ;
 EffectList      = Ident { "," Ident } ;
@@ -1255,7 +1275,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
    equivalent items are redundant and should be diagnosed, even though signature
    hashing remains conservative over the written surface form.
 
-3. **`where T: Bound, U: Bound`** — Generic constraints. The canonical form is a single `where` clause with comma-separated constraints. Spore does not use `+` multi-bound syntax.
+3. **`where T: Bound + Bound2, U: Bound`** — Generic constraints. Each constraint is a `+`-separated list of trait bounds (`T: Eq + Hash`). The canonical form is a single `where` clause with comma-separated constraints.
 
 4. **`cost [c, a, i, p]`** — A four-slot cost vector (`compute`, `alloc`, `io`, `parallel`). Each slot may reference parameters or use the currently supported linear `O(n)` forms.
 
@@ -1272,7 +1292,7 @@ fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
    - **`example "label": expr`** — A concrete named test case. The body expression must be `Bool`. If using `==`, both sides must have the same type. Multi-line examples use block syntax: `example "label" { ... }`.
    - **`property "label": |x: T, ...| expr`** — A universally quantified assertion. The compiler generates random inputs of the declared types and verifies the body evaluates to `true` for all trials. Type annotations on property parameters are required.
 
-   For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `#[allow(missing_spec)]`.
+   For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `@allow(missing_spec)`.
 
    This amendment fixes where trait-method `spec` may appear, but does not
    define trait-method `spec` inheritance or contract merging. That behavior is
@@ -1392,14 +1412,14 @@ Holes (`?`, `?name`, `?name : Type`) enable incremental development. A function 
 The `@allows` annotation constrains which functions the compiler (or an AI agent) may use to fill a hole:
 
 ```spore
-@allows[validate, sanitize, format]
+@allows(validate, sanitize, format)
 fn process_input(raw: Str) -> Str ! ValidationError {
     let validated = validate(raw)?;
     let sanitized = sanitize(validated);
     ?final_step  // this hole can only call validate/sanitize/format
 }
 
-@allows[add, multiply, negate]
+@allows(add, multiply, negate)
 fn arithmetic(a: I64, b: I64) -> I64 {
     let x = ?step1 : I64;  // only add/multiply/negate
     let y = ?step2 : I64;  // same constraint
@@ -1574,8 +1594,12 @@ fn consumer(id: I64, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Str])
 }
 
 // Result collector using tail recursion
-fn collector(rx: Channel.Receiver[Str], expected: I64) {
-    fn collect(rx: Channel.Receiver[Str], remaining: I64) {
+fn collector(rx: Channel.Receiver[Str], expected: I64)
+    uses [Console]
+{
+    fn collect(rx: Channel.Receiver[Str], remaining: I64)
+        uses [Console]
+    {
         if remaining <= 0 { return }
         let result = rx.recv();
         print(result);
@@ -1587,19 +1611,18 @@ fn collector(rx: Channel.Receiver[Str], expected: I64) {
 fn main() {
     let task_count = 10;
     let consumer_count = 3;
-    let (task_tx, task_rx) = Channel.new[Task](buffer: 5);
     let (result_tx, result_rx) = Channel.new[Str](buffer: 10);
 
     parallel_scope {
-        spawn { producer(task_tx, task_count) };
-
+        // Each consumer gets its own dedicated channel — MPSC receivers cannot be cloned.
         (1..=consumer_count).for_each(|i| {
-            let rx_clone = task_rx.clone();
+            let (task_tx, task_rx) = Channel.new[Task](buffer: 5);
             let tx_clone = result_tx.clone();
-            spawn { consumer(i, rx_clone, tx_clone) };
+            spawn { producer(task_tx, task_count) };
+            spawn { consumer(i, task_rx, tx_clone) };
         });
 
-        spawn { collector(result_rx, task_count) };
+        spawn { collector(result_rx, task_count * consumer_count) };
     }
 
     print("All tasks completed!");
@@ -1760,6 +1783,8 @@ The AST serializes naturally to JSON, S-expressions, or any tree-structured form
 
 ## Diagnostics impact
 
+> **Note:** Numeric diagnostic codes (`E0xxx`, `C0xxx`, `W0xxx`, `K0xxx`, `M0xxx`) and the full code registry are defined in **SEP-0006 (Compiler Architecture)**. This section illustrates the *message format and context* that Spore's explicit syntax enables; the specific codes shown are examples only and the authoritative list lives in SEP-0006.
+
 ### Error messages
 
 Spore's explicit syntax enables highly specific error messages:
@@ -1767,7 +1792,7 @@ Spore's explicit syntax enables highly specific error messages:
 **Missing effect:**
 
 ```text
-error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declare it
+error: function `fetch_data` uses effect `NetConnect` but does not declare it
   --> src/api.sp:12:5
    |
 12 | fn fetch_data(url: Url) -> Data ! NetworkError {
@@ -1780,7 +1805,7 @@ error[E0301]: function `fetch_data` uses effect `NetConnect` but does not declar
 **Non-exhaustive match:**
 
 ```text
-error[E0401]: non-exhaustive match expression
+error: non-exhaustive match expression
   --> src/main.sp:25:5
    |
 25 | match color {
@@ -1792,7 +1817,7 @@ error[E0401]: non-exhaustive match expression
 **Loop keyword used:**
 
 ```text
-error[E0101]: `for` loops are not supported in Spore
+error: `for` loops are not supported in Spore
   --> src/main.sp:10:5
    |
 10 | for x in list {
@@ -1805,7 +1830,7 @@ error[E0101]: `for` loops are not supported in Spore
 **Spec clause in wrong position:**
 
 ```text
-error[E0501]: `spec` must appear after all other signature clauses
+error: `spec` must appear after all other signature clauses
   --> src/lib.sp:5:1
    |
  5 | spec { ... }
@@ -1842,14 +1867,14 @@ spec counterexample: `parse_date` — property "round-trip"
 **Missing spec warning:**
 
 ```text
-warning[W0501]: public function `parse_date` has no `spec` block
+warning: public function `parse_date` has no `spec` block
   --> src/dates.sp:3:1
    |
  3 | pub fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError {
    |        ^^^^^^^^^^ no behavioral contract declared
    |
    = help: add a `spec { example "...": ... }` block before the function body
-   = note: suppress with `#[allow(missing_spec)]` if intentional
+   = note: suppress with `@allow(missing_spec)` if intentional
 ```
 
 ### Recovery strategies
