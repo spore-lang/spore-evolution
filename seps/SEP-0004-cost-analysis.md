@@ -23,15 +23,11 @@ superseded_by: null
 
 This SEP specifies Spore's compile-time cost analysis system — a three-tier mechanism that statically determines or verifies upper bounds on resource consumption for every function. The system operates along four cost dimensions — **compute(op)**, **alloc(cell)**, **io(call)**, **parallel(lane)** — and leverages the fact that Spore has **no loops** (all iteration is expressed via recursion and higher-order functions) to make cost analysis equivalent to recursion analysis.
 
-> **Note:** This SEP is `Draft`. Compiler behavior follows the implementation
-> repository (`spore/README.md`) until acceptance. Declare per-function budgets
-> with four-slot `cost [compute, alloc, io, parallel]` (SEP-0001).
-
 The three tiers are:
 
 1. **Tier 1 — Automatic structural recursion detection** (~70% of functions): the compiler detects that one argument strictly decreases along a well-founded relation on every recursive call and automatically infers a cost bound.
 2. **Tier 2 — Declarative verification** (~20%): the developer writes `cost [compute, alloc, io, parallel]` in the function signature; the compiler verifies each slot independently.
-3. **Tier 3 — `@unbounded` escape hatch** (~10%): the developer explicitly opts out of cost checking; the annotation is *contagious* — callers inherit `@unbounded` unless they isolate it with `with_cost_limit`.
+3. **Tier 3 — `@unbounded` escape hatch** (~10%): the developer explicitly opts out of cost checking; the annotation is _contagious_ — callers inherit `@unbounded` unless they isolate it with `with_cost_limit`.
 
 Cost expressions (`CostExpr`) are drawn from a restricted grammar over compile-time `Index` parameters — `+`, `*`, `log`, `max`, `min`, and `span(hi, lo)` — deliberately excluding arbitrary runtime values, division, ordinary subtraction, and conditionals. This restriction keeps verification decidable and makes cost a compile-time symbolic upper-bound function rather than runtime profiling.
 
@@ -41,7 +37,7 @@ Cost expressions (`CostExpr`) are drawn from a restricted grammar over compile-t
 
 ### The problem with runtime profiling
 
-Traditional performance analysis relies on runtime profiling: run the program, measure timings, hope the workload is representative. This is machine-dependent, non-reproducible, and fundamentally reactive — you discover performance regressions *after* they ship.
+Traditional performance analysis relies on runtime profiling: run the program, measure timings, hope the workload is representative. This is machine-dependent, non-reproducible, and fundamentally reactive — you discover performance regressions _after_ they ship.
 
 ### Why Spore can do better
 
@@ -54,13 +50,13 @@ Spore's language design creates a unique opportunity for compile-time cost analy
 
 ### Design goals
 
-| Goal | Description |
-|------|-------------|
+| Goal          | Description                                                                             |
+| ------------- | --------------------------------------------------------------------------------------- |
 | High coverage | ~90% of real-world recursive code gets a cost bound automatically or semi-automatically |
-| Zero burden | Simple cases require no manual annotation |
-| Escapable | Unanalyzable code does not block compilation — it produces a warning |
-| Composable | Recursive cost and higher-order function cost compose seamlessly |
-| Decidable | The verification algorithm always terminates in polynomial time |
+| Zero burden   | Simple cases require no manual annotation                                               |
+| Escapable     | Unanalyzable code does not block compilation — it produces a warning                    |
+| Composable    | Recursive cost and higher-order function cost compose seamlessly                        |
+| Decidable     | The verification algorithm always terminates in polynomial time                         |
 
 ### The core equation
 
@@ -154,7 +150,7 @@ fn collatz_steps(n: I64) -> I64 {
 }
 ```
 
-`@unbounded` functions cannot be called directly from ordinary four-slot cost declarations without isolation. The intended bridge is a **runtime cost limiter** (below). The reference compiler in the `spore` implementation repository does not implement this form yet; see that repo’s `docs/DESIGN.md`.
+`@unbounded` functions cannot be called directly from ordinary four-slot cost declarations without isolation. The bridge is a **runtime cost limiter** (below): it lexically bounds evaluation of unbounded callees while preserving a checkable four-slot contract for the enclosing function. Contagion and isolation rules are normative in this SEP; how implementations surface violations in the pipeline (`K0xxx` and related) belongs to SEP-0006.
 
 ```spore
 fn safe_collatz(n: I64) -> I64 ! CostExceeded
@@ -219,16 +215,32 @@ Design principle: **What can be inferred automatically shall never require manua
 
 ## Reference-level explanation
 
+### Notation
+
+| Symbol                | Meaning                                                                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `C` / `A` / `W` / `P` | Cost dimensions: Compute(op), Alloc(cell), IO(call), Parallel(lane). Note: `C` here denotes **Compute**, distinct from the EffectSet metavariable `C` used in SEP-0002's typing judgments. |
+| `K(e)`                | CostVector of expression `e`                                                                                                                                                               |
+| `⊕`                   | Pointwise CostVector addition                                                                                                                                                              |
+| `⊗`                   | CostVector scaling                                                                                                                                                                         |
+| `≤`                   | Pointwise CostVector comparison (each dimension ≤)                                                                                                                                         |
+| `N0`                  | Non-negative integers {0, 1, 2, …}                                                                                                                                                         |
+| `N: Index`            | Compile-time non-negative size parameter                                                                                                                                                   |
+| `σ`                   | Assignment environment: IndexVar → N0                                                                                                                                                      |
+| `⟦e⟧σ`                | Semantic evaluation of CostExpr `e` under assignment `σ`                                                                                                                                   |
+| `≺`                   | Well-founded decreasing relation                                                                                                                                                           |
+| `≼`                   | Asymptotic dominance                                                                                                                                                                       |
+
 ### 4.1 Cost dimensions
 
 The abstract machine maintains four independent cost dimensions:
 
-| Dimension | Abbreviation | Meaning | Unit |
-|-----------|-------------|---------|------|
-| Compute | `C` | CPU operation steps | op (operation) |
-| Allocation | `A` | Heap memory allocation | cell (abstract memory unit) |
-| I/O | `W` | Side-effect / external call count | call |
-| Parallelism | `P` | Parallel execution width | lane |
+| Dimension   | Abbreviation | Meaning                           | Unit                        |
+| ----------- | ------------ | --------------------------------- | --------------------------- |
+| Compute     | `C`          | CPU operation steps               | op (operation)              |
+| Allocation  | `A`          | Heap memory allocation            | cell (abstract memory unit) |
+| I/O         | `W`          | Side-effect / external call count | call                        |
+| Parallelism | `P`          | Parallel execution width          | lane                        |
 
 **Scalar summaries (reports):** tooling may fold **C**, **A**, and **W** into one
 weighted number for display. Declarations remain the four-slot form; the fold is:
@@ -245,33 +257,33 @@ where `α` and `β` are project-configurable weights (default α = 2, β = 100).
 
 #### Compute (C dimension)
 
-| Operation | Cost (op) | Notes |
-|-----------|----------|-------|
-| Integer `+`, `-`, `*` | 1 | |
-| Integer `/`, `%` | 2 | Division is slightly more expensive |
-| F64 `+`, `-`, `*` | 2 | |
-| F64 `/` | 3 | |
-| Comparison `==`, `!=`, `<`, `>` | 1 | |
-| Logical `&&`, `\|\|`, `!` | 1 | Max-path (short-circuit does not reduce cost) |
-| Bitwise `&`, `\|`, `^`, `<<`, `>>` | 1 | |
-| Variable read | 0 | Already in scope |
-| `let` binding | 1 | |
-| Pattern arm | 1 | Per arm matched |
-| Function call overhead | 3 | Fixed, excludes callee body |
-| Closure creation (N captures) | N + 2 | |
-| Pipe `\|>` | 0 | Syntactic sugar |
+| Operation                          | Cost (op) | Notes                                         |
+| ---------------------------------- | --------- | --------------------------------------------- |
+| Integer `+`, `-`, `*`              | 1         |                                               |
+| Integer `/`, `%`                   | 2         | Division is slightly more expensive           |
+| F64 `+`, `-`, `*`                  | 2         |                                               |
+| F64 `/`                            | 3         |                                               |
+| Comparison `==`, `!=`, `<`, `>`    | 1         |                                               |
+| Logical `&&`, `\|\|`, `!`          | 1         | Max-path (short-circuit does not reduce cost) |
+| Bitwise `&`, `\|`, `^`, `<<`, `>>` | 1         |                                               |
+| Variable read                      | 0         | Already in scope                              |
+| `let` binding                      | 1         |                                               |
+| Pattern arm                        | 1         | Per arm matched                               |
+| Function call overhead             | 3         | Fixed, excludes callee body                   |
+| Closure creation (N captures)      | N + 2     |                                               |
+| Pipe `\|>`                         | 0         | Syntactic sugar                               |
 
 #### Allocation (A dimension)
 
-| Operation | Cost (cell) |
-|-----------|------------|
-| Struct creation | field count |
-| List creation | element count + 1 header |
-| `Str` creation | ⌈len / 8⌉ |
+| Operation           | Cost (cell)                            |
+| ------------------- | -------------------------------------- |
+| Struct creation     | field count                            |
+| List creation       | element count + 1 header               |
+| `Str` creation      | ⌈len / 8⌉                              |
 | `Str` concatenation | ⌈(len_a + len_b) / 8⌉ (new allocation) |
-| Enum / union | 1 (tag + max variant size) |
-| Deep copy | original cell count |
-| Borrow / reference | 0 |
+| Enum / union        | 1 (tag + max variant size)             |
+| Deep copy           | original cell count                    |
+| Borrow / reference  | 0                                      |
 
 #### I/O (W dimension)
 
@@ -279,14 +291,14 @@ Every system call (file read/write, network request, stdio, random number genera
 
 ### 4.3 Composition rules
 
-| Form | Cost rule |
-|------|-----------|
-| Sequential `A; B` | `cost(A) + cost(B)` |
-| Conditional `if c then A else B` | `cost(c) + max(cost(A), cost(B))` |
-| Pattern match `match x { p₁ => A, p₂ => B, ... }` | `cost(x) + max(cost(A), cost(B), ...) + arms × 1` |
-| Function call `f(args)` | `Σ cost(argᵢ) + 3 + cost(f.body)` |
-| Pipe chain `x \|> f \|> g` | `cost(x) + cost(f) + cost(g)` |
-| Parallel `parallel { A, B }` | C, A, W: `max(cost(A), cost(B)) + sync_overhead`; P: `sum(P(A), P(B))` |
+| Form                                              | Cost rule                                                              |
+| ------------------------------------------------- | ---------------------------------------------------------------------- |
+| Sequential `A; B`                                 | `cost(A) + cost(B)`                                                    |
+| Conditional `if c then A else B`                  | `cost(c) + max(cost(A), cost(B))`                                      |
+| Pattern match `match x { p₁ => A, p₂ => B, ... }` | `cost(x) + max(cost(A), cost(B), ...) + arms × 1`                      |
+| Function call `f(args)`                           | `Σ cost(argᵢ) + 3 + cost(f.body)`                                      |
+| Pipe chain `x \|> f \|> g`                        | `cost(x) + cost(f) + cost(g)`                                          |
+| Parallel `parallel { A, B }`                      | C, A, W: `max(cost(A), cost(B)) + sync_overhead`; P: `sum(P(A), P(B))` |
 
 > **Concurrent sync overhead.** The `sync_overhead` is a configurable constant (default: 0) representing the synchronisation cost of joining parallel branches. It can be set in `spore.toml` as `[cost] sync_overhead = 10`. When set to 0 (the default), the parallel cost reduces to a simple `max`. Projects requiring precise modelling of fork/join overhead should configure this parameter.
 
@@ -448,15 +460,15 @@ FnVar    ::= [a-z][A-Za-z0-9_]*
 
 #### Explicitly forbidden constructs
 
-| Construct | Reason |
-|-----------|--------|
-| Ordinary runtime values | Cost must be a compile-time symbolic upper-bound function over Index parameters |
-| Division `/` | Avoids division-by-zero and rational expressions |
-| Ordinary subtraction `-` | May produce negative values and non-monotone expressions |
-| Conditionals `if...then...else` | Introduces undecidable branching — conditionals can encode arbitrary predicates |
-| Recursive cost definitions | Avoids fixpoint computation; recursion analysis is handled at a separate layer |
-| Negative numbers | Cost domain is `N0` (non-negative integers) |
-| Variable exponents `n^m` | Pushes comparison into the exponential polynomial domain, losing polynomial decidability |
+| Construct                       | Reason                                                                                   |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| Ordinary runtime values         | Cost must be a compile-time symbolic upper-bound function over Index parameters          |
+| Division `/`                    | Avoids division-by-zero and rational expressions                                         |
+| Ordinary subtraction `-`        | May produce negative values and non-monotone expressions                                 |
+| Conditionals `if...then...else` | Introduces undecidable branching — conditionals can encode arbitrary predicates          |
+| Recursive cost definitions      | Avoids fixpoint computation; recursion analysis is handled at a separate layer           |
+| Negative numbers                | Cost domain is `N0` (non-negative integers)                                              |
+| Variable exponents `n^m`        | Pushes comparison into the exponential polynomial domain, losing polynomial decidability |
 
 `span(hi, lo)` is the only difference-like operation. Its meaning is
 `max(hi - lo, 0)`, and it exists only in the Index layer so APIs can express
@@ -467,9 +479,9 @@ Residual budgeting does not weaken this rule: the checker may compute
 surface and therefore does not reintroduce ordinary subtraction into the source
 language.
 
-#### Implementation (Rust)
+#### CostExpr definition
 
-The `CostExpr` type is implemented in `sporec-typeck/src/cost.rs`:
+The `CostExpr` type has the following structure:
 
 ```rust
 pub enum CostExpr {
@@ -510,7 +522,7 @@ Let σ: IndexVar → N0 be an assignment environment. The semantic function
 that does not contain `span`, if σ₁(N) ≤ σ₂(N) for all variables N, then
 ⟦e⟧σ₁ ≤ ⟦e⟧σ₂.
 
-*Proof.* By structural induction on `e`. All operations (`+`, `×`, `log`,
+_Proof._ By structural induction on `e`. All operations (`+`, `×`, `log`,
 `max`, `min`) are monotone non-decreasing on N0. ∎
 
 For `span(hi, lo)`, the checker tracks variance: `hi` is covariant and `lo` is
@@ -521,7 +533,7 @@ runtime-value reasoning.
 
 #### Tier 1: Structural recursion auto-detection
 
-**Definition.** A function f(x₁, ..., xₙ) is *structurally recursive* if there exists i ∈ {1, ..., n} such that for every recursive call f(y₁, ..., yₙ):
+**Definition.** A function f(x₁, ..., xₙ) is _structurally recursive_ if there exists i ∈ {1, ..., n} such that for every recursive call f(y₁, ..., yₙ):
 
 ```text
 yᵢ ≺ xᵢ   (where ≺ is a well-founded relation on type Tᵢ)
@@ -529,17 +541,17 @@ yᵢ ≺ xᵢ   (where ≺ is a well-founded relation on type Tᵢ)
 
 The compiler recognizes the following decreasing patterns:
 
-| Pattern | Source → Recursive arg | Well-founded relation | Typical cost |
-|---------|----------------------|----------------------|-------------|
-| Natural number decrement | `n → n - 1` (with `n > 0` guard) | `<` on ℕ | O(n) |
-| List tail | `list → list.tail` | Sublist relation | O(n) |
-| Tree child (unary) | `tree → tree.left` or `tree → tree.right` | Subtree relation | O(log n) balanced / O(n) worst |
-| Tree child (binary) | `tree → tree.left` and `tree → tree.right` | Subtree relation | O(n) |
-| Enum destructuring | `match x { Variant(inner) => f(inner) }` | Structural subterm | O(depth) |
-| Tuple projection | `(a, b) → a` or `(a, b) → b` (strictly smaller) | Structural subterm | Depends on projected component |
-| Integer halving | `n → n / 2` (with `n > 0` guard) | `<` on ℕ | O(log n) |
+| Pattern                  | Source → Recursive arg                          | Well-founded relation | Typical cost                   |
+| ------------------------ | ----------------------------------------------- | --------------------- | ------------------------------ |
+| Natural number decrement | `n → n - 1` (with `n > 0` guard)                | `<` on ℕ              | O(n)                           |
+| List tail                | `list → list.tail`                              | Sublist relation      | O(n)                           |
+| Tree child (unary)       | `tree → tree.left` or `tree → tree.right`       | Subtree relation      | O(log n) balanced / O(n) worst |
+| Tree child (binary)      | `tree → tree.left` and `tree → tree.right`      | Subtree relation      | O(n)                           |
+| Enum destructuring       | `match x { Variant(inner) => f(inner) }`        | Structural subterm    | O(depth)                       |
+| Tuple projection         | `(a, b) → a` or `(a, b) → b` (strictly smaller) | Structural subterm    | Depends on projected component |
+| Integer halving          | `n → n / 2` (with `n > 0` guard)                | `<` on ℕ              | O(log n)                       |
 
-**Detection algorithm** (implemented in `sporec-typeck/src/cost.rs`):
+**Detection algorithm**:
 
 ```text
 algorithm detect_structural_recursion(f):
@@ -623,12 +635,12 @@ fn collatz_steps(n: I64) -> I64 {
 
 **Rules:**
 
-| Rule | Description |
-|------|-------------|
-| Warning, not error | `@unbounded` produces a compiler warning, does not block compilation |
-| Contagious | Calling an `@unbounded` function makes the caller `@unbounded` too (unless wrapped in `with_cost_limit`) |
-| Context restriction | `@unbounded` functions cannot be called directly inside ordinary `cost [...]` functions |
-| Hole interaction | Holes inside `@unbounded` functions report `cost_budget: unbounded` |
+| Rule                | Description                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| Warning, not error  | `@unbounded` produces a compiler warning, does not block compilation                                     |
+| Contagious          | Calling an `@unbounded` function makes the caller `@unbounded` too (unless wrapped in `with_cost_limit`) |
+| Context restriction | `@unbounded` functions cannot be called directly inside ordinary `cost [...]` functions                  |
+| Hole interaction    | Holes inside `@unbounded` functions report `cost_budget: unbounded`                                      |
 
 **Impact scope tracking.** When a function is marked `@unbounded`, its unbounded status propagates through the call chain:
 
@@ -649,16 +661,16 @@ WARNING [unbounded-function] collatz_steps is marked @unbounded.
 
 ### 4.7 Higher-order function cost formulas
 
-Since Spore has no loops, higher-order functions are the *only* iteration mechanism besides recursion. Verified standard-library cost formulas are defined for indexed containers:
+Since Spore has no loops, higher-order functions are the _only_ iteration mechanism besides recursion. Verified standard-library cost formulas are defined for indexed containers:
 
-| Function | Cost formula |
-|----------|-------------|
-| `v.map(f)` where `v: Vec[T, max: N]` | `N × cost(f) + N` |
-| `v.fold(init, f)` where `v: Vec[T, max: N]` | `N × cost(f)` |
-| `v.filter(pred)` where `v: Vec[T, max: N]` | `N × cost(pred) + N` |
-| `a.zip(b)` where `a: Vec[A, max: M]`, `b: Vec[B, max: N]` | `min(M, N)` |
-| `v.take(count)` where `count: Count[K]` | `min(N, K)` |
-| `v.reduce(f)` where `v: Vec[T, max: N]` | `N × cost(f)` |
+| Function                                                  | Cost formula         |
+| --------------------------------------------------------- | -------------------- |
+| `v.map(f)` where `v: Vec[T, max: N]`                      | `N × cost(f) + N`    |
+| `v.fold(init, f)` where `v: Vec[T, max: N]`               | `N × cost(f)`        |
+| `v.filter(pred)` where `v: Vec[T, max: N]`                | `N × cost(pred) + N` |
+| `a.zip(b)` where `a: Vec[A, max: M]`, `b: Vec[B, max: N]` | `min(M, N)`          |
+| `v.take(count)` where `count: Count[K]`                   | `min(N, K)`          |
+| `v.reduce(f)` where `v: Vec[T, max: N]`                   | `N × cost(f)`        |
 
 Since higher-order function arguments `f` in Spore must be pure (no effect variables), `cost(f)` is always statically determinable. Substituting `cost(f)` into the formula yields a valid CostExpr.
 
@@ -722,11 +734,11 @@ fn is_odd(n: I64) -> Bool {
 
 Analysis: SCC = {is_even, is_odd}. Combined call pattern: `is_even(n) → is_odd(n-1) → is_even(n-2) → ...`. Parameter n decreases by 2 every two calls → structural recursion, cost = O(n).
 
-| Scenario | Handling |
-|----------|----------|
-| SCC satisfies structural recursion | Automatic cost derivation |
+| Scenario                                  | Handling                                                        |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| SCC satisfies structural recursion        | Automatic cost derivation                                       |
 | SCC does not satisfy structural recursion | All functions in SCC need explicit `cost [...]` or `@unbounded` |
-| Any function in SCC is `@unbounded` | Entire SCC treated as `@unbounded` |
+| Any function in SCC is `@unbounded`       | Entire SCC treated as `@unbounded`                              |
 
 ### 4.9 Decidability proof sketch
 
@@ -746,14 +758,14 @@ With nesting depth d bounded by a constant (default ≤ 8), this produces at mos
 
 Verification rules for max/min at the top level:
 
-| Form | Rule | Condition |
-|------|------|-----------|
-| `max(A, B) ≤ C` | Verify A ≤ C **and** B ≤ C | Necessary and sufficient |
-| `min(A, B) ≤ C` | Verify A ≤ C **or** B ≤ C | Sufficient (conservative) |
-| `C ≤ max(A, B)` | Verify C ≤ A **or** C ≤ B | Sufficient (conservative) |
-| `C ≤ min(A, B)` | Verify C ≤ A **and** C ≤ B | Necessary and sufficient |
+| Form            | Rule                       | Condition                 |
+| --------------- | -------------------------- | ------------------------- |
+| `max(A, B) ≤ C` | Verify A ≤ C **and** B ≤ C | Necessary and sufficient  |
+| `min(A, B) ≤ C` | Verify A ≤ C **or** B ≤ C  | Sufficient (conservative) |
+| `C ≤ max(A, B)` | Verify C ≤ A **or** C ≤ B  | Sufficient (conservative) |
+| `C ≤ min(A, B)` | Verify C ≤ A **and** C ≤ B | Necessary and sufficient  |
 
-**Step 2: Normal form conversion.** A *poly-log monomial* has the form:
+**Step 2: Normal form conversion.** A _poly-log monomial_ has the form:
 
 ```text
 t = c × n₁^a₁ × ... × nₖ^aₖ × log(n₁)^b₁ × ... × log(nₖ)^bₖ
@@ -762,7 +774,7 @@ t = c × n₁^a₁ × ... × nₖ^aₖ × log(n₁)^b₁ × ... × log(nₖ)^b�
 where c is a positive N0 coefficient, and each ai and bi is in N0. We write
 this as the triple **(c, a_bar, b_bar)**.
 
-The *normal form* of a CostExpr is a finite sum of poly-log monomials. Conversion algorithm NF:
+The _normal form_ of a CostExpr is a finite sum of poly-log monomials. Conversion algorithm NF:
 
 ```text
 NF(c)           = {(c, 0̄, 0̄)}
@@ -787,7 +799,7 @@ After conversion, merge like terms: monomials with the same (ā, b̄) have their
 
 **Step 3: Asymptotic dominance check.**
 
-**Definition 4.2 (Asymptotic dominance).** Monomial t₁ = (c₁, ā₁, b̄₁) is *dominated* by t₂ = (c₂, ā₂, b̄₂), written t₁ ≼ t₂, iff:
+**Definition 4.2 (Asymptotic dominance).** Monomial t₁ = (c₁, ā₁, b̄₁) is _dominated_ by t₂ = (c₂, ā₂, b̄₂), written t₁ ≼ t₂, iff:
 
 ```text
 t₁ ≼ t₂  ⟺  ā₁ < ā₂  (componentwise ≤ and ≠)
@@ -818,7 +830,7 @@ space is T^k, feasible for k <= 5.
 
 **Theorem 4.2 (Polynomial-time decidability).** The asymptotic comparison of CostExprs is decidable in O(n⁵) time, where n = |C| + |B|.
 
-*Proof.* Let n = |C| + |B| (total AST nodes) and k = |V| (variable count).
+_Proof._ Let n = |C| + |B| (total AST nodes) and k = |V| (variable count).
 
 1. **max/min lifting**: O(n) with d bounded by a constant.
 2. **Normal form conversion**: Multiplication distributes monomials (Cartesian product). An expression of size n yields at most O(n²) monomials. Logarithm simplification: O(n) substitutions. Like-term merging: sort in O(n² log n).
@@ -835,7 +847,7 @@ This is in **P** (polynomial-time complexity class). ∎
 threshold T in N0 such that for all non-negative Index assignments n_bar with
 min(n_bar) >= T, we have C(n_bar) <= B(n_bar).
 
-*Proof sketch.*
+_Proof sketch._
 
 1. Normal form conversion preserves asymptotic equivalence (logarithm simplifications introduce only constant-factor errors).
 2. If every monomial in NF(C) is dominated by some monomial in NF(B):
@@ -948,12 +960,12 @@ extern fn openssl_encrypt[N: Index](data: Bytes[N], key: Key) -> Bytes[N] ! Cryp
 
 **Rules for extern fn cost:**
 
-| Rule | Description |
-|------|-------------|
-| Required declaration | `extern fn` without a `cost` clause is treated as `@unbounded` |
-| No body analysis | The compiler trusts the declared cost — no verification is possible |
-| Contagious unbounded | An `@unbounded` extern fn follows the same contagion rules as any `@unbounded` function |
-| Variable binding | Cost variables are Index parameters such as `N`; ordinary runtime values do not bind into CostExpr |
+| Rule                 | Description                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| Required declaration | `extern fn` without a `cost` clause is treated as `@unbounded`                                     |
+| No body analysis     | The compiler trusts the declared cost — no verification is possible                                |
+| Contagious unbounded | An `@unbounded` extern fn follows the same contagion rules as any `@unbounded` function            |
+| Variable binding     | Cost variables are Index parameters such as `N`; ordinary runtime values do not bind into CostExpr |
 
 This ensures FFI boundaries maintain cost transparency — external code cannot silently introduce cost black holes.
 
@@ -1087,7 +1099,7 @@ CostExpr is serialized as a JSON AST for tool consumption:
 {
   "type": "Mul",
   "left": { "type": "Var", "name": "n" },
-      "right": { "type": "Log", "arg": { "type": "IndexVar", "name": "N" } }
+  "right": { "type": "Log", "arg": { "type": "IndexVar", "name": "N" } }
 }
 ```
 
@@ -1105,14 +1117,14 @@ The Language Server Protocol exposes:
 
 ### New diagnostic categories
 
-| Code | Severity | Trigger |
-|------|----------|---------|
-| `cost-exceeded` | Error | Inferred cost exceeds declared bound |
-| `unbounded-cost` | Warning | Recursive function with no detectable cost bound and no `@unbounded` annotation |
-| `unbounded-function` | Warning | Function marked `@unbounded` |
-| `unbounded-in-bounded-context` | Error | `@unbounded` function called from `cost [...]` context without `with_cost_limit` |
-| `unverified-cost-bound` | Warning | `cost [...]` declared but compiler cannot verify one or more slots |
-| `cost-effect-conflict` | Error | `uses []` (pure) declared but W > 0 inferred |
+| Code                           | Severity | Trigger                                                                          |
+| ------------------------------ | -------- | -------------------------------------------------------------------------------- |
+| `cost-exceeded`                | Error    | Inferred cost exceeds declared bound                                             |
+| `unbounded-cost`               | Warning  | Recursive function with no detectable cost bound and no `@unbounded` annotation  |
+| `unbounded-function`           | Warning  | Function marked `@unbounded`                                                     |
+| `unbounded-in-bounded-context` | Error    | `@unbounded` function called from `cost [...]` context without `with_cost_limit` |
+| `unverified-cost-bound`        | Warning  | `cost [...]` declared but compiler cannot verify one or more slots               |
+| `cost-effect-conflict`         | Error    | `uses []` (pure) declared but W > 0 inferred                                     |
 
 ### Example diagnostics
 
@@ -1165,7 +1177,7 @@ The cost system and effect system form a cross-validation network. If a function
 
 4. **`@unbounded` contagion.** One `@unbounded` function deep in the call chain can force many callers to also become `@unbounded`, potentially undermining the cost system's value. Mitigation: `with_cost_limit` isolation.
 
-5. **No runtime validation (yet).** The system currently has no mechanism to verify that compile-time cost predictions match actual runtime performance. Cost drift detection is deferred to future work.
+5. **No built-in runtime proof of static predictions.** Compile-time costs bound the abstract accounting model (`compute`, `alloc`, `io`, `parallel`); they are not automatically certified against wall-clock or host-resource measurements. Closing that gap belongs to tooling and profiling outside this SEP's normative scope.
 
 6. **Multi-variable partial order.** With multiple variables, some monomials are incomparable (e.g., `n*m` vs `n²`), leading to conservative FAIL. Developers must restructure declarations.
 
@@ -1321,14 +1333,14 @@ With k > 1 variables, the comparison uses componentwise partial ordering on expo
 
 ### Limitations
 
-| Limitation | Description | Workaround |
-|---|---|---|
-| No conditional cost | Cannot express "if sorted then O(n), else O(n²)" | Use `max(n, n^2) = n^2` (conservative) |
-| No amortized analysis | Cannot express "amortized O(1)" | Use worst-case cost |
-| No probabilistic analysis | Cannot express "expected O(n log n)" | Use worst-case cost |
-| No subtraction / division | Cannot exactly express `n*(n-1)/2` | Use `n^2` upper bound |
-| max/min nesting depth bounded | Deep nesting causes expression blowup | Compiler limits depth (default 8) |
-| Multi-variable incomparability | Partial order on exponent vectors can be inconclusive | Restructure declaration or use `max` |
+| Limitation                     | Description                                           | Workaround                             |
+| ------------------------------ | ----------------------------------------------------- | -------------------------------------- |
+| No conditional cost            | Cannot express "if sorted then O(n), else O(n²)"      | Use `max(n, n^2) = n^2` (conservative) |
+| No amortized analysis          | Cannot express "amortized O(1)"                       | Use worst-case cost                    |
+| No probabilistic analysis      | Cannot express "expected O(n log n)"                  | Use worst-case cost                    |
+| No subtraction / division      | Cannot exactly express `n*(n-1)/2`                    | Use `n^2` upper bound                  |
+| max/min nesting depth bounded  | Deep nesting causes expression blowup                 | Compiler limits depth (default 8)      |
+| Multi-variable incomparability | Partial order on exponent vectors can be inconclusive | Restructure declaration or use `max`   |
 
 ---
 
@@ -1364,15 +1376,15 @@ WARNING [cost-drift] function merge_sort: actual cost exceeds prediction.
 
 ## Design decisions
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| Recursion analysis tiers | 3 tiers (auto + declarative + escape) | Balances automation with expressiveness; ~90% coverage |
-| Structural recursion detection | Syntactic parameter-decreasing check | Simple, reliable, O(\|call_graph\|) complexity |
-| Verification failure handling | Warning, not error | Gradual adoption; does not block development |
-| `@unbounded` semantics | Contagious + isolatable via `with_cost_limit` | Ensures cost information propagates while providing an escape path |
-| `decreases` clause | Optional | Compiler auto-derives in most cases; manual only when needed |
-| Mutual recursion | SCC-based whole-group analysis | Natural fit with call-graph analysis |
-| Higher-order function cost | Compiler built-in formulas | No loops → HOFs are the only iteration mechanism; must be built-in |
+| Decision                       | Choice                                        | Rationale                                                          |
+| ------------------------------ | --------------------------------------------- | ------------------------------------------------------------------ |
+| Recursion analysis tiers       | 3 tiers (auto + declarative + escape)         | Balances automation with expressiveness; ~90% coverage             |
+| Structural recursion detection | Syntactic parameter-decreasing check          | Simple, reliable, O(\|call_graph\|) complexity                     |
+| Verification failure handling  | Warning, not error                            | Gradual adoption; does not block development                       |
+| `@unbounded` semantics         | Contagious + isolatable via `with_cost_limit` | Ensures cost information propagates while providing an escape path |
+| `decreases` clause             | Optional                                      | Compiler auto-derives in most cases; manual only when needed       |
+| Mutual recursion               | SCC-based whole-group analysis                | Natural fit with call-graph analysis                               |
+| Higher-order function cost     | Compiler built-in formulas                    | No loops → HOFs are the only iteration mechanism; must be built-in |
 
 ---
 

@@ -31,15 +31,15 @@ representation. Five major passes (lex, parse, resolve+desugar,
 typecheck+capcheck+costcheck, codegen) transform source programs through these
 layers.
 
-Incremental compilation is achieved through the **salsa** framework with a
+Incremental compilation is achieved through demand-driven memoized computation with a
 two-tier content-addressed hashing strategy: **sig hash** (computed at the
 Resolve layer) controls downstream recompilation, and **impl hash** (computed at
 the TypeCheck layer) controls codegen caching. A **watch mode** provides
 real-time diagnostics via human-readable terminal output or machine-consumable
 NDJSON events.
 
-The Proof-of-Concept (PoC) phase uses a tree-walking interpreter; Cranelift
-codegen is deferred to the prototype phase.
+An initial implementation may use a tree-walking interpreter; native code
+generation is deferred to a later stage.
 
 ---
 
@@ -49,7 +49,7 @@ A language that targets both human developers and AI agents as first-class users
 needs a compiler whose architecture is:
 
 1. **Transparent** — every compilation stage produces an observable, queryable
-   representation so that diagnostics can pinpoint *exactly* what went wrong,
+   representation so that diagnostics can pinpoint _exactly_ what went wrong,
    where, and why.
 2. **Incremental** — developers and agents iterate rapidly; the compiler must
    recompile only what changed, propagating invalidation no further than
@@ -142,28 +142,20 @@ $ spore watch src/main.sp
 
 ### Error output modes
 
-| Mode | Flag | Audience | Contract |
-|------|------|----------|----------|
-| **Default** | *(none)* | Developers | Human-readable projection of the canonical Diagnostic IR |
+| Mode        | Flag        | Audience                            | Contract                                                                     |
+| ----------- | ----------- | ----------------------------------- | ---------------------------------------------------------------------------- |
+| **Default** | _(none)_    | Developers                          | Human-readable projection of the canonical Diagnostic IR                     |
 | **Verbose** | `--verbose` | Developers debugging complex errors | Default projection plus optional analysis detail not required by the base IR |
-| **JSON** | `--json` | CI/CD, scripts, LSP, agents | Machine-readable projection of the canonical Diagnostic IR |
+| **JSON**    | `--json`    | CI/CD, scripts, LSP, agents         | Machine-readable projection of the canonical Diagnostic IR                   |
 
 The architectural target is one shared Diagnostic IR with multiple projections.
 `Default` and `--json` are two renderings of the same diagnostics; `--verbose`
 adds extra analysis detail on top of that shared model rather than defining a
 separate protocol.
 
-> **Current implementation status (2026-04):**
->
-> - the shared diagnostics direction is no longer hypothetical: CLI JSON, LSP,
->   and hole-reporting surfaces are being aligned as projections over the same
->   compiler-facing model
-> - `sporec holes FILE --json` and `sporec query-hole FILE ?name --json` already
->   expose a shared typed-hole machine protocol
-> - `spore watch --json` already emits machine-readable `compile_result` and
->   `hole_graph_update` events
-> - the remaining work is freezing the minimal canonical field set and layering
->   richer watch / auto-fix transports without inventing parallel schemas
+> The shared diagnostics direction is the design target: CLI JSON, LSP,
+> and hole-reporting surfaces should be projections over the same
+> compiler-facing model.
 
 ---
 
@@ -222,12 +214,12 @@ Source Text (.sp files)
     ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Pass 5: CODEGEN                                                        │
-│  TypedHIR → Cranelift IR → Native Code                                  │
-│  ─ Cranelift IR serves as LIR (no separate low-level IR)                │
+│  TypedHIR → Native Code                                              │
+│  ─ Codegen backend serves as LIR (no separate low-level IR)            │
 │  ─ Function-level granularity (fits content-addressed caching)          │
 │  ─ Tail-call optimization (TCO) applied here                            │
 │  ─ Pattern matching lowered to branches/jumps                           │
-│  ─ [PoC phase: tree-walking interpreter instead]                        │
+│  ─ Initial implementation may use tree-walking interpreter              │
 └──────────────────────────────────────────────────────────────────────────┘
     │
     ▼
@@ -252,25 +244,14 @@ The diagnostics architecture is split into three layers:
 
 This separation is intentional:
 
-- `thiserror` belongs at crate boundaries and implementation-facing error enums
-- `ariadne` belongs only to the human-rendering layer
-- the core compiler should not depend on terminal-formatting concerns
+- Implementation-facing error types belong at crate boundaries
+- Terminal-formatting belongs only to the human-rendering layer
+- The core compiler should not depend on terminal-formatting concerns
 - JSON and LSP should be derived from the same IR, not maintained as parallel
   ad hoc structures
 
-**Current implementation status (2026-04):**
-
-- parser, type checking, and module loading already expose typed diagnostic
-  producers
-- JSON, LSP, and hole-reporting are no longer separate greenfield designs; they
-  already have machine-readable surfaces and now need convergence rather than
-  reinvention
-- some crate boundaries still use `Result<_, String>` or `Vec<String>`, so the
-  migration is not finished
-
-The next diagnostics migration step should finish converging those remaining
-stringly boundaries on a shared `sporec-diagnostics` crate without regressing the
-working JSON/LSP/hole surfaces that already exist.
+The diagnostics architecture aims for a shared `Diagnostic` IR crate that feeds
+all renderers (human CLI, JSON, LSP, and future watch/event-stream transports).
 
 ### IR layers
 
@@ -320,12 +301,12 @@ The Resolve pass performs:
 
 The Desugar pass (merged into Resolve) canonicalizes all syntactic sugar:
 
-| Sugar | Desugared form |
-|-------|---------------|
-| `a \|> f(b)` | `f(a, b)` |
-| `expr?` | `match expr { Ok(v) => v, Err(e) => return Err(e.into()) }` |
-| `f"hello {name}"` | `InterpolatedStr([Literal("hello "), Expr(name)])` |
-| `t"hello {name}"` | `Template([Literal("hello "), Interpolation(name)])` |
+| Sugar             | Desugared form                                              |
+| ----------------- | ----------------------------------------------------------- |
+| `a \|> f(b)`      | `f(a, b)`                                                   |
+| `expr?`           | `match expr { Ok(v) => v, Err(e) => return Err(e.into()) }` |
+| `f"hello {name}"` | `InterpolatedStr([Literal("hello "), Expr(name)])`          |
+| `t"hello {name}"` | `Template([Literal("hello "), Interpolation(name)])`        |
 
 **sig hash is computed at this layer.** It covers:
 
@@ -344,17 +325,17 @@ the input to codegen.
 
 The unified TypeCheck pass performs:
 
-| Sub-pass | Responsibility |
-|----------|---------------|
-| **Type inference** | Bidirectional: signatures fully annotated, function bodies inferred |
-| **Trait resolution** | Trait/Effect resolution, associated types, GAT instantiation |
-| **Const generics** | Evaluation of compile-time constant generic parameters |
-| **Exhaustiveness** | Verify match expressions cover all variants |
-| **Error sets** | Propagation and consistency of `! ErrorType` declarations |
-| **Refinement types** | L0 decidable predicates + L1 abstract interpretation propagation |
-| **CapCheck** | Function body effect usage ⊆ declared `uses` set; module ceiling check |
-| **CostCheck** | Abstract interpretation of 4D cost vector: `compute(op) + alloc(cell) + io(call) + parallel(lane)`; verify ≤ declared bound |
-| **Hole reports** | Generate full context: type, available bindings, effect set, cost budget, candidate functions |
+| Sub-pass             | Responsibility                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Type inference**   | Bidirectional: signatures fully annotated, function bodies inferred                                                         |
+| **Trait resolution** | Trait/Effect resolution, associated types, GAT instantiation                                                                |
+| **Const generics**   | Evaluation of compile-time constant generic parameters                                                                      |
+| **Exhaustiveness**   | Verify match expressions cover all variants                                                                                 |
+| **Error sets**       | Propagation and consistency of `! ErrorType` declarations                                                                   |
+| **Refinement types** | L0 decidable predicates + L1 abstract interpretation propagation                                                            |
+| **CapCheck**         | Function body effect usage ⊆ declared `uses` set; module ceiling check                                                      |
+| **CostCheck**        | Abstract interpretation of 4D cost vector: `compute(op) + alloc(cell) + io(call) + parallel(lane)`; verify ≤ declared bound |
+| **Hole reports**     | Generate full context: type, available bindings, effect set, cost budget, candidate functions                               |
 
 Effect checking is merged into TypeCheck because `Effect = Trait` in
 Spore — effect resolution shares the same infrastructure as trait resolution.
@@ -375,7 +356,7 @@ There is **no separate low-level IR**. Cranelift IR serves as the LIR:
 - Pattern matching is lowered to branch/jump instructions during codegen
 - Tail-call optimization (TCO) is applied during the TypedHIR → Cranelift
   translation
-- In the PoC phase, a tree-walking interpreter replaces Cranelift; the codegen
+- An initial implementation may use a tree-walking interpreter; the codegen
   pass is a clean abstraction boundary
 
 ### Design rationale for IR layer count
@@ -398,37 +379,16 @@ does not have.
 
 ### Incremental compilation
 
-#### salsa integration
+#### Incremental compilation strategy
 
-Spore uses the [salsa](https://github.com/salsa-rs/salsa) framework for
-demand-driven, memoized, incremental computation. Each compilation pass is a
-salsa-tracked function:
+The compiler uses demand-driven incremental computation. Each compilation pass is memoized as a tracked query with automatic invalidation on input changes. The pass signatures are:
 
-```rust
-#[salsa::input]
-struct SourceFile {
-    #[return_ref]
-    path: PathBuf,
-    #[return_ref]
-    contents: String,
-}
-
-#[salsa::tracked]
-fn lex(db: &dyn Db, file: SourceFile) -> TokenStream { ... }
-
-#[salsa::tracked]
-fn parse(db: &dyn Db, tokens: TokenStream) -> Ast { ... }
-
-#[salsa::tracked]
-fn resolve(db: &dyn Db, ast: Ast) -> Hir { ... }
-// side product: sig_hash
-
-#[salsa::tracked]
-fn type_check(db: &dyn Db, hir: Hir) -> TypedHir { ... }
-// side product: impl_hash, hole_reports, diagnostics
-
-#[salsa::tracked]
-fn codegen(db: &dyn Db, typed_hir: TypedHir) -> CompiledModule { ... }
+```text
+lex(file) → TokenStream
+parse(tokens) → Ast
+resolve(ast) → Hir         // side product: sig_hash
+type_check(hir) → TypedHir  // side product: impl_hash, hole_reports, diagnostics
+codegen(typed_hir) → CompiledModule
 ```
 
 #### Two-tier hash strategy
@@ -462,7 +422,7 @@ The incremental compilation strategy relies on two content-addressed hashes:
 ```
 
 **sig hash** covers: exported type/function signatures, effect requirements,
-cost annotations. It does *not* cover: function bodies, private definitions,
+cost annotations. It does _not_ cover: function bodies, private definitions,
 comments, internal hole states.
 
 **impl hash** covers: the fully type-checked module content. Partial functions
@@ -474,25 +434,25 @@ contracts can be edited without changing the callable API. It is also separate
 from `impl hash` so test metadata can be tracked even when a body is still
 partial.
 
-| Change | Signature hash | Spec hash | Required approval |
-|--------|----------------|-----------|-------------------|
-| Add a `spec` block where none existed | unchanged | changed | `--permit-spec` |
-| Add, modify, or remove an `example` or `law` | unchanged | changed | `--permit-spec` |
-| Change a callable signature clause | changed | unchanged unless `spec` also changed | `--permit` |
+| Change                                       | Signature hash | Spec hash                            | Required approval |
+| -------------------------------------------- | -------------- | ------------------------------------ | ----------------- |
+| Add a `spec` block where none existed        | unchanged      | changed                              | `--permit-spec`   |
+| Add, modify, or remove an `example` or `law` | unchanged      | changed                              | `--permit-spec`   |
+| Change a callable signature clause           | changed        | unchanged unless `spec` also changed | `--permit`        |
 
 Incremental scenarios:
 
-| Scenario | Example | What happens |
-|----------|---------|-------------|
-| **A: impl hash unchanged** | Only a comment changed | Skip entirely (<1ms) |
-| **B: impl only** | Changed function body, same signature | Recompile this module, skip downstream |
-| **C: sig changed** | Changed function parameter type | Recompile this module + cascade to direct dependents |
+| Scenario                   | Example                               | What happens                                         |
+| -------------------------- | ------------------------------------- | ---------------------------------------------------- |
+| **A: impl hash unchanged** | Only a comment changed                | Skip entirely (<1ms)                                 |
+| **B: impl only**           | Changed function body, same signature | Recompile this module, skip downstream               |
+| **C: sig changed**         | Changed function parameter type       | Recompile this module + cascade to direct dependents |
 
 #### Dependency graph traversal
 
 When a sig hash changes, the compiler walks the dependency graph in topological
 order. At each level, it recompiles affected modules in parallel, then checks
-whether *their* sig hashes changed before propagating further. This ensures
+whether _their_ sig hashes changed before propagating further. This ensures
 minimal recompilation:
 
 ```text
@@ -566,9 +526,9 @@ t=100ms  Begin incremental compile {A, B, C}
 
 Current stable events:
 
-| Event | Trigger | Data |
-|---|---|---|
-| `compile_result` | Each incremental compilation cycle | File path, status (`ok`/`error`), diagnostics payload, timestamp |
+| Event               | Trigger                                         | Data                                                                               |
+| ------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `compile_result`    | Each incremental compilation cycle              | File path, status (`ok`/`error`), diagnostics payload, timestamp                   |
 | `hole_graph_update` | After a compile cycle that still contains holes | Hole-count summary: `holes_total`, `filled_this_cycle`, `ready_to_fill`, `blocked` |
 
 This summary stream is enough for save-compile feedback loops and for agents that pair watch mode with the richer batch hole commands (`sporec holes FILE --json`, `sporec query-hole FILE ?name --json`).
@@ -579,12 +539,12 @@ Future revisions may layer more detailed events — for example per-hole updates
 
 Watch mode **never exits** (except on Ctrl+C). Recovery behavior:
 
-| Situation | Strategy |
-|-----------|----------|
+| Situation           | Strategy                                                    |
+| ------------------- | ----------------------------------------------------------- |
 | Syntax / type error | Report diagnostic, retain last successful compilation state |
-| Circular dependency | Report error, interrupt affected module subtree |
-| File deleted | Remove from dependency graph, mark dependents as errored |
-| Compiler panic | Catch and report as internal error, continue watching |
+| Circular dependency | Report error, interrupt affected module subtree             |
+| File deleted        | Remove from dependency graph, mark dependents as errored    |
+| Compiler panic      | Catch and report as internal error, continue watching       |
 
 #### Complete watch terminal output
 
@@ -764,16 +724,18 @@ LSP diagnostics are published directly from the compiler's shared diagnostics pi
   "method": "textDocument/publishDiagnostics",
   "params": {
     "uri": "file:///project/src/auth.sp",
-    "diagnostics": [{
-      "range": {
-        "start": { "line": 22, "character": 9 },
-        "end": { "line": 22, "character": 24 }
-      },
-      "severity": 1,
-      "code": "E0301",
-      "source": "spore",
-      "message": "type mismatch: expected `Token`, found `Str`"
-    }]
+    "diagnostics": [
+      {
+        "range": {
+          "start": { "line": 22, "character": 9 },
+          "end": { "line": 22, "character": 24 }
+        },
+        "severity": 1,
+        "code": "E0301",
+        "source": "spore",
+        "message": "type mismatch: expected `Token`, found `Str`"
+      }
+    ]
   }
 }
 ```
@@ -801,14 +763,14 @@ A custom `spore/holeUpdate` notification is a **future** extension, not the curr
 The `spore` binary is built on a curated set of Rust crates chosen for
 correctness, minimal footprint, and future Spore self-hosting feasibility:
 
-| Crate | Purpose | Bootstrap path |
-|-------|---------|---------------|
-| `bpaf` | Argument parsing (derive-based) | Parser combinator — natural fit for Spore |
-| `ariadne` | Diagnostic rendering (span-based) | Thin wrapper on ANSI formatting |
-| `owo-colors` | Terminal color output | Pure ANSI escape sequences |
-| `notify` | File system watching (`watch` mode) | System call wrapper |
-| `serde_json` | JSON serialization (`--json` flag) | Spore will need JSON support |
-| `tracing` | Structured logging (`--verbose`) | Replaceable with print-based logging |
+| Crate        | Purpose                             | Bootstrap path                            |
+| ------------ | ----------------------------------- | ----------------------------------------- |
+| `bpaf`       | Argument parsing (derive-based)     | Parser combinator — natural fit for Spore |
+| `ariadne`    | Diagnostic rendering (span-based)   | Thin wrapper on ANSI formatting           |
+| `owo-colors` | Terminal color output               | Pure ANSI escape sequences                |
+| `notify`     | File system watching (`watch` mode) | System call wrapper                       |
+| `serde_json` | JSON serialization (`--json` flag)  | Spore will need JSON support              |
+| `tracing`    | Structured logging (`--verbose`)    | Replaceable with print-based logging      |
 
 **Self-hosting consideration:** Every crate above wraps a concept that Spore
 must eventually implement natively (parsing, formatting, file I/O, JSON). The
@@ -907,9 +869,7 @@ make richer analysis payloads an explicit later layer.
       "message": "callee expects `Money` here"
     }
   ],
-  "notes": [
-    "enclosing function `charge_customer` uses `PaymentGateway`"
-  ],
+  "notes": ["enclosing function `charge_customer` uses `PaymentGateway`"],
   "help": "try `Money.from_string(\"fifty dollars\")`",
   "related": []
 }
@@ -922,16 +882,18 @@ not part of the minimal stable contract.
 
 #### Diagnostic field requirements
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `code` | string | **required** | Stable diagnostic code, for example `E0301` |
-| `severity` | string | **required** | `error`, `warning`, or `note` |
-| `message` | string | **required** | Human-readable headline |
-| `primary_span` | object \| null | **required** | Primary source location; `null` only for global diagnostics |
-| `secondary_labels` | array | optional | Additional labeled spans related to the same diagnostic |
-| `notes` | string[] | optional | Supplemental context lines |
-| `help` | string | optional | One actionable fix hint or next step |
-| `related` | array | optional | References to related diagnostics or locations |
+| Field              | Type           | Minimal canonical | Required     | Description                                                 |
+| ------------------ | -------------- | :---------------: | ------------ | ----------------------------------------------------------- |
+| `code`             | string         |         ✓         | **required** | Stable diagnostic code, for example `E0301`                 |
+| `severity`         | string         |         ✓         | **required** | `error`, `warning`, or `note`                               |
+| `message`          | string         |         ✓         | **required** | Human-readable headline                                     |
+| `primary_span`     | object \| null |         ✓         | **required** | Primary source location; `null` only for global diagnostics |
+| `secondary_labels` | array          |                   | optional     | Additional labeled spans related to the same diagnostic     |
+| `notes`            | string[]       |                   | optional     | Supplemental context lines                                  |
+| `help`             | string         |                   | optional     | One actionable fix hint or next step                        |
+| `related`          | array          |                   | optional     | References to related diagnostics or locations              |
+
+The **minimal canonical** fields (`code`, `severity`, `message`, `primary_span`) form the stable machine contract. The remaining fields are extension fields that may be absent without breaking consumers.
 
 ```json
 {
@@ -975,26 +937,24 @@ not part of the minimal stable contract.
 }
 ```
 
-> **Current implementation status (2026-04):**
->
-> The shared-model architecture is now the right description of the codebase: hole
-> commands already expose a shared typed-hole protocol, and CLI JSON plus LSP are
-> being treated as projections over the same diagnostics pipeline. The remaining
-> work is to finish freezing the minimal canonical field set and to extend richer
-> analysis/watch transports without reintroducing command-private schemas.
+> The shared-model architecture is the design target: hole
+> commands expose a shared typed-hole protocol, and CLI JSON plus LSP are
+> treated as projections over the same diagnostics pipeline. The remaining
+> design work is freezing the minimal canonical field set and extending richer
+> analysis/watch transports without introducing command-private schemas.
 
 #### Error code system
 
 All diagnostics carry categorized codes:
 
-| Prefix | Category | Examples |
-|--------|----------|----------|
-| `E0xxx` | Type errors | type mismatch, missing field, arity error |
-| `W0xxx` | Warnings | unused variable, redundant pattern, shadowing |
-| `C0xxx` | Effect violations | undeclared effect, exceeding ceiling |
-| `K0xxx` | Cost violations | budget exceeded, unbounded call |
-| `H0xxx` | Hole diagnostics | hole report, partial function, type conflict |
-| `M0xxx` | Module errors | circular dependency, visibility violation |
+| Prefix  | Category          | Examples                                      |
+| ------- | ----------------- | --------------------------------------------- |
+| `E0xxx` | Type errors       | type mismatch, missing field, arity error     |
+| `W0xxx` | Warnings          | unused variable, redundant pattern, shadowing |
+| `C0xxx` | Effect violations | undeclared effect, exceeding ceiling          |
+| `K0xxx` | Cost violations   | budget exceeded, unbounded call               |
+| `H0xxx` | Hole diagnostics  | hole report, partial function, type conflict  |
+| `M0xxx` | Module errors     | circular dependency, visibility violation     |
 
 Every code is queryable: `sporec explain E0301` prints a detailed explanation
 with common causes, examples, and fix strategies.
@@ -1032,14 +992,14 @@ $ sporec explain E0301
 
 Target latencies (aspirational, not hard guarantees):
 
-| Operation | Target | Notes |
-|-----------|--------|-------|
-| Single module recompilation | < 100ms | Type check + effect + cost |
-| Dependency graph traversal | < 10ms | Topological sort of module DAG |
-| Hash computation (single module) | < 5ms | blake3 of module content |
-| Full project initial analysis (~100 modules) | < 5s | Cold start, parallel compilation |
-| End-to-end latency (file save → diagnostics) | < 200ms | Including 100ms debounce |
-| Hole graph update | < 50ms | Incremental hole summary / `HoleGraphUpdate` regeneration |
+| Operation                                    | Target  | Notes                                                     |
+| -------------------------------------------- | ------- | --------------------------------------------------------- |
+| Single module recompilation                  | < 100ms | Type check + effect + cost                                |
+| Dependency graph traversal                   | < 10ms  | Topological sort of module DAG                            |
+| Hash computation (single module)             | < 5ms   | blake3 of module content                                  |
+| Full project initial analysis (~100 modules) | < 5s    | Cold start, parallel compilation                          |
+| End-to-end latency (file save → diagnostics) | < 200ms | Including 100ms debounce                                  |
+| Hole graph update                            | < 50ms  | Incremental hole summary / `HoleGraphUpdate` regeneration |
 
 **Cache strategy:** Watch mode maintains in-memory caches for hashes, dependency graph, compilation artifacts, and hole state. Persistence to disk is not required for the current design but is a future option.
 
@@ -1174,7 +1134,7 @@ analysis gate:
 
 The incremental compilation system eliminates the most frustrating part of the
 edit-compile-test loop: unnecessary waiting. When a developer changes a function
-body without altering its signature, *only that module* is recompiled. Downstream
+body without altering its signature, _only that module_ is recompiled. Downstream
 modules are untouched. In practice this means sub-100ms feedback for most edits.
 
 ### Actionable diagnostics
@@ -1250,14 +1210,14 @@ Diagnostic IR.
 
 #### Agent mode selection
 
-| Scenario | Recommended Mode | Rationale |
-|----------|-----------------|-----------|
-| Agent filling holes | `spore check --json` + hole JSON commands | Stable machine-readable diagnostics plus hole-specific context |
-| Agent debugging compiler error | `--json` | Consume code/severity/message/spans/notes/help without parsing text |
-| Agent in CI pipeline | `--json` | Stable machine-readable contract |
-| Human scanning build output | Default | Concise, color-coded, glanceable |
-| Human debugging inference failure | `--verbose` | Richer renderer over the same base diagnostics |
-| IDE / LSP client | LSP adapter over Diagnostic IR | Same canonical fields, editor-specific transport |
+| Scenario                          | Recommended Mode                          | Rationale                                                           |
+| --------------------------------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| Agent filling holes               | `spore check --json` + hole JSON commands | Stable machine-readable diagnostics plus hole-specific context      |
+| Agent debugging compiler error    | `--json`                                  | Consume code/severity/message/spans/notes/help without parsing text |
+| Agent in CI pipeline              | `--json`                                  | Stable machine-readable contract                                    |
+| Human scanning build output       | Default                                   | Concise, color-coded, glanceable                                    |
+| Human debugging inference failure | `--verbose`                               | Richer renderer over the same base diagnostics                      |
+| IDE / LSP client                  | LSP adapter over Diagnostic IR            | Same canonical fields, editor-specific transport                    |
 
 #### Agent error recovery
 
@@ -1320,21 +1280,18 @@ separate schema.
 
 Target mapping from the canonical Diagnostic IR:
 
-| Diagnostic IR | LSP `Diagnostic` | Notes |
-|---------------|------------------|-------|
-| `severity` | `severity` | `error=1`, `warning=2`, `note=3` |
-| `code` | `code` | direct copy |
-| `message` | `message` | direct copy |
-| `primary_span.range` | `range` | convert 1-indexed line/col to LSP 0-indexed positions |
-| `related` | `relatedInformation` | when representable |
-| `secondary_labels`, `notes`, `help` | `data.spore` | retained even when the base LSP surface cannot render them losslessly |
+| Diagnostic IR                       | LSP `Diagnostic`     | Notes                                                                 |
+| ----------------------------------- | -------------------- | --------------------------------------------------------------------- |
+| `severity`                          | `severity`           | `error=1`, `warning=2`, `note=3`                                      |
+| `code`                              | `code`               | direct copy                                                           |
+| `message`                           | `message`            | direct copy                                                           |
+| `primary_span.range`                | `range`              | convert 1-indexed line/col to LSP 0-indexed positions                 |
+| `related`                           | `relatedInformation` | when representable                                                    |
+| `secondary_labels`, `notes`, `help` | `data.spore`         | retained even when the base LSP surface cannot render them losslessly |
 
-> **Current implementation status (2026-04):**
->
-> The LSP server already publishes diagnostics from the compiler pipeline. The
-> remaining gap is lossless carriage of richer fields such as secondary labels,
-> notes, help, and hole-specific updates once the minimal canonical shape is fully
-> frozen.
+> The LSP server publishes diagnostics from the compiler pipeline. The
+> design goal is lossless carriage of richer fields such as secondary labels,
+> notes, help, and hole-specific updates within the LSP protocol.
 
 ### JSON as the machine projection
 
@@ -1401,16 +1358,16 @@ The `/ | |___^` format connects multi-line spans visually.
 
 #### ANSI color scheme
 
-| Element | Color | ANSI Code |
-|---------|-------|-----------|
-| `error` + error code | Red (bold) | `\x1b[1;31m` |
-| `warning` + warning code | Yellow (bold) | `\x1b[1;33m` |
-| `note` | Blue (bold) | `\x1b[1;34m` |
-| `help` | Green (bold) | `\x1b[1;32m` |
-| `hint` | Cyan (bold) | `\x1b[1;36m` |
-| Line numbers | Bright blue | `\x1b[94m` |
-| Source text | Default | — |
-| Underline (`^^^`) | Matches severity color | — |
+| Element                  | Color                  | ANSI Code    |
+| ------------------------ | ---------------------- | ------------ |
+| `error` + error code     | Red (bold)             | `\x1b[1;31m` |
+| `warning` + warning code | Yellow (bold)          | `\x1b[1;33m` |
+| `note`                   | Blue (bold)            | `\x1b[1;34m` |
+| `help`                   | Green (bold)           | `\x1b[1;32m` |
+| `hint`                   | Cyan (bold)            | `\x1b[1;36m` |
+| Line numbers             | Bright blue            | `\x1b[94m`   |
+| Source text              | Default                | —            |
+| Underline (`^^^`)        | Matches severity color | —            |
 
 Colors are disabled when output is piped (not a TTY) or when `--no-color` is passed. The `--json` mode never includes ANSI codes.
 
@@ -1510,14 +1467,14 @@ help: add a `spec { example "...": ... }` block before the function body
 The compiler employs error recovery to report as many errors as possible per
 compilation rather than stopping at the first:
 
-| Phase | Recovery strategy |
-|-------|------------------|
-| Lexer | Skip to next recognizable token boundary |
-| Parser | Synchronize at statement/declaration boundaries; insert synthetic nodes |
-| Resolve | Mark unresolved names as `ErrorType`, continue checking |
-| TypeCheck | Propagate `ErrorType` without cascading false errors |
-| CapCheck | Report violation but continue checking remaining uses |
-| CostCheck | Report budget exceedance but compute total cost for diagnostics |
+| Phase     | Recovery strategy                                                       |
+| --------- | ----------------------------------------------------------------------- |
+| Lexer     | Skip to next recognizable token boundary                                |
+| Parser    | Synchronize at statement/declaration boundaries; insert synthetic nodes |
+| Resolve   | Mark unresolved names as `ErrorType`, continue checking                 |
+| TypeCheck | Propagate `ErrorType` without cascading false errors                    |
+| CapCheck  | Report violation but continue checking remaining uses                   |
+| CostCheck | Report budget exceedance but compute total cost for diagnostics         |
 
 **Deduplication policy:** when a single root cause produces multiple downstream
 errors, the compiler shows the root error in full and collapses downstream
@@ -1529,125 +1486,125 @@ All diagnostics carry a categorized code. Every code is queryable: `sporec expla
 
 #### E0xxx — Type Errors
 
-| Code | Name | Description |
-|------|------|-------------|
-| `E0101` | missing-field | Struct literal missing a required field |
-| `E0102` | unknown-field | Struct literal contains a field not in the type definition |
-| `E0103` | duplicate-field | Struct literal contains the same field twice |
-| `E0104` | field-type-mismatch | Struct field value type does not match declaration |
-| `E0105` | tuple-length-mismatch | Tuple has wrong number of elements |
-| `E0106` | missing-variant-field | Enum variant constructor missing a field |
-| `E0107` | record-vs-tuple | Used record syntax where tuple expected, or vice versa |
-| `E0108` | non-struct-field-access | Field access on a non-struct type |
-| `E0109` | private-field-access | Accessing a private field from outside the defining module |
-| `E0110` | spread-type-mismatch | Spread operator (`..base`) type does not match struct |
-| `E0201` | arity-mismatch | Function called with wrong number of arguments |
-| `E0202` | named-arg-mismatch | Named argument does not match any parameter |
-| `E0203` | missing-required-arg | Required argument not provided |
-| `E0204` | duplicate-arg | Same argument provided twice |
-| `E0301` | type-mismatch | Expression type incompatible with expected type |
-| `E0302` | return-type-mismatch | Function body returns wrong type |
-| `E0303` | error-type-mismatch | Function raises undeclared error type |
-| `E0304` | if-branch-mismatch | If/else branches have different types |
-| `E0305` | match-arm-mismatch | Match arms have different types |
-| `E0306` | operator-type-error | Operator applied to incompatible types |
-| `E0307` | index-type-error | Non-integer used as index |
-| `E0308` | not-callable | Attempt to call a non-function value |
-| `E0309` | pipe-type-mismatch | Pipe operator left-hand side incompatible with right-hand function |
-| `E0310` | lambda-return-mismatch | Lambda body type does not match expected return |
-| `E0401` | constraint-not-satisfied | Generic type does not satisfy trait constraint |
-| `E0402` | ambiguous-type | Type inference cannot determine a unique type |
-| `E0403` | recursive-type | Infinitely recursive type definition |
-| `E0404` | gat-mismatch | Generic associated type arguments do not match |
-| `E0501` | pattern-exhaustiveness | Match does not cover all variants |
-| `E0502` | pattern-type-mismatch | Pattern type does not match scrutinee type |
-| `E0503` | duplicate-pattern | Same pattern appears twice in match |
-| `E0504` | guard-type-error | Match guard expression is not Bool |
+| Code    | Name                     | Description                                                        |
+| ------- | ------------------------ | ------------------------------------------------------------------ |
+| `E0101` | missing-field            | Struct literal missing a required field                            |
+| `E0102` | unknown-field            | Struct literal contains a field not in the type definition         |
+| `E0103` | duplicate-field          | Struct literal contains the same field twice                       |
+| `E0104` | field-type-mismatch      | Struct field value type does not match declaration                 |
+| `E0105` | tuple-length-mismatch    | Tuple has wrong number of elements                                 |
+| `E0106` | missing-variant-field    | Enum variant constructor missing a field                           |
+| `E0107` | record-vs-tuple          | Used record syntax where tuple expected, or vice versa             |
+| `E0108` | non-struct-field-access  | Field access on a non-struct type                                  |
+| `E0109` | private-field-access     | Accessing a private field from outside the defining module         |
+| `E0110` | spread-type-mismatch     | Spread operator (`..base`) type does not match struct              |
+| `E0201` | arity-mismatch           | Function called with wrong number of arguments                     |
+| `E0202` | named-arg-mismatch       | Named argument does not match any parameter                        |
+| `E0203` | missing-required-arg     | Required argument not provided                                     |
+| `E0204` | duplicate-arg            | Same argument provided twice                                       |
+| `E0301` | type-mismatch            | Expression type incompatible with expected type                    |
+| `E0302` | return-type-mismatch     | Function body returns wrong type                                   |
+| `E0303` | error-type-mismatch      | Function raises undeclared error type                              |
+| `E0304` | if-branch-mismatch       | If/else branches have different types                              |
+| `E0305` | match-arm-mismatch       | Match arms have different types                                    |
+| `E0306` | operator-type-error      | Operator applied to incompatible types                             |
+| `E0307` | index-type-error         | Non-integer used as index                                          |
+| `E0308` | not-callable             | Attempt to call a non-function value                               |
+| `E0309` | pipe-type-mismatch       | Pipe operator left-hand side incompatible with right-hand function |
+| `E0310` | lambda-return-mismatch   | Lambda body type does not match expected return                    |
+| `E0401` | constraint-not-satisfied | Generic type does not satisfy trait constraint                     |
+| `E0402` | ambiguous-type           | Type inference cannot determine a unique type                      |
+| `E0403` | recursive-type           | Infinitely recursive type definition                               |
+| `E0404` | gat-mismatch             | Generic associated type arguments do not match                     |
+| `E0501` | pattern-exhaustiveness   | Match does not cover all variants                                  |
+| `E0502` | pattern-type-mismatch    | Pattern type does not match scrutinee type                         |
+| `E0503` | duplicate-pattern        | Same pattern appears twice in match                                |
+| `E0504` | guard-type-error         | Match guard expression is not Bool                                 |
 
 #### W0xxx — Warnings
 
-| Code | Name | Description |
-|------|------|-------------|
-| `W0101` | unused-variable | Variable bound but never read |
-| `W0102` | unused-import | Module import never referenced |
-| `W0103` | unused-function | Private function never called |
-| `W0104` | unused-type | Private type never referenced |
-| `W0105` | unused-effect | Declared effect never exercised |
-| `W0201` | redundant-pattern | Match arm unreachable due to prior arm |
-| `W0202` | redundant-constraint | Generic constraint implied by another |
-| `W0203` | redundant-parentheses | Unnecessary parentheses around expression |
-| `W0301` | shadowing | Variable shadows binding in outer scope |
-| `W0302` | implicit-discard | Expression result discarded without explicit `_` |
-| `W0401` | missing-spec | Public function has no `spec` block |
+| Code    | Name                  | Description                                      |
+| ------- | --------------------- | ------------------------------------------------ |
+| `W0101` | unused-variable       | Variable bound but never read                    |
+| `W0102` | unused-import         | Module import never referenced                   |
+| `W0103` | unused-function       | Private function never called                    |
+| `W0104` | unused-type           | Private type never referenced                    |
+| `W0105` | unused-effect         | Declared effect never exercised                  |
+| `W0201` | redundant-pattern     | Match arm unreachable due to prior arm           |
+| `W0202` | redundant-constraint  | Generic constraint implied by another            |
+| `W0203` | redundant-parentheses | Unnecessary parentheses around expression        |
+| `W0301` | shadowing             | Variable shadows binding in outer scope          |
+| `W0302` | implicit-discard      | Expression result discarded without explicit `_` |
+| `W0401` | missing-spec          | Public function has no `spec` block              |
 
 #### C0xxx — Effect Violations
 
-| Code | Name | Description |
-|------|------|-------------|
-| `C0101` | undeclared-effect | Function uses effect not in `uses` |
-| `C0102` | exceeds-ceiling | Function `uses` exceeds module ceiling |
-| `C0103` | callee-effect-leak | Calling function whose `uses` exceeds caller's |
-| `C0104` | transitive-effect | Transitive callee introduces undeclared effect |
+| Code    | Name                   | Description                                     |
+| ------- | ---------------------- | ----------------------------------------------- |
+| `C0101` | undeclared-effect      | Function uses effect not in `uses`              |
+| `C0102` | exceeds-ceiling        | Function `uses` exceeds module ceiling          |
+| `C0103` | callee-effect-leak     | Calling function whose `uses` exceeds caller's  |
+| `C0104` | transitive-effect      | Transitive callee introduces undeclared effect  |
 | `C0201` | platform-effect-denied | Package requests effect Platform does not grant |
-| `C0202` | platform-missing | No Platform provides required effect |
-| `C0301` | effect-purity-conflict | `uses []` (pure) function calls impure code |
+| `C0202` | platform-missing       | No Platform provides required effect            |
+| `C0301` | effect-purity-conflict | `uses []` (pure) function calls impure code     |
 
 #### K0xxx — Cost Violations
 
-| Code | Name (implementation) | Short description |
-|------|----------------------|-------------------|
-| `K0101` | cost budget exceeded | Inferred cost exceeds declared bound (warning in current policy) |
-| `K0102` | cost annotation mismatch | Declared `cost [...]` does not match inferred cost |
-| `K0001` | cost budget exceeded | Legacy alias for `K0101` |
-| `K0201` | unbounded recursion detected | Recursion pattern not structurally bounded |
-| `K0202` | loop without bounded iteration | Reserved / iteration-path diagnostic |
-| `K0301` | missing cost on recursive function | Recursive function lacks `cost [...]` where required |
-| `K0302` | invalid cost expression | `cost [...]` parse or shape error |
-| `K0303` | `@unbounded` requires cost | `@unbounded` without `cost [c, a, i, p]` (hard error) |
+| Code    | Name (implementation)              | Short description                                                |
+| ------- | ---------------------------------- | ---------------------------------------------------------------- |
+| `K0101` | cost budget exceeded               | Inferred cost exceeds declared bound (warning in current policy) |
+| `K0102` | cost annotation mismatch           | Declared `cost [...]` does not match inferred cost               |
+| `K0001` | cost budget exceeded               | Legacy alias for `K0101`                                         |
+| `K0201` | unbounded recursion detected       | Recursion pattern not structurally bounded                       |
+| `K0202` | loop without bounded iteration     | Reserved / iteration-path diagnostic                             |
+| `K0301` | missing cost on recursive function | Recursive function lacks `cost [...]` where required             |
+| `K0302` | invalid cost expression            | `cost [...]` parse or shape error                                |
+| `K0303` | `@unbounded` requires cost         | `@unbounded` without `cost [c, a, i, p]` (hard error)            |
 
-Canonical enum and messages: `spore` repo `crates/sporec-typeck/src/error.rs`.
+Canonical error codes and messages are defined in the error code registry.
 
 #### H0xxx — Hole Diagnostics
 
-| Code | Name (implementation) | Short description |
-|------|----------------------|-------------------|
-| `H0101` | typed hole found | Standard hole report entry |
-| `H0102` | hole with inferred type | Hole with type context |
-| `H0103` | hole in return position | Hole where return is expected |
-| `H0201` | hole candidates available | Ranked fills exist |
-| `H0202` | no candidates found | No suitable fill |
-| `H0203` | ambiguous candidates | Multiple close matches |
-| `H0301` | hole depends on another hole | Ordering / dependency |
-| `H0302` | circular hole dependency | Dependency cycle |
+| Code    | Name (implementation)        | Short description             |
+| ------- | ---------------------------- | ----------------------------- |
+| `H0101` | typed hole found             | Standard hole report entry    |
+| `H0102` | hole with inferred type      | Hole with type context        |
+| `H0103` | hole in return position      | Hole where return is expected |
+| `H0201` | hole candidates available    | Ranked fills exist            |
+| `H0202` | no candidates found          | No suitable fill              |
+| `H0203` | ambiguous candidates         | Multiple close matches        |
+| `H0301` | hole depends on another hole | Ordering / dependency         |
+| `H0302` | circular hole dependency     | Dependency cycle              |
 
-Canonical enum: `spore` repo `crates/sporec-typeck/src/error.rs` (SEP tables may lag other `H` variants).
+See §H0xxx — Hole Diagnostics in the error code registry.
 
 #### S0xxx — Spec Diagnostics
 
-| Code | Name | Description |
-|------|------|-------------|
-| `S0101` | spec-example-failed | `example` item evaluated to false |
-| `S0102` | spec-law-counterexample | `law` item produced a counterexample |
-| `S0201` | spec-body-hit-hole | Spec execution reached an unfilled hole |
+| Code    | Name                    | Description                             |
+| ------- | ----------------------- | --------------------------------------- |
+| `S0101` | spec-example-failed     | `example` item evaluated to false       |
+| `S0102` | spec-law-counterexample | `law` item produced a counterexample    |
+| `S0201` | spec-body-hit-hole      | Spec execution reached an unfilled hole |
 
 #### M0xxx — Module Errors
 
-| Code | Name | Description |
-|------|------|-------------|
-| `M0101` | circular-dependency | Modules form a dependency cycle |
-| `M0102` | self-import | Module imports itself |
-| `M0103` | duplicate-module | Two files map to the same module path |
-| `M0201` | visibility-violation | Accessing private or `pub(pkg)` symbol from outside scope |
-| `M0202` | re-export-visibility | Re-exporting with broader visibility than original |
-| `M0203` | orphan-impl | Implementing external trait for external type |
-| `M0204` | alias-chain | `pub alias` points to another alias instead of a concrete export |
-| `M0301` | import-not-found | Imported module or symbol does not exist |
-| `M0302` | ambiguous-import | Two imports bring same name into scope |
-| `M0303` | wildcard-import | Wildcard imports are not allowed in Spore |
-| `M0304` | import-shadowing-conflict | Import alias conflicts with module name or existing import binding |
-| `M0401` | snapshot-changed | Dependent signature hash changed; requires `--permit` |
-| `M0402` | snapshot-missing | Referenced snapshot not found in `.spore-lock` |
-| `M0501` | platform-binding-conflict | Project declares more than one Platform binding |
+| Code    | Name                      | Description                                                            |
+| ------- | ------------------------- | ---------------------------------------------------------------------- |
+| `M0101` | circular-dependency       | Modules form a dependency cycle                                        |
+| `M0102` | self-import               | Module imports itself                                                  |
+| `M0103` | duplicate-module          | Two files map to the same module path                                  |
+| `M0201` | visibility-violation      | Accessing private or `pub(pkg)` symbol from outside scope              |
+| `M0202` | re-export-visibility      | Re-exporting with broader visibility than original                     |
+| `M0203` | orphan-impl               | Implementing external trait for external type                          |
+| `M0204` | alias-chain               | `pub alias` points to another alias instead of a concrete export       |
+| `M0301` | import-not-found          | Imported module or symbol does not exist                               |
+| `M0302` | ambiguous-import          | Two imports bring same name into scope                                 |
+| `M0303` | wildcard-import           | Wildcard imports are not allowed in Spore                              |
+| `M0304` | import-shadowing-conflict | Import alias conflicts with module name or existing import binding     |
+| `M0401` | snapshot-changed          | Dependent signature hash changed; requires `--permit`                  |
+| `M0402` | snapshot-missing          | Referenced snapshot not found in `.spore-lock`                         |
+| `M0501` | platform-binding-conflict | Project declares more than one Platform binding                        |
 | `M0502` | startup-contract-mismatch | Startup function signature does not satisfy selected Platform contract |
 
 ### System integration
@@ -1849,26 +1806,25 @@ The prefix convention (E/W/C/K/H/M) maps directly to Spore's major subsystems.
 
 ## Prior art
 
-| Language | Pipeline | What Spore borrows |
-|----------|----------|-------------------|
-| **Rust** | AST → HIR → THIR → MIR → LLVM IR | HIR/TypedHIR concepts; salsa for incremental compilation (via rust-analyzer); Rust-style diagnostic layout |
-| **Zig** | AST → ZIR → AIR → Machine IR | Pratt parser for expressions; *not* the ZIR concept (no comptime) |
-| **Roc** | AST → Canonical → Solved → IR | Canonical ≈ HIR concept; name resolution approach |
-| **Gleam** | Untyped AST → Typed AST | Inspiration for simplicity in the 2-layer approach; confirmed that 2 layers are too few for Spore |
-| **Gonidium** | AST → TypedDag | `DiagCollector` error collection pattern |
-| **Elm** | AST → Canonical → Typed → Optimized | Philosophy of helpful error messages; Spore adopts the helpfulness but uses Rust's concise layout rather than Elm's paragraph style |
+| Language     | Pipeline                            | What Spore borrows                                                                                                                  |
+| ------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Rust**     | AST → HIR → THIR → MIR → LLVM IR    | HIR/TypedHIR concepts; salsa for incremental compilation (via rust-analyzer); Rust-style diagnostic layout                          |
+| **Zig**      | AST → ZIR → AIR → Machine IR        | Pratt parser for expressions; _not_ the ZIR concept (no comptime)                                                                   |
+| **Roc**      | AST → Canonical → Solved → IR       | Canonical ≈ HIR concept; name resolution approach                                                                                   |
+| **Gleam**    | Untyped AST → Typed AST             | Inspiration for simplicity in the 2-layer approach; confirmed that 2 layers are too few for Spore                                   |
+| **Gonidium** | AST → TypedDag                      | `DiagCollector` error collection pattern                                                                                            |
+| **Elm**      | AST → Canonical → Typed → Optimized | Philosophy of helpful error messages; Spore adopts the helpfulness but uses Rust's concise layout rather than Elm's paragraph style |
 
-### salsa (Rust ecosystem)
+### Incremental computation framework (Prior Art)
 
-salsa is a framework for demand-driven incremental computation, originally
-developed for rust-analyzer. It provides:
+Demand-driven incremental computation frameworks provide:
 
 - Automatic memoization of query results
 - Fine-grained dependency tracking
 - Automatic invalidation and recomputation on input changes
 - Durability layers for optimizing frequently vs. rarely changing inputs
 
-Spore uses salsa to make each compilation pass a tracked query, enabling
+The compiler uses demand-driven incremental computation to make each compilation pass a tracked query, enabling
 automatic incremental recomputation when source files change.
 
 ### Cranelift
@@ -1887,15 +1843,15 @@ debug builds. Key properties:
 
 ## Backward compatibility and migration
 
-### PoC → Prototype migration
+### Migration from interpreter to native codegen
 
-The PoC phase uses a **tree-walking interpreter** in place of Cranelift codegen.
+An initial implementation may use a **tree-walking interpreter** in place of native codegen.
 The migration path:
 
 1. The `codegen` pass is behind a clean abstraction boundary (it receives
    `TypedHIR` and produces an executable result)
-2. Replacing the tree-walking interpreter with Cranelift codegen requires
-   implementing the `TypedHIR → Cranelift IR` translation — no changes to
+2. Replacing the tree-walking interpreter with native codegen requires
+   implementing the `TypedHIR → native` translation — no changes to
    passes 1–4
 3. The `--json` diagnostic format is identical in both phases; tools built
    against PoC diagnostics continue to work in prototype
@@ -1999,13 +1955,13 @@ Suppression is limited to **warnings only** — errors and notes cannot be suppr
 
 ## Glossary
 
-| Term | Definition |
-|------|-----------|
-| **impl hash** | Hash of module implementation content; determines whether to recompile this module |
-| **sig hash** | Hash of module public interface; determines whether downstream dependents need rechecking |
-| **hole** | Source-code placeholder (`?name`) for unfinished implementation, carrying type information |
-| **effect** | A declared capability such as `NetConnect`, `FileRead`, or `Spawn` required to perform certain operations |
-| **effect ceiling** | Reserved module/project policy concept; function-level `uses [...]` checking is the stable surface |
-| **cost annotation** | A declared four-slot upper bound (`cost [compute, alloc, io, parallel]`) |
-| **debounce** | Coalescing multiple rapid file-system events into a single compilation trigger |
-| **NDJSON** | Newline-Delimited JSON — each line is a complete, independent JSON object |
+| Term                | Definition                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------- |
+| **impl hash**       | Hash of module implementation content; determines whether to recompile this module                        |
+| **sig hash**        | Hash of module public interface; determines whether downstream dependents need rechecking                 |
+| **hole**            | Source-code placeholder (`?name`) for unfinished implementation, carrying type information                |
+| **effect**          | A declared capability such as `NetConnect`, `FileRead`, or `Spawn` required to perform certain operations |
+| **effect ceiling**  | Reserved module/project policy concept; function-level `uses [...]` checking is the stable surface        |
+| **cost annotation** | A declared four-slot upper bound (`cost [compute, alloc, io, parallel]`)                                  |
+| **debounce**        | Coalescing multiple rapid file-system events into a single compilation trigger                            |
+| **NDJSON**          | Newline-Delimited JSON — each line is a complete, independent JSON object                                 |

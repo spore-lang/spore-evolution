@@ -26,18 +26,18 @@ This SEP specifies the **surface grammar** and cross-SEP signature layout. SEP-0
 
 SEP-0001 is the root syntax SEP. Later SEPs may assign semantics to forms defined here, but they must not re-specify incompatible grammar.
 
-| Surface area | SEP-0001 owns | Semantic owner |
-|---|---|---|
-| Function declarations | clause order, delimiters, optional body shape | SEP-0002 for type checking, SEP-0004 for cost, SEP-0003 for effects |
-| Type syntax | identifiers, generic brackets, tuple/function/refinement syntax forms | SEP-0002 |
-| Error clauses and `?` / `throw` syntax | spelling and placement | SEP-0002 for error-set typing and propagation |
-| `effect`, `handler`, `perform`, `handle` | declaration and expression grammar | SEP-0003 |
-| `cost [...]` | clause placement and expression syntax envelope | SEP-0004 |
-| `spec { ... }` | clause placement and item grammar | SEP-0006 for test execution, diagnostics, and spec hashing |
-| Holes (`?name`) | expression grammar | SEP-0005 |
-| `parallel_scope`, `spawn`, `select`, `await` | expression grammar | SEP-0007 |
-| `import`, `alias`, visibility | declaration grammar | SEP-0008 |
-| Prelude and library names | examples only | SEP-0009 |
+| Surface area                                 | SEP-0001 owns                                                         | Semantic owner                                                      |
+| -------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Function declarations                        | clause order, delimiters, optional body shape                         | SEP-0002 for type checking, SEP-0004 for cost, SEP-0003 for effects |
+| Type syntax                                  | identifiers, generic brackets, tuple/function/refinement syntax forms | SEP-0002                                                            |
+| Error clauses and `?` / `throw` syntax       | spelling and placement                                                | SEP-0002 for error-set typing and propagation                       |
+| `effect`, `handler`, `perform`, `handle`     | declaration and expression grammar                                    | SEP-0003                                                            |
+| `cost [...]`                                 | clause placement and expression syntax envelope                       | SEP-0004                                                            |
+| `spec { ... }`                               | clause placement and item grammar                                     | SEP-0006 for test execution, diagnostics, and spec hashing          |
+| Holes (`?name`)                              | expression grammar                                                    | SEP-0005                                                            |
+| `parallel_scope`, `spawn`, `select`, `await` | expression grammar                                                    | SEP-0007                                                            |
+| `import`, `alias`, visibility                | declaration grammar                                                   | SEP-0008                                                            |
+| Prelude and library names                    | examples only                                                         | SEP-0009                                                            |
 
 Unless explicitly marked as grammar, examples that mention type names, effect names, cost values, module paths, or standard-library items are illustrative.
 
@@ -162,7 +162,22 @@ let is_weekend = match day {
 
 ### No loop syntax
 
-Spore has **no** `for`, `while`, `loop`, `break`, or `continue` syntax. Iteration is expressed with recursion or library functions:
+Spore has **no** `for`, `while`, `loop`, `break`, or `continue` syntax. Iteration is expressed with recursion or library functions.
+
+**Local function declarations.** The block grammar includes a `Statement` form
+labeled _local function_ below: nesting `fn` introduces a sibling function scoped
+inside that enclosing block. Unlike lambdas (`|params|`), a statement-form `fn`
+**does not** close over outer `let` bindings or the enclosing function's
+parameters; pass any needed outer state explicitly as arguments to helpers.
+Lexical closures and inference rules for lambdas belong to SEP-0002 (**§3.5.1** contrasts nested statement `fn` vs lambdas).
+
+**Cost and stack space.** How the compiler recognises linear recursion and
+computes inferred or declared `cost […]` bounds is SEP-0004. **Tail calls.**
+Calls in syntactic tail position (as in the accumulator helper below) are part of the
+canonical evaluation model: SEP-0006 assigns them a merging lowering rule so deeply
+tail-recursive iteration does **not** build a proportional chain of suspended
+caller frames. That restores the predictable stack footprint programmers associate
+with loops, even though the surface language has no loop forms.
 
 ```spore
 // Sum a list using fold
@@ -170,10 +185,11 @@ fn sum(numbers: List[I64]) -> I64 {
     numbers.fold(0, |acc, x| acc + x)
 }
 
-// Factorial using recursion
+// Factorial: inner helper carries the accumulator; parameters `n` vs `k` are
+// distinct (no accidental shadow of the caller's iteration variable).
 fn factorial(n: I64) -> I64 {
-    fn go(n: I64, acc: I64) -> I64 {
-        if n <= 1 { acc } else { go(n - 1, n * acc) }
+    fn go(k: I64, acc: I64) -> I64 {
+        if k <= 1 { acc } else { go(k - 1, k * acc) }
     }
     go(n, 1)
 }
@@ -552,80 +568,80 @@ Spore source files are UTF-8 encoded. Identifiers may contain Unicode letters, A
 
 The complete reserved keyword table:
 
-| Keyword | Purpose |
-|---|---|
-| `fn` | Function definition |
-| `let` | Immutable binding |
-| `if` / `else` | Conditional expression |
-| `match` | Pattern matching expression |
-| `struct` | Struct type definition |
-| `type` | Type alias / sum type definition |
-| `trait` | Type interface definition (trait) |
-| `effect` | Effect definition / effect alias |
-| `handler` | Effect handler implementation |
-| `perform` | Invoke an effect operation |
-| `impl` | Trait implementation block |
-| `pub` / `pub(pkg)` | Visibility modifiers (public / package-visible) |
-| `import` | Module import |
-| `alias` | Type alias |
-| `when` | Refinement predicate introducer |
-| `where` | Generic type constraints |
-| `uses` | Effect requirement declaration |
-| `cost` | Four-slot cost vector clause |
-| `spec` | Behavioral specification block in function declarations and `impl` methods |
-| `example` | Concrete labeled example item inside a `spec` block |
-| `law` | Universally quantified assertion inside a `spec` block |
-| `spawn` | Spawn concurrent task |
-| `select` | Channel multiplex expression |
-| `parallel_scope` | Structured concurrency scope |
-| `const` | Compile-time constant definition |
-| `return` | Early return from function |
-| `throw` | Throw an error value |
-| `handle` | Bind effect handler expression |
-| `with` | Handler binding (with handle) |
-| `implements` | Reserved (use `impl ... for ...`) |
-| `as` | Rename in imports |
-| `in` | Reserved |
-| `mut` | Reserved |
-| `static` | Reserved |
-| `async` | Reserved |
-| `await` | Reserved spelling for postfix `.await` |
-| `move` | Reserved |
-| `ref` | Reserved |
-| `self` | Current instance in trait/handler methods (regular identifier) |
-| `super` | Parent module reference |
-| `crate` | Crate root reference |
-| `enum` | Reserved (use `type` with variants) |
-| `union` | Reserved |
-| `unsafe` | Reserved |
-| `extern` | Reserved |
-| `macro` | Reserved |
-| `on` | Inline effect arm introducer inside `handle … with { … }` |
-| `from` | Channel receive binder in `select` arms (`value from rx`) |
-| `use` | Named handler binding inside `handle … with { … }` |
-| `timeout` | Timeout arm in `select` expressions |
-| `true` / `false` | Boolean literals |
-| `Some` / `None` | Option type constructors |
-| `Ok` / `Err` | Result type constructors |
-| `Result` / `Option` / `Ref` | Built-in parameterized types |
+| Keyword                     | Purpose                                                                    |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `fn`                        | Function definition                                                        |
+| `let`                       | Immutable binding                                                          |
+| `if` / `else`               | Conditional expression                                                     |
+| `match`                     | Pattern matching expression                                                |
+| `struct`                    | Struct type definition                                                     |
+| `type`                      | Type alias / sum type definition                                           |
+| `trait`                     | Type interface definition (trait)                                          |
+| `effect`                    | Effect definition / effect alias                                           |
+| `handler`                   | Effect handler implementation                                              |
+| `perform`                   | Invoke an effect operation                                                 |
+| `impl`                      | Trait implementation block                                                 |
+| `pub` / `pub(pkg)`          | Visibility modifiers (public / package-visible)                            |
+| `import`                    | Module import                                                              |
+| `alias`                     | Type alias                                                                 |
+| `when`                      | Refinement predicate introducer                                            |
+| `where`                     | Generic type constraints                                                   |
+| `uses`                      | Effect requirement declaration                                             |
+| `cost`                      | Four-slot cost vector clause                                               |
+| `spec`                      | Behavioral specification block in function declarations and `impl` methods |
+| `example`                   | Concrete labeled example item inside a `spec` block                        |
+| `law`                       | Universally quantified assertion inside a `spec` block                     |
+| `spawn`                     | Spawn concurrent task                                                      |
+| `select`                    | Channel multiplex expression                                               |
+| `parallel_scope`            | Structured concurrency scope                                               |
+| `const`                     | Compile-time constant definition                                           |
+| `return`                    | Early return from function                                                 |
+| `throw`                     | Throw an error value                                                       |
+| `handle`                    | Bind effect handler expression                                             |
+| `with`                      | Handler binding (with handle)                                              |
+| `implements`                | Reserved (use `impl ... for ...`)                                          |
+| `as`                        | Rename in imports                                                          |
+| `in`                        | Reserved                                                                   |
+| `mut`                       | Reserved                                                                   |
+| `static`                    | Reserved                                                                   |
+| `async`                     | Reserved                                                                   |
+| `await`                     | Reserved spelling for postfix `.await`                                     |
+| `move`                      | Reserved                                                                   |
+| `ref`                       | Reserved                                                                   |
+| `self`                      | Current instance in trait/handler methods (regular identifier)             |
+| `super`                     | Parent module reference                                                    |
+| `crate`                     | Crate root reference                                                       |
+| `enum`                      | Reserved (use `type` with variants)                                        |
+| `union`                     | Reserved                                                                   |
+| `unsafe`                    | Reserved                                                                   |
+| `extern`                    | Reserved                                                                   |
+| `macro`                     | Reserved                                                                   |
+| `on`                        | Inline effect arm introducer inside `handle … with { … }`                  |
+| `from`                      | Channel receive binder in `select` arms (`value from rx`)                  |
+| `use`                       | Named handler binding inside `handle … with { … }`                         |
+| `timeout`                   | Timeout arm in `select` expressions                                        |
+| `true` / `false`            | Boolean literals                                                           |
+| `Some` / `None`             | Option type constructors                                                   |
+| `Ok` / `Err`                | Result type constructors                                                   |
+| `Result` / `Option` / `Ref` | Built-in parameterized types                                               |
 
 **Attributes.** Function-level attributes use the `@name(args)` form — a decorator-style prefix placed before `fn` (and before any doc comment). Examples: `@allows(validate, sanitize)`, `@allow(missing_spec)`. The `@` sigil is not a standalone operator; the full attribute form is parsed as part of `FunctionHeader`.
 
 #### Operators
 
-| Category | Operators | Description |
-|---|---|---|
-| Arithmetic | `+` `-` `*` `/` `%` | Add, subtract, multiply, divide, modulo |
-| Comparison | `==` `!=` `<` `>` `<=` `>=` | Equality and ordering |
-| Logical | `&&` `\|\|` `!` | And, or, not |
-| Bitwise | `&` `\|` `^` `~` `<<` `>>` | AND, OR, XOR, NOT, shifts |
-| Pipe | `\|>` | Data-flow pipe |
-| Error propagation | `?` | Propagate error from Result |
-| Range | `..` `..=` | Half-open and closed range |
-| Field access | `.` | Field / method access |
-| Assignment | `=` | Binding assignment |
-| Call | `()` | Function / method invocation |
-| Index | `[]` | Index access and generic parameters |
+| Category          | Operators                   | Description                             |
+| ----------------- | --------------------------- | --------------------------------------- |
+| Arithmetic        | `+` `-` `*` `/` `%`         | Add, subtract, multiply, divide, modulo |
+| Comparison        | `==` `!=` `<` `>` `<=` `>=` | Equality and ordering                   |
+| Logical           | `&&` `\|\|` `!`             | And, or, not                            |
+| Bitwise           | `&` `\|` `^` `~` `<<` `>>`  | AND, OR, XOR, NOT, shifts               |
+| Pipe              | `\|>`                       | Data-flow pipe                          |
+| Error propagation | `?`                         | Propagate error from Result             |
+| Range             | `..` `..=`                  | Half-open and closed range              |
+| Field access      | `.`                         | Field / method access                   |
+| Assignment        | `=`                         | Binding assignment                      |
+| Call              | `()`                        | Function / method invocation            |
+| Index             | `[]`                        | Index access and generic parameters     |
 
 Spore has a **fixed operator set** — no custom operators are allowed.
 
@@ -633,21 +649,21 @@ Spore has a **fixed operator set** — no custom operators are allowed.
 
 13 levels, from highest to lowest:
 
-| Level | Operators | Associativity | Description |
-|---|---|---|---|
-| 1 | `.` `()` `[]` | Left | Field access, call, index |
-| 2 | `-` (unary) `!` `~` | Right (prefix) | Unary negation, logical not, bitwise not |
-| 3 | `*` `/` `%` | Left | Multiplicative |
-| 4 | `+` `-` | Left | Additive |
-| 5 | `<<` `>>` | Left | Bit shift |
-| 6 | `&` | Left | Bitwise AND |
-| 7 | `^` | Left | Bitwise XOR |
-| 8 | `\|` | Left | Bitwise OR |
-| 9 | `==` `!=` `<` `>` `<=` `>=` | Non-associative | Comparison |
-| 10 | `&&` | Left | Logical AND (short-circuit) |
-| 11 | `\|\|` | Left | Logical OR (short-circuit) |
-| 12 | `..` `..=` | Non-associative | Range |
-| 13 | `\|>` | Left | Pipe |
+| Level | Operators                   | Associativity   | Description                              |
+| ----- | --------------------------- | --------------- | ---------------------------------------- |
+| 1     | `.` `()` `[]`               | Left            | Field access, call, index                |
+| 2     | `-` (unary) `!` `~`         | Right (prefix)  | Unary negation, logical not, bitwise not |
+| 3     | `*` `/` `%`                 | Left            | Multiplicative                           |
+| 4     | `+` `-`                     | Left            | Additive                                 |
+| 5     | `<<` `>>`                   | Left            | Bit shift                                |
+| 6     | `&`                         | Left            | Bitwise AND                              |
+| 7     | `^`                         | Left            | Bitwise XOR                              |
+| 8     | `\|`                        | Left            | Bitwise OR                               |
+| 9     | `==` `!=` `<` `>` `<=` `>=` | Non-associative | Comparison                               |
+| 10    | `&&`                        | Left            | Logical AND (short-circuit)              |
+| 11    | `\|\|`                      | Left            | Logical OR (short-circuit)               |
+| 12    | `..` `..=`                  | Non-associative | Range                                    |
+| 13    | `\|>`                       | Left            | Pipe                                     |
 
 The error propagation operator `?` is a postfix operator that binds tighter than any binary operator — it applies immediately to the preceding expression.
 
@@ -700,7 +716,7 @@ t"Dear {customer}, order {id}"    // template string
 
 #### Comments
 
-```spore
+````spore
 // Line comment
 
 /// Doc comment (supports Markdown)
@@ -713,15 +729,15 @@ t"Dear {customer}, order {id}"    // template string
    /* can be nested */
    continues here
 */
-```
+````
 
 #### Identifiers and naming conventions
 
-| Convention | Used for | Examples |
-|---|---|---|
-| `snake_case` | Variables, functions, modules | `user_name`, `calculate_total`, `http_client` |
-| `PascalCase` | Types, traits, effects, enum variants | `UserAccount`, `Serialize`, `Some` |
-| `SCREAMING_SNAKE_CASE` | Constants | `MAX_BUFFER_SIZE`, `PI` |
+| Convention             | Used for                              | Examples                                      |
+| ---------------------- | ------------------------------------- | --------------------------------------------- |
+| `snake_case`           | Variables, functions, modules         | `user_name`, `calculate_total`, `http_client` |
+| `PascalCase`           | Types, traits, effects, enum variants | `UserAccount`, `Serialize`, `Some`            |
+| `SCREAMING_SNAKE_CASE` | Constants                             | `MAX_BUFFER_SIZE`, `PI`                       |
 
 ### EBNF Grammar
 
@@ -755,7 +771,7 @@ ImportPath      = Ident { "." Ident } ;
 AliasDecl       = [ Visibility ] "alias" Ident "=" QualifiedIdent ";" ;
 
 (* ─── Module ──────────────────────────────────────── *)
-(* REMOVED: Module names are derived from file paths (see SEP-0008).
+(* Module names are derived from file paths (see SEP-0008).
    The `module` keyword is not part of the surface syntax. *)
 
 (* ─── Struct ──────────────────────────────────────── *)
@@ -1144,19 +1160,19 @@ tail expression.
 
 Supported pattern forms:
 
-| Pattern | Syntax | Example |
-|---|---|---|
-| Literal | `42`, `"hello"`, `true` | `0 => "zero"` |
-| Variable binding | `name` | `Some(x) => x` |
-| Wildcard | `_` | `_ => "other"` |
-| Constructor | `Ctor(p1, p2)` | `Some(value) => value` |
-| Struct | `Name { f1, f2, .. }` | `Point { x, y } => x + y` |
-| List (empty) | `[]` | `[] => "empty"` |
-| List (head..tail) | `[h, ..t]` | `[head, ..tail] => head` |
-| List (exact) | `[a, b]` | `[a, b] => a + b` |
-| Or | `p1 \| p2` | `"Sat" \| "Sun" => true` |
-| Guard | `p if cond` | `n if n > 0 => "positive"` |
-| Nested | `Ok(Some(x))` | `Ok(Some(v)) => v` |
+| Pattern           | Syntax                  | Example                    |
+| ----------------- | ----------------------- | -------------------------- |
+| Literal           | `42`, `"hello"`, `true` | `0 => "zero"`              |
+| Variable binding  | `name`                  | `Some(x) => x`             |
+| Wildcard          | `_`                     | `_ => "other"`             |
+| Constructor       | `Ctor(p1, p2)`          | `Some(value) => value`     |
+| Struct            | `Name { f1, f2, .. }`   | `Point { x, y } => x + y`  |
+| List (empty)      | `[]`                    | `[] => "empty"`            |
+| List (head..tail) | `[h, ..t]`              | `[head, ..tail] => head`   |
+| List (exact)      | `[a, b]`                | `[a, b] => a + b`          |
+| Or                | `p1 \| p2`              | `"Sat" \| "Sun" => true`   |
+| Guard             | `p if cond`             | `n if n > 0 => "positive"` |
+| Nested            | `Ok(Some(x))`           | `Ok(Some(v)) => v`         |
 
 ### Type system
 
