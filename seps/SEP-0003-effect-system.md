@@ -7,6 +7,7 @@ authors:
   - Zhan Rongrui
 created: 2026-03-31
 requires:
+  - 1
   - 2
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/3"
 pr: null
@@ -19,7 +20,7 @@ superseded_by: null
 
 ## Summary
 
-This SEP introduces Spore's **effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of *atomic effects* it requires. The compiler verifies that a function body never exercises an effect absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and effect narrowing.
+This SEP introduces Spore's **effect system**: a compile-time mechanism that tracks how functions interact with the outside world. Every function declares — via a `uses [...]` clause — the set of _atomic effects_ it requires. The compiler verifies that a function body never exercises an effect absent from its declared set, auto-infers semantic properties (pure, deterministic, total) from that set, and uses set-inclusion as the basis for subtyping and effect narrowing.
 
 The built-in effect vocabulary is **intent-oriented**: each built-in effect answers "What does this code intend to do with the outside world?" Pure computation is the default state — no effect declaration is needed for it. Mutable state is tracked by the language semantics, not by built-in external effect names. In compiler internals and tooling protocols, these effect names form the effect set used for subset checks, platform ceilings, and machine-readable fields such as `effects`.
 
@@ -27,17 +28,11 @@ The design is intentionally **flat and monomorphic**: effect sets are finite set
 
 Concrete surface syntax for `effect`, `handler`, `perform`, and `handle ... with` is defined in SEP-0001. This SEP focuses on semantics, algebra, typing, protocol fields, and diagnostics.
 
-> **Release-safety note**: Handler discharge and the unified declaration form in
-> this SEP describe the target behavior of the current compositional-semantics
-> wave. The shipping implementation already checks explicit `perform` usage and
-> effect sets, but parser/runtime support for the full unified handler surface is
-> still being completed.
-
 ---
 
 ## Motivation
 
-Modern programs interleave pure computation with diverse side effects — file I/O, networking, mutable state, concurrency, randomness, process control. Without a disciplined tracking mechanism these effects become invisible at function boundaries, making it hard for both humans and automated agents to reason about what a function *can do*.
+Modern programs interleave pure computation with diverse side effects — file I/O, networking, mutable state, concurrency, randomness, process control. Without a disciplined tracking mechanism these effects become invisible at function boundaries, making it hard for both humans and automated agents to reason about what a function _can do_.
 
 ### Problems addressed
 
@@ -53,14 +48,14 @@ Modern programs interleave pure computation with diverse side effects — file I
 
 ### Design goals
 
-| Goal | Mechanism |
-|------|-----------|
-| Explicit effect tracking | `uses [...]` clause on every function |
-| Zero-cost purity | Omitting `uses` ≡ `uses []` (pure) |
-| Composable aliases | `effect` keyword for named groups and aliases |
-| Sound subtyping | Set inclusion on effect sets |
+| Goal                     | Mechanism                                            |
+| ------------------------ | ---------------------------------------------------- |
+| Explicit effect tracking | `uses [...]` clause on every function                |
+| Zero-cost purity         | Omitting `uses` ≡ `uses []` (pure)                   |
+| Composable aliases       | `effect` keyword for named groups and aliases        |
+| Sound subtyping          | Set inclusion on effect sets                         |
 | Auto-inferred properties | `pure`, `deterministic`, `total` derived from `uses` |
-| Agent integration | `available_effects` emitted in `HoleReport` JSON |
+| Agent integration        | `available_effects` emitted in `HoleReport` JSON     |
 
 ---
 
@@ -95,7 +90,7 @@ fn greet(name: Str) uses [Console] {
 }
 ```
 
-If a function needs no effects it is *pure* and the `uses` clause may be omitted entirely:
+If a function needs no effects it is _pure_ and the `uses` clause may be omitted entirely:
 
 ```spore
 fn add(a: I64, b: I64) -> I64 {
@@ -108,18 +103,18 @@ fn add(a: I64, b: I64) -> I64 {
 
 Spore ships with the following intent-oriented atomic effects. Each one answers: "What does this code intend to do with the outside world?"
 
-| Effect | Intent | Typical operations |
-|---|---|---|
-| `Console` | User interaction (terminal I/O) | `println`, `eprintln`, `read_line` |
-| `FileRead` | Persistent data access | `File.read`, `Dir.list` |
-| `FileWrite` | Persistent data modification | `File.write`, `Dir.create`, `File.delete` |
-| `NetConnect` | External communication (outbound) | `http.get`, `http.post`, `tcp.connect` |
-| `NetListen` | Service provision (inbound) | `tcp.listen`, `http.serve` |
-| `Env` | Configuration access | `Env.get`, `Env.vars` |
-| `Spawn` | Subprocess management | `Cmd.exec`, `spawn { ... }` |
-| `Clock` | Time-dependent computation | `now()`, `elapsed()` |
-| `Random` | Non-deterministic computation | `random()`, `uuid()` |
-| `Exit` | Process lifecycle control | `exit()`, `abort()` |
+| Effect       | Intent                            | Typical operations                        |
+| ------------ | --------------------------------- | ----------------------------------------- |
+| `Console`    | User interaction (terminal I/O)   | `println`, `eprintln`, `read_line`        |
+| `FileRead`   | Persistent data access            | `File.read`, `Dir.list`                   |
+| `FileWrite`  | Persistent data modification      | `File.write`, `Dir.create`, `File.delete` |
+| `NetConnect` | External communication (outbound) | `http.get`, `http.post`, `tcp.connect`    |
+| `NetListen`  | Service provision (inbound)       | `tcp.listen`, `http.serve`                |
+| `Env`        | Configuration access              | `Env.get`, `Env.vars`                     |
+| `Spawn`      | Subprocess management             | `Cmd.exec`, `spawn { ... }`               |
+| `Clock`      | Time-dependent computation        | `now()`, `elapsed()`                      |
+| `Random`     | Non-deterministic computation     | `random()`, `uuid()`                      |
+| `Exit`       | Process lifecycle control         | `exit()`, `abort()`                       |
 
 `Exit` authorizes explicit process termination. Startup contracts, runtime exit
 propagation, and host exit-code conversion are Platform/runtime concerns
@@ -129,11 +124,11 @@ specified in SEP-0008 rather than in this effect SEP.
 
 The guiding principle is: **each built-in effect answers "What does this code intend to do with the outside world?"** This leads to several deliberate design choices:
 
-1. **No `Compute` effect.** Pure computation is the default state — no effect declaration is needed. Every function can compute; effects describe what *additional* external powers a function needs beyond pure computation. A function with `uses []` (or no `uses` clause) is pure and can compute freely.
+1. **No `Compute` effect.** Pure computation is the default state — no effect declaration is needed. Every function can compute; effects describe what _additional_ external powers a function needs beyond pure computation. A function with `uses []` (or no `uses` clause) is pure and can compute freely.
 
-2. **No `StateRead`/`StateWrite`.** Mutable state is tracked by the language semantics, not by built-in external effect names. The built-in effects describe interactions with the *external world* — the filesystem, the network, the terminal, the clock. Internal mutable state (for example, a local cache) is an implementation detail, not an intent to interact with the outside world.
+2. **No `StateRead`/`StateWrite`.** Mutable state is tracked by the language semantics, not by built-in external effect names. The built-in effects describe interactions with the _external world_ — the filesystem, the network, the terminal, the clock. Internal mutable state (for example, a local cache) is an implementation detail, not an intent to interact with the outside world.
 
-3. **`NetConnect`/`NetListen` instead of `NetRead`/`NetWrite`.** The old names described data direction, but the real intent distinction is *client vs server*. An HTTP client both reads and writes the network, but its intent is "connect to an external service." Similarly, a server both reads and writes, but its intent is "listen for incoming connections."
+3. **`NetConnect`/`NetListen` instead of `NetRead`/`NetWrite`.** The old names described data direction, but the real intent distinction is _client vs server_. An HTTP client both reads and writes the network, but its intent is "connect to an external service." Similarly, a server both reads and writes, but its intent is "listen for incoming connections."
 
 4. **`Console` for terminal I/O.** `println("hello")` is user interaction, not file writing, even though stdout is technically a file descriptor. Distinguishing terminal I/O from filesystem I/O reflects a real difference in intent.
 
@@ -143,27 +138,27 @@ The guiding principle is: **each built-in effect answers "What does this code in
 
 The `basic-cli` Platform currently maps its package modules to built-in effects as follows:
 
-| Operation | Required effect |
-|---|---|
-| `basic_cli.stdout.print`, `basic_cli.stdout.println`, `basic_cli.stdout.eprint`, `basic_cli.stdout.eprintln` | `Console` |
-| `basic_cli.stdin.read_line` | `Console` |
-| `basic_cli.file.file_read`, `basic_cli.file.file_exists`, `basic_cli.file.file_stat` | `FileRead` |
-| `basic_cli.file.file_write` | `FileWrite` |
-| `basic_cli.dir.dir_list` | `FileRead` |
-| `basic_cli.dir.dir_mkdir` | `FileWrite` |
-| `basic_cli.env.env_get`, `basic_cli.env.env_set` | `Env` |
-| `basic_cli.cmd.process_run`, `basic_cli.cmd.process_run_status` | `Spawn` |
-| `basic_cli.cmd.exit` | `Exit` |
+| Operation                                                                                                    | Required effect |
+| ------------------------------------------------------------------------------------------------------------ | --------------- |
+| `basic_cli.stdout.print`, `basic_cli.stdout.println`, `basic_cli.stdout.eprint`, `basic_cli.stdout.eprintln` | `Console`       |
+| `basic_cli.stdin.read_line`                                                                                  | `Console`       |
+| `basic_cli.file.file_read`, `basic_cli.file.file_exists`, `basic_cli.file.file_stat`                         | `FileRead`      |
+| `basic_cli.file.file_write`                                                                                  | `FileWrite`     |
+| `basic_cli.dir.dir_list`                                                                                     | `FileRead`      |
+| `basic_cli.dir.dir_mkdir`                                                                                    | `FileWrite`     |
+| `basic_cli.env.env_get`, `basic_cli.env.env_set`                                                             | `Env`           |
+| `basic_cli.cmd.process_run`, `basic_cli.cmd.process_run_status`                                              | `Spawn`         |
+| `basic_cli.cmd.exit`                                                                                         | `Exit`          |
 
 ### Defining effect aliases
 
 The `effect` keyword creates a **named alias** that expands into a flat set of atomic effects:
 
 ```spore
-effect FileIO = FileRead | FileWrite
-effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit
-effect Server = NetListen | FileRead | FileWrite | Clock | Random
-effect HttpClient = NetConnect | Clock
+effect FileIO = FileRead | FileWrite;
+effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit;
+effect Server = NetListen | FileRead | FileWrite | Clock | Random;
+effect HttpClient = NetConnect | Clock;
 ```
 
 Aliases expand recursively and flatten:
@@ -173,16 +168,15 @@ CLI → {Console, FileRead, FileWrite, Env, Spawn, Exit}
 ```
 
 Aliases are purely syntactic sugar in `uses [...]`: after expansion, only atomic
-effects remain. The current implementation also ships a small builtin alias
-hierarchy for `IO`, `FileIO`, and `NetIO`, but **same-module declarations
-shadow those builtin names**. In other words, a local `effect IO = Console` or
-`effect IO { ... }` is treated as that local declaration, not as the builtin
-filesystem/network bundle.
+effects remain. A small builtin alias hierarchy provides `IO`, `FileIO`, and
+`NetIO` for convenience, but **same-module declarations shadow those builtin
+names**. In other words, a local `effect IO = Console` or `effect IO { ... }` is
+treated as that local declaration, not as the builtin filesystem/network bundle.
 
 ### Using effects in practice
 
 ```spore
-effect HttpClient = NetConnect | Clock
+effect HttpClient = NetConnect | Clock;
 
 fn query_api(url: Url) -> Data ! NetworkError
 uses [HttpClient]
@@ -262,19 +256,19 @@ Why does this type-check?
 
 The compiler automatically derives semantic properties from the declared effect set. No manual annotation is required:
 
-| Declared `uses` | Inferred properties |
-|---|---|
-| `uses []` (or omitted) | pure, deterministic, total* |
-| `uses [Console]` | ¬pure |
-| `uses [FileRead]` | ¬pure, deterministic |
-| `uses [Random]` | ¬pure, ¬deterministic |
-| `uses [NetConnect, Spawn]` | ¬pure, deterministic |
+| Declared `uses`            | Inferred properties          |
+| -------------------------- | ---------------------------- |
+| `uses []` (or omitted)     | pure, deterministic, total\* |
+| `uses [Console]`           | ¬pure                        |
+| `uses [FileRead]`          | ¬pure, deterministic         |
+| `uses [Random]`            | ¬pure, ¬deterministic        |
+| `uses [NetConnect, Spawn]` | ¬pure, deterministic         |
 
-(*total requires a separate termination analysis; see Reference-level explanation §5.4.)
+(\*total requires a separate termination analysis; see Reference-level explanation §5.4.)
 
 ### Incomplete functions — missing `uses` declarations
 
-A function that calls operations requiring effects but does **not** declare a `uses` clause is an *incomplete function*. The compiler treats this as an error with a fix suggestion:
+A function that calls operations requiring effects but does **not** declare a `uses` clause is an _incomplete function_. The compiler treats this as an error with a fix suggestion:
 
 ```spore
 fn save_data(data: Data) -> Unit {
@@ -380,7 +374,7 @@ uses []
 
 Let **E** be the universe of atomic effects. Each element of **E** is an indivisible identifier representing one way a program may interact with the external world.
 
-An **effect set** *S* is a finite subset of **E**:
+An **effect set** _S_ is a finite subset of **E**:
 
 $$S \subseteq E, \quad |S| < \infty$$
 
@@ -390,21 +384,21 @@ The empty set `{}` denotes a pure function — no interaction with the outside w
 
 Effect sets obey standard finite-set algebra:
 
-| Property | Formula | Consequence |
-|---|---|---|
-| Commutativity | {A, B} = {B, A} | Declaration order is irrelevant |
-| Idempotence | {A, A} = {A} | Duplicate declarations collapse |
-| Associativity | Nested aliases flatten | `[FileIO, NetConnect]` = `[FileRead, FileWrite, NetConnect]` |
-| Identity element | {} (empty set) | The identity for union: S ∪ {} = S |
+| Property         | Formula                | Consequence                                                  |
+| ---------------- | ---------------------- | ------------------------------------------------------------ |
+| Commutativity    | {A, B} = {B, A}        | Declaration order is irrelevant                              |
+| Idempotence      | {A, A} = {A}           | Duplicate declarations collapse                              |
+| Associativity    | Nested aliases flatten | `[FileIO, NetConnect]` = `[FileRead, FileWrite, NetConnect]` |
+| Identity element | {} (empty set)         | The identity for union: S ∪ {} = S                           |
 
 #### Set operations
 
-| Operation | Symbol | Use |
-|---|---|---|
-| Union | S₁ ∪ S₂ | Sequential composition, conditional branches |
-| Subset | S₁ ⊆ S₂ | Subtype check, effect narrowing |
-| Intersection | S₁ ∩ S₂ | Property inference |
-| Difference | S₁ \ S₂ | Reserved; not currently exposed in syntax |
+| Operation    | Symbol  | Use                                          |
+| ------------ | ------- | -------------------------------------------- |
+| Union        | S₁ ∪ S₂ | Sequential composition, conditional branches |
+| Subset       | S₁ ⊆ S₂ | Subtype check, effect narrowing              |
+| Intersection | S₁ ∩ S₂ | Property inference                           |
+| Difference   | S₁ \ S₂ | Reserved; not currently exposed in syntax    |
 
 ### 3. Effect alias definition and expansion
 
@@ -419,7 +413,7 @@ $$\texttt{uses } [C] \equiv \texttt{uses } [A_1, A_2, \ldots, A_n]$$
 Expansion is **recursive**: if any $A_i$ is itself an alias, it is expanded
 until every element is an atomic effect. The result is always a flat set.
 
-The shipped implementation also reserves builtin aliases `IO`, `FileIO`, and
+The language reserves builtin aliases `IO`, `FileIO`, and
 `NetIO` for convenience expansion, but those names are **not global keywords**:
 same-module declared effects and effect aliases with the same names shadow the
 builtin hierarchy.
@@ -460,13 +454,13 @@ where:
 
 #### 4.2 Internal representation
 
-In the compiler's type IR the function type is represented as:
+In the type system, the function type carries an effect set:
 
-```rust
-Ty::Fn(Vec<Ty>, Box<Ty>, EffectSet)
+```text
+(T₁, T₂, …, Tₙ) -> R  uses S
 ```
 
-where `EffectSet = BTreeSet<String>`. A `BTreeSet` is chosen over `HashSet` for deterministic ordering in diagnostics and serialisation.
+where the effect components use a deterministically ordered set for consistent diagnostics and serialisation.
 
 #### 4.3 Shorthand
 
@@ -488,16 +482,16 @@ $$\mathcal{P}(\text{total}, S) = \text{determined by a separate termination anal
 
 The complete rule: `𝒫(pure, S) = true` iff `S = ∅`. Pure computation requires no declared effect — it is the default. `Spawn` is not pure-compatible: creating schedulable work has observable concurrency and scheduling consequences even when the spawned body is deterministic. Determinism remains a separate property.
 
-| Effect set S | pure? | Rationale |
-|---|---|---|
-| `{}` | true | No effects at all |
-| `{Spawn}` | false | `spawn` introduces observable concurrency/scheduling behavior |
-| `{Console}` | false | Console interacts with the terminal — an external I/O channel |
-| `{Clock}` | false | Clock reads the external world (system time) |
-| `{Random}` | false | Random reads external entropy |
-| `{Env}` | false | Env reads the process environment — an external configuration source |
-| `{Exit}` | false | `exit` terminates the process — an observable external effect |
-| `{NetConnect}` | false | Outbound network access is external I/O |
+| Effect set S   | pure? | Rationale                                                            |
+| -------------- | ----- | -------------------------------------------------------------------- |
+| `{}`           | true  | No effects at all                                                    |
+| `{Spawn}`      | false | `spawn` introduces observable concurrency/scheduling behavior        |
+| `{Console}`    | false | Console interacts with the terminal — an external I/O channel        |
+| `{Clock}`      | false | Clock reads the external world (system time)                         |
+| `{Random}`     | false | Random reads external entropy                                        |
+| `{Env}`        | false | Env reads the process environment — an external configuration source |
+| `{Exit}`       | false | `exit` terminates the process — an observable external effect        |
+| `{NetConnect}` | false | Outbound network access is external I/O                              |
 
 #### 5.1 Implication chain
 
@@ -535,7 +529,7 @@ Effect sets induce subtyping via set inclusion. Function types are **contravaria
 
 $$S_1 \subseteq S_2 \implies (\tau \to \rho \ \textbf{uses}\ S_1) <: (\tau \to \rho \ \textbf{uses}\ S_2)$$
 
-A function that requires *fewer* effects is more general and can be used wherever a more-capable function is expected.
+A function that requires _fewer_ effects is more general and can be used wherever a more-capable function is expected.
 
 ```text
                     S₁ ⊆ S₂
@@ -587,14 +581,14 @@ Read: "Under type context Γ and effect set S, expression e has type T."
 
 When multiple expressions are combined the compiler computes the composite effect set:
 
-| Composition form | Effect computation |
-|---|---|
-| `A; B` | S_A ∪ S_B |
-| `if c then A else B` | S_c ∪ S_A ∪ S_B |
-| `match x { p₁ => A, p₂ => B, … }` | S_x ∪ S_A ∪ S_B ∪ … |
-| `f(x)` where f `uses S_f` | Requires S_f ⊆ S_scope |
+| Composition form                       | Effect computation                           |
+| -------------------------------------- | -------------------------------------------- |
+| `A; B`                                 | S_A ∪ S_B                                    |
+| `if c then A else B`                   | S_c ∪ S_A ∪ S_B                              |
+| `match x { p₁ => A, p₂ => B, … }`      | S_x ∪ S_A ∪ S_B ∪ …                          |
+| `f(x)` where f `uses S_f`              | Requires S_f ⊆ S_scope                       |
 | `spawn { body }` where body `uses S_b` | Requires `Spawn ∈ S_scope` and S_b ⊆ S_scope |
-| `let x = e₁ in e₂` | S_e₁ ∪ S_e₂ |
+| `let x = e₁ in e₂`                     | S_e₁ ∪ S_e₂                                  |
 
 Formal rules for the two most important cases:
 
@@ -653,7 +647,7 @@ residual(handle e with h̄) = (S_body \ H) ∪ S_impl
 Intuition:
 
 1. effects covered by the active handlers stop leaking outward;
-2. any effects required to *run the handlers themselves* still count; and
+2. any effects required to _run the handlers themselves_ still count; and
 3. unhandled effects remain visible to the outer scope.
 
 This rule is purely semantic. Users still declare ordinary `uses [...]`
@@ -698,7 +692,7 @@ If the check fails, the compiler emits a `effect-violation` diagnostic listing t
 
 ### 10. Closure effect capture
 
-A closure defined within a context with effect set *S* has an inferred effect set *S'* where *S'* ⊆ *S*. The inference is determined by the effects actually exercised in the closure body:
+A closure defined within a context with effect set _S_ has an inferred effect set _S'_ where _S'_ ⊆ _S_. The inference is determined by the effects actually exercised in the closure body:
 
 ```spore
 fn example() -> Unit
@@ -770,20 +764,20 @@ ERROR [effect-violation] Hole ?fetch_logic filled code uses unauthorised effects
 
 The cost model maintains a **four-dimensional cost vector**: `(compute, alloc, io, parallel)`.
 
-| Dimension | Abbreviation | Meaning | Unit |
-|---|---|---|---|
-| Compute | `C` | CPU operation steps | op (operation) |
-| Allocation | `A` | Heap memory allocation | cell (abstract memory unit) |
-| I/O | `W` | Side-effect / external call count | call |
-| Parallelism | `P` | Parallel execution width | lane |
+| Dimension   | Abbreviation | Meaning                           | Unit                        |
+| ----------- | ------------ | --------------------------------- | --------------------------- |
+| Compute     | `C`          | CPU operation steps               | op (operation)              |
+| Allocation  | `A`          | Heap memory allocation            | cell (abstract memory unit) |
+| I/O         | `W`          | Side-effect / external call count | call                        |
+| Parallelism | `P`          | Parallel execution width          | lane                        |
 
 Effect sets provide hard upper-bound constraints on these cost dimensions:
 
-| Condition | Cost dimension constraint |
-|---|---|
-| `uses {}` | `io = 0` (guaranteed no I/O overhead) |
-| S ∩ {NetConnect, NetListen, FileRead, FileWrite, Console} ≠ ∅ | `io > 0` possible |
-| `Spawn ∈ S` | `parallel > 0` possible |
+| Condition                                                     | Cost dimension constraint             |
+| ------------------------------------------------------------- | ------------------------------------- |
+| `uses {}`                                                     | `io = 0` (guaranteed no I/O overhead) |
+| S ∩ {NetConnect, NetListen, FileRead, FileWrite, Console} ≠ ∅ | `io > 0` possible                     |
+| `Spawn ∈ S`                                                   | `parallel > 0` possible               |
 
 The relationship is a **necessary condition**: if the effect set excludes all I/O effects, the cost model's I/O dimension is provably zero.
 
@@ -812,17 +806,17 @@ effect FileWrite {
 }
 
 effect Env {
-    fn get(name: Str) -> Option[Str]
-    fn vars() -> List[(Str, Str)]
+    fn get(name: Str) -> Option[Str];
+    fn vars() -> List[(Str, Str)];
 }
 ```
 
-Declaring `uses [FileRead]` authorizes the effect, but operations remain explicit: `perform FileRead.read_file(path)` dispatches to the active `FileRead` handler. Canonical v0.1 semantics require the corresponding `effect` interface to be declared explicitly; undeclared pseudo-effect paths are compatibility-only.
+Declaring `uses [FileRead]` authorizes the effect, but operations remain explicit: `perform FileRead.read_file(path)` dispatches to the active `FileRead` handler. Canonical semantics require the corresponding `effect` interface to be declared explicitly; undeclared pseudo-effect paths are compatibility-only.
 
-Effect aliases are part of the committed v0.1 surface:
+Effect aliases are part of the committed surface:
 
 ```spore
-effect FileIO = FileRead | FileWrite
+effect FileIO = FileRead | FileWrite;
 ```
 
 This expands semantically to the union of the two effects and does not define a new operation surface of its own.
@@ -862,7 +856,7 @@ uses []
 
 The first example is a mock handler. The second shows the same declaration
 shape applied to a different effect family. A Platform package installs
-handlers using the same model; the difference is only *where* the handler
+handlers using the same model; the difference is only _where_ the handler
 instance comes from (project startup / adapter wiring) rather than any special
 Platform-only semantics.
 
@@ -900,9 +894,9 @@ handle {
 }
 ```
 
-#### User-defined effects (allowed from v1)
+#### User-defined effects
 
-Users may define their own effects from the first version of Spore:
+Users may define their own effects:
 
 ```spore
 effect RateLimit {
@@ -1020,15 +1014,15 @@ The language server protocol integration should expose effect information throug
 
 ### New diagnostics
 
-| Code | Severity | Message template |
-|---|---|---|
-| `effect-violation` | Error | Function body uses effect `{cap}` not declared in `uses` clause. Declared: `{declared}`. Required: `{required}`. Excess: `{excess}`. |
-| `cap-closure-violation` | Error | Closure passed to `{fn_name}` must be pure (`uses []`), but it uses `{caps}`. |
-| `cap-spawn-missing` | Error | `spawn` expression requires `Spawn` effect, but current scope declares `uses {scope_caps}`. |
-| `cap-narrowing-violation` | Error | Spawn body uses `{child_caps}` which is not a subset of parent scope `{parent_caps}`. Excess: `{excess}`. |
-| `cap-unknown` | Error | Unknown effect `{name}`. Did you mean `{suggestion}`? |
-| `cap-alias-cycle` | Error | Effect alias `{name}` contains a cycle: `{cycle_path}`. |
-| `cap-redundant` | Warning | Effect `{cap}` is declared but never used in the function body. |
+| Code                      | Severity | Message template                                                                                                                     |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `effect-violation`        | Error    | Function body uses effect `{cap}` not declared in `uses` clause. Declared: `{declared}`. Required: `{required}`. Excess: `{excess}`. |
+| `cap-closure-violation`   | Error    | Closure passed to `{fn_name}` must be pure (`uses []`), but it uses `{caps}`.                                                        |
+| `cap-spawn-missing`       | Error    | `spawn` expression requires `Spawn` effect, but current scope declares `uses {scope_caps}`.                                          |
+| `cap-narrowing-violation` | Error    | Spawn body uses `{child_caps}` which is not a subset of parent scope `{parent_caps}`. Excess: `{excess}`.                            |
+| `cap-unknown`             | Error    | Unknown effect `{name}`. Did you mean `{suggestion}`?                                                                                |
+| `cap-alias-cycle`         | Error    | Effect alias `{name}` contains a cycle: `{cycle_path}`.                                                                              |
+| `cap-redundant`           | Warning  | Effect `{cap}` is declared but never used in the function body.                                                                      |
 
 ### Diagnostic quality guidelines
 
@@ -1071,7 +1065,7 @@ error[effect-violation]: function body uses undeclared effect
 
 5. **Alias is expansion only.** Effect aliases do not create new abstract effects. This prevents hiding implementation details behind an alias boundary — the caller always sees the expanded set.
 
-6. **String-based EffectSet.** Using `BTreeSet<String>` for the internal representation is simple but offers no compile-time interning or efficient bitset operations. This may need revisiting for large-scale codebases with many effects.
+6. **EffectSet representation.** Using identifier-based effect sets is simple but offers no compile-time interning or efficient bitset operations. This may need revisiting for large-scale codebases with many effects.
 
 ---
 
@@ -1113,7 +1107,7 @@ Algebraic effect handlers (as in Koka or OCaml 5) allow effects to be intercepte
 Spore's handler model is intentionally simpler than full algebraic effects:
 handlers are lexical, non-resumable, and one-shot. A matching handler arm
 computes the value of the corresponding `perform` expression directly; there is
-no continuation capture or `resume()` path in canonical v0.1 semantics.
+no continuation capture or `resume()` path in canonical semantics.
 Discharge is explicit: handled effects are removed from the local residual set,
 while handler implementation effects remain visible to the enclosing scope.
 Normal, mock, and Platform handlers all follow this same rule.
@@ -1130,18 +1124,18 @@ Encoding effects in the type system via monads (e.g., `IO a`, `State s a`).
 
 ## Prior art
 
-| System | Approach | Relation to this SEP |
-|---|---|---|
-| **Koka** | Algebraic effects with row-polymorphic effect types | Spore takes the same "effects in the type" philosophy with flat sets and simplified handlers (no continuations) |
-| **Eff** | First-class algebraic effects and handlers | Spore adopts simplified handlers (no continuations); effects are statically checked with runtime handler dispatch |
-| **Rust** | No built-in effect system; `unsafe` is the only effect marker | Spore generalises `unsafe` to a full effect vocabulary |
-| **Haskell** | `IO` monad, mtl-style monad transformers | Spore replaces monadic encoding with flat set annotation |
-| **OCaml 5** | Algebraic effects for concurrency | Spore's `Spawn` effect is analogous; Spore adopts simplified handlers without continuations |
-| **Scala (ZIO)** | Environment type `R` in `ZIO[R, E, A]` | Similar in spirit; ZIO's `R` is an intersection type, Spore uses a flat set |
-| **Unison** | Ability types (algebraic effects) | Close conceptual ancestor; Spore simplifies by removing polymorphism |
-| **Android Manifest** | Permission declarations | Same "declare what you need" philosophy at the OS level |
-| **Wasm Component Model** | Import/export effects | Static effect declaration before instantiation |
-| **Java (checked exceptions)** | `throws` clause | Spore's `uses` is analogous but tracks effects rather than error types |
+| System                        | Approach                                                      | Relation to this SEP                                                                                              |
+| ----------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Koka**                      | Algebraic effects with row-polymorphic effect types           | Spore takes the same "effects in the type" philosophy with flat sets and simplified handlers (no continuations)   |
+| **Eff**                       | First-class algebraic effects and handlers                    | Spore adopts simplified handlers (no continuations); effects are statically checked with runtime handler dispatch |
+| **Rust**                      | No built-in effect system; `unsafe` is the only effect marker | Spore generalises `unsafe` to a full effect vocabulary                                                            |
+| **Haskell**                   | `IO` monad, mtl-style monad transformers                      | Spore replaces monadic encoding with flat set annotation                                                          |
+| **OCaml 5**                   | Algebraic effects for concurrency                             | Spore's `Spawn` effect is analogous; Spore adopts simplified handlers without continuations                       |
+| **Scala (ZIO)**               | Environment type `R` in `ZIO[R, E, A]`                        | Similar in spirit; ZIO's `R` is an intersection type, Spore uses a flat set                                       |
+| **Unison**                    | Ability types (algebraic effects)                             | Close conceptual ancestor; Spore simplifies by removing polymorphism                                              |
+| **Android Manifest**          | Permission declarations                                       | Same "declare what you need" philosophy at the OS level                                                           |
+| **Wasm Component Model**      | Import/export effects                                         | Static effect declaration before instantiation                                                                    |
+| **Java (checked exceptions)** | `throws` clause                                               | Spore's `uses` is analogous but tracks effects rather than error types                                            |
 
 ---
 
@@ -1153,17 +1147,7 @@ Spore is a new language and this SEP defines a core feature of its type system. 
 
 ### Interaction with SEP-0002
 
-This SEP depends on SEP-0002 (Type System). The `EffectSet` is integrated into the function type representation defined there:
-
-```rust
-enum Ty {
-    I64,
-    Bool,
-    Str,
-    Fn(Vec<Ty>, Box<Ty>, EffectSet),  // params, return, effects
-    // ...
-}
-```
+This SEP depends on SEP-0002 (Type System). The effect set is integrated into the function type representation: `Fn(params, ret, S)` where `S` is the set of required effect names.
 
 ### Future extensibility
 
@@ -1175,36 +1159,28 @@ enum Ty {
 
 ## Unresolved questions
 
-### 1. Effect subtraction syntax
+### 1. Effect identity, scoping, and imports
 
-Should Spore support a subtraction syntax such as `uses [All \ Spawn]`? This depends on the definition of the universal set **E**, which may vary across platforms. Current decision: **not supported**. Developers must enumerate effects explicitly.
+Third-party packages may define new atomic effects. The remaining design
+question is how those names are made globally unambiguous across packages:
+qualified module paths, package-qualified names, or another identity layer tied
+to the module/package system in SEP-0008.
 
-### 2. Platform effect ceilings
+### 2. Fine-grained effect policy
 
-How does a module-level `platform [Web]` declaration interact with function-level `uses` clauses? Two options:
+The language-level model currently uses coarse intent-oriented effects such as
+`FileRead`, `FileWrite`, `Console`, and `NetConnect`. More granular policies
+such as path-scoped filesystem access or separate console read/write permissions
+remain a future extension. SEP-0008 currently treats those as manifest/platform
+policy rather than core effect algebra.
 
-- **Intersection model:** The effective effect set is `S_function ∩ S_platform`.
-- **Constraint model:** The compiler checks `S_function ⊆ S_platform` and rejects violations.
+### 3. Effect evolution and deprecation
 
-The constraint model (static rejection) is preferred but needs formal specification.
+When an atomic effect is deprecated, renamed, or split, the language needs a
+migration story: diagnostics, compatibility aliases, possible `@deprecated`
+metadata, and any automated rewrites.
 
-### 3. Effect scoping and imports
-
-Can third-party libraries define new atomic effects? If so, how are they scoped and imported? Should there be a namespace mechanism (`mylib::MyEffect`)?
-
-### 4. Granularity of file-system effects
-
-Is `FileRead` / `FileWrite` the right granularity, or should effects be path-scoped (e.g., `FileRead("/etc/config")`)? Path-scoping adds expressiveness but complicates the set algebra.
-
-### 5. Granularity of `Console` effect
-
-Should `Console` be split further (e.g., `ConsoleRead` for stdin vs `ConsoleWrite` for stdout/stderr)? A single `Console` is simpler and covers the common case where terminal I/O is bidirectional, but finer granularity may be useful for sandboxing scenarios where a program should print output but not read input.
-
-### 6. Effect evolution and deprecation
-
-When an atomic effect is deprecated or split (e.g., `FileIO` split into `FileRead` + `FileWrite`), what migration tooling is needed? Should the compiler support `@deprecated` annotations on effect definitions?
-
-### 7. Interaction with generics
+### 4. Interaction with generics
 
 How do generic type parameters interact with effect sets? For example:
 
@@ -1216,25 +1192,33 @@ fn apply[T, R](f: (T) -> R, x: T) -> R {
 
 This currently works only with pure `f`. If `f` has effects, should `apply` need to declare them? Without effect polymorphism, the answer is that `apply` must be specialised for each effect set, which may require monomorphisation or overloading.
 
-### 8. Runtime effect tokens
+### 5. Runtime effect tokens
 
 Should effect tokens have a runtime representation (e.g., for dependency injection in tests), or are they purely a compile-time concept? A hybrid model where effects are erased by default but can be reified for testing purposes may be desirable.
+
+### Resolved or delegated questions
+
+- **Effect subtraction syntax** is not part of the accepted surface. Spore does not support
+  `uses [All \ Spawn]`; developers enumerate effects explicitly.
+- **Platform ceilings** are delegated to SEP-0008. If standardized, the expected
+  model is static constraint checking (`S_function ⊆ S_platform`), not
+  silently intersecting a function's declared effect set.
 
 ---
 
 ## Appendix A: Formal notation quick reference
 
-| # | Notation | Meaning |
-|---|----------|---------|
-| 1 | **E** | Universe of atomic effects |
-| 2 | S, S₁, S₂ | Effect sets (finite subsets of **E**) |
-| 3 | {} or ∅ | Empty effect set (pure function) |
-| 4 | S₁ ⊆ S₂ | S₁ is a subset of S₂ |
-| 5 | S₁ ∪ S₂ | Union of S₁ and S₂ |
-| 6 | S₁ ∩ S₂ | Intersection of S₁ and S₂ |
-| 7 | (T → R uses S) | Function type: parameter T, return R, effect set S |
-| 8 | Γ; S ⊢ e : T | Typing judgement: under context Γ and effect set S, expression e has type T |
-| 9 | 𝒫(prop, S) | Property inference function: determines property `prop` from effect set S |
-| 10 | <: | Subtype relation |
-| 11 | (C, A, W, P) | Four-dimensional cost vector: compute(op), alloc(cell), io(call), parallel(lane) |
-| 12 | `effect C = A₁ | A₂ | ... | Aₙ` | Named alias definition expanding to a flat set of atomic effects |
+| #   | Notation       | Meaning                                                                          |
+| --- | -------------- | -------------------------------------------------------------------------------- |
+| 1   | **E**          | Universe of atomic effects                                                       |
+| 2   | S, S₁, S₂      | Effect sets (finite subsets of **E**)                                            |
+| 3   | {} or ∅        | Empty effect set (pure function)                                                 |
+| 4   | S₁ ⊆ S₂        | S₁ is a subset of S₂                                                             |
+| 5   | S₁ ∪ S₂        | Union of S₁ and S₂                                                               |
+| 6   | S₁ ∩ S₂        | Intersection of S₁ and S₂                                                        |
+| 7   | (T → R uses S) | Function type: parameter T, return R, effect set S                               |
+| 8   | Γ; S ⊢ e : T   | Typing judgement: under context Γ and effect set S, expression e has type T      |
+| 9   | 𝒫(prop, S)     | Property inference function: determines property `prop` from effect set S        |
+| 10  | <:             | Subtype relation                                                                 |
+| 11  | (C, A, W, P)   | Four-dimensional cost vector: compute(op), alloc(cell), io(call), parallel(lane) |
+| 12  | `effect C = A₁ | A₂                                                                               | ... | Aₙ` | Named alias definition expanding to a flat set of atomic effects |

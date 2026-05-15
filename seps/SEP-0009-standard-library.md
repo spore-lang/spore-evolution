@@ -33,11 +33,9 @@ implementation, and ambiguous cases use trait-qualified syntax.
 
 The stdlib is deliberately small. Spore follows the principle that the standard library should provide exactly the types and functions needed to write idiomatic Spore code, with everything else available as packages.
 
-> **Target-surface note**: This SEP still contains historical `std.*` examples
-> in places. For the approved compositional-semantics wave, the engineering-
-> facing helper naming is expected to use `spore.combine`, `spore.merge`,
-> `spore.order`, and `spore.laws`, and explicitly does **not** introduce a
-> user-facing `std.algebra` surface.
+The standard-library naming uses `std.*` for core modules and `spore.*` for
+algebraic helper surfaces (for example, `spore.combine`, `spore.merge`,
+`spore.order`, and `spore.laws`). No `std.algebra` surface is introduced.
 
 ## Motivation
 
@@ -94,9 +92,8 @@ import std.json        // json_parse, json_to_string
 
 ### How do I/O functions work?
 
-The current implementation does **not** yet ship a stabilized `std.io`
-abstraction layer. Manifest-backed projects import the selected Platform
-package's modules directly, and those modules expose `foreign fn` declarations
+Manifest-backed projects import the selected Platform
+package's modules directly. Those modules expose `foreign fn` declarations
 with explicit `uses [...]` requirements.
 
 ```spore
@@ -109,18 +106,16 @@ fn main() -> () uses [Console, Exit] {
 }
 ```
 
-For `basic-cli`, the shipped surface currently lives in modules such as
+For `basic-cli`, the surface lives in modules such as
 `basic_cli.stdout`, `basic_cli.stdin`, `basic_cli.file`, `basic_cli.env`, and
 `basic_cli.cmd`.
 A future `std.io` layer may wrap or re-export a common surface above those
-Platform packages, but that is not today's contract.
+Platform packages.
 
-There is also a narrower runtime path for declared effects in interpreter-style
-execution: `perform Effect.operation(...)` falls back through registered host
-handlers by the **qualified** `Effect.operation` key. Today that support is
-explicit rather than generic (for example, the CLI runtime supports
-`Console.print`, `Console.println`, and `Console.read_line`). Platform package
-modules remain the main shipped application-facing contract.
+For declared effects in interpreter-style
+execution, `perform Effect.operation(...)` falls back through registered host
+handlers by the **qualified** `Effect.operation` key. Platform package
+modules remain the primary application-facing contract.
 
 ## Reference-level explanation
 
@@ -130,16 +125,16 @@ The prelude is implicitly imported into every module. It contains:
 
 #### Primitive types
 
-| Type | Description | Default | Size / notes |
-|------|-------------|---------|----------------|
-| `I8`…`I64`, `U8`…`U64` | Fixed-width integers | `0` for the chosen width | 1–8 bytes |
-| `F32`, `F64` | IEEE-754 floats | `0.0` | 4 or 8 bytes |
-| `Bool` | Boolean | `false` | 1 byte |
-| `Str` | Immutable UTF-8 string | `""` | Variable |
-| `Unit` | Zero-valued type | `()` | 0 bytes |
-| `Never` | Bottom type (uninhabited) | — | 0 bytes |
+| Type                   | Description               | Default                  | Size / notes |
+| ---------------------- | ------------------------- | ------------------------ | ------------ |
+| `I8`…`I64`, `U8`…`U64` | Fixed-width integers      | `0` for the chosen width | 1–8 bytes    |
+| `F32`, `F64`           | IEEE-754 floats           | `0.0`                    | 4 or 8 bytes |
+| `Bool`                 | Boolean                   | `false`                  | 1 byte       |
+| `Str`                  | Immutable UTF-8 string    | `""`                     | Variable     |
+| `Unit`                 | Zero-valued type          | `()`                     | 0 bytes      |
+| `Never`                | Bottom type (uninhabited) | —                        | 0 bytes      |
 
-**No `Char`.** Unicode scalars are represented as `Str` values (typically length 1). Character predicates and conversions live in `stdlib/char.sp` (`is_digit`, `char_to_int`, …). This matches `spore` PR #113.
+**No `Char`.** Unicode scalars are represented as `Str` values (typically length 1). Character predicates and conversions live in `stdlib/char.sp` (`is_digit`, `char_to_int`, …). This matches the language specification.
 
 **Literals.** In the reference type checker, unsuffixed integer literals default to **`I64`** and floating-point literals default to **`F64`**. Standard-library signatures use explicit fixed-width names; `Int` and `Float` are not standard aliases.
 
@@ -438,20 +433,18 @@ impl[T] Set[T] where T: Hash + Eq {
 }
 ```
 
-#### `std.io` (future standardization layer)
+#### `std.io` (platform I/O)
 
-`std.io` is not yet the normative surface of the current implementation. Today,
-manifest-backed projects import Platform package modules directly. For
-`basic-cli`, the shipped modules are:
+`std.io` is a future standardization layer. Manifest-backed projects import Platform package modules directly. For `basic-cli`, the platform modules are:
 
-| Module | Example operations | Required effects |
-|---|---|---|
-| `basic_cli.stdout` | `print`, `println`, `eprint`, `eprintln` | `Console` |
-| `basic_cli.stdin` | `read_line` | `Console` |
-| `basic_cli.file` | `file_read`, `file_write`, `file_exists`, `file_stat` | `FileRead`, `FileWrite` |
-| `basic_cli.dir` | `dir_list`, `dir_mkdir` | `FileRead`, `FileWrite` |
-| `basic_cli.env` | `env_get`, `env_set` | `Env` |
-| `basic_cli.cmd` | `process_run`, `process_run_status`, `exit` | `Spawn`, `Exit` |
+| Module             | Example operations                                    | Required effects        |
+| ------------------ | ----------------------------------------------------- | ----------------------- |
+| `basic_cli.stdout` | `print`, `println`, `eprint`, `eprintln`              | `Console`               |
+| `basic_cli.stdin`  | `read_line`                                           | `Console`               |
+| `basic_cli.file`   | `file_read`, `file_write`, `file_exists`, `file_stat` | `FileRead`, `FileWrite` |
+| `basic_cli.dir`    | `dir_list`, `dir_mkdir`                               | `FileRead`, `FileWrite` |
+| `basic_cli.env`    | `env_get`, `env_set`                                  | `Env`                   |
+| `basic_cli.cmd`    | `process_run`, `process_run_status`, `exit`           | `Spawn`, `Exit`         |
 
 ```spore
 pub foreign fn process_run(cmd: Str, args: List[Str]) -> Str ! ExecError uses [Spawn]
@@ -459,7 +452,7 @@ pub foreign fn process_run_status(cmd: Str, args: List[Str]) -> Option[U8] ! Exe
 pub foreign fn exit(code: U8) -> Never uses [Exit]
 ```
 
-`basic_cli.cmd.exit(code)` is the currently shipped explicit process-termination
+`basic_cli.cmd.exit(code)` is the explicit process-termination
 surface. In project mode it works together with SEP-0008's startup contract
 (`main() -> ()`), and the runtime converts the resulting structured outcome into
 a host exit status.
@@ -590,25 +583,25 @@ All error types implement `Error`, `Display`, and `Debug`.
 
 These 13 traits have special compiler support (SEP-0002). The stdlib provides their definitions:
 
-| Trait | Methods | Derivable | Description |
-|-------|---------|-----------|-------------|
-| `Eq` | `eq(self, other) -> Bool` | ✅ | Equality comparison |
-| `Ord` | `compare(self, other) -> Ordering` | ✅ | Total ordering |
-| `Clone` | `clone(self) -> Self` | ✅ | Deep copy |
-| `Display` | `display(self) -> Str` | ❌ | Human-readable formatting |
-| `Debug` | `debug(self) -> Str` | ✅ | Debug formatting |
-| `Hash` | `hash(self) -> U64` | ✅ | Hash computation |
-| `Default` | `default() -> Self` | ✅ | Default value |
-| `Serialize` | `serialize(self) -> List[U8]` | ✅ | Byte serialization |
-| `Deserialize` | `deserialize(bytes: List[U8]) -> Result[Self, ParseError]` | ✅ | Byte deserialization |
-| `Add` | `add(self, other) -> Self` | ❌ | `+` operator |
-| `Sub` | `sub(self, other) -> Self` | ❌ | `-` operator |
-| `Mul` | `mul(self, other) -> Self` | ❌ | `*` operator |
-| `Div` | `div(self, other) -> Self` | ❌ | `/` operator |
+| Trait         | Methods                                                    | Derivable | Description               |
+| ------------- | ---------------------------------------------------------- | --------- | ------------------------- |
+| `Eq`          | `eq(self, other) -> Bool`                                  | ✅        | Equality comparison       |
+| `Ord`         | `compare(self, other) -> Ordering`                         | ✅        | Total ordering            |
+| `Clone`       | `clone(self) -> Self`                                      | ✅        | Deep copy                 |
+| `Display`     | `display(self) -> Str`                                     | ❌        | Human-readable formatting |
+| `Debug`       | `debug(self) -> Str`                                       | ✅        | Debug formatting          |
+| `Hash`        | `hash(self) -> U64`                                        | ✅        | Hash computation          |
+| `Default`     | `default() -> Self`                                        | ✅        | Default value             |
+| `Serialize`   | `serialize(self) -> List[U8]`                              | ✅        | Byte serialization        |
+| `Deserialize` | `deserialize(bytes: List[U8]) -> Result[Self, ParseError]` | ✅        | Byte deserialization      |
+| `Add`         | `add(self, other) -> Self`                                 | ❌        | `+` operator              |
+| `Sub`         | `sub(self, other) -> Self`                                 | ❌        | `-` operator              |
+| `Mul`         | `mul(self, other) -> Self`                                 | ❌        | `*` operator              |
+| `Div`         | `div(self, other) -> Self`                                 | ❌        | `/` operator              |
 
 ### 4.6 Platform binding architecture
 
-The current runtime stack for platform-backed I/O looks like this:
+The platform-backed I/O stack looks like this:
 
 ```text
 ┌──────────────────────────────────────────────┐
@@ -639,7 +632,7 @@ Key properties:
 2. **Each foreign surface** declares explicit effect requirements.
 3. **The selected Platform package** owns startup contracts and handled-effect metadata.
 4. **Some operations** may propagate structured runtime outcomes before host conversion (for example `Exit` in project mode).
-5. **Future stdlib wrappers** may layer above this, but they are not required for the current implementation.
+5. **Future stdlib wrappers** may layer above this.
 
 ### 4.7 Cost expression inputs
 
@@ -647,13 +640,13 @@ The cost annotation language (SEP-0004) does not call ordinary stdlib functions
 inside `cost [...]`. Verified costs mention only Index parameters and
 `cost(f)` summaries:
 
-| Source | Example | Notes |
-|--------|---------|-------|
-| Index parameter | `N: Index` | Compile-time non-negative size symbol |
-| Indexed count | `Count[N]` | Runtime count whose static Index is `N` |
-| Indexed container | `Array[T, N]`, `Vec[T, max: N]` | Exposes `N` to CostExpr |
-| Index operation | `max(N, M)`, `min(N, M)`, `span(Hi, Lo)` | Pure IndexExpr, not runtime function calls |
-| Function summary | `cost(f)` | Substituted when `f` is concrete at the call site |
+| Source            | Example                                  | Notes                                             |
+| ----------------- | ---------------------------------------- | ------------------------------------------------- |
+| Index parameter   | `N: Index`                               | Compile-time non-negative size symbol             |
+| Indexed count     | `Count[N]`                               | Runtime count whose static Index is `N`           |
+| Indexed container | `Array[T, N]`, `Vec[T, max: N]`          | Exposes `N` to CostExpr                           |
+| Index operation   | `max(N, M)`, `min(N, M)`, `span(Hi, Lo)` | Pure IndexExpr, not runtime function calls        |
+| Function summary  | `cost(f)`                                | Substituted when `f` is concrete at the call site |
 
 Dynamic methods such as `list.len()`, `s.len()`, `map.len()`, or `set.len()`
 return runtime integers. They are useful program APIs, but they are not
@@ -692,14 +685,17 @@ The stdlib is represented in the module system as:
       "trait": "Mappable",
       "name": "map",
       "type_params": ["A", "B", "N: Index"],
-      "params": [{"name": "self", "type": "Vec[A, max: N]"}, {"name": "f", "type": "(A) -> B"}],
+      "params": [
+        { "name": "self", "type": "Vec[A, max: N]" },
+        { "name": "f", "type": "(A) -> B" }
+      ],
       "return_type": "Vec[B, max: N]",
       "cost": "N * cost(f) + N",
       "effects": []
     }
   ],
   "types": [
-    {"name": "Option", "params": ["T"], "variants": ["Some(T)", "None"]}
+    { "name": "Option", "params": ["T"], "variants": ["Some(T)", "None"] }
   ]
 }
 ```
@@ -715,12 +711,12 @@ This structured representation enables:
 
 New diagnostic codes for stdlib-related errors:
 
-| Code | Category | Message |
-|------|----------|---------|
-| `E0018` | Type error | stdlib function applied to wrong type |
+| Code    | Category   | Message                                |
+| ------- | ---------- | -------------------------------------- |
+| `E0018` | Type error | stdlib function applied to wrong type  |
 | `E0019` | Type error | missing trait bound for stdlib generic |
-| `W0001` | Warning | unused stdlib import |
-| `W0002` | Warning | deprecated stdlib function |
+| `W0001` | Warning    | unused stdlib import                   |
+| `W0002` | Warning    | deprecated stdlib function             |
 
 ## Drawbacks
 
@@ -741,19 +737,19 @@ Rejected. A large stdlib creates maintenance burden and version coupling. Spore'
 
 ### No foreign fn (pure Spore stdlib)
 
-Rejected. I/O operations cannot be expressed in pure Spore. The designed MVP
+Rejected. I/O operations cannot be expressed in pure Spore. The designed
 mechanism is Platform-owned package modules plus the selected Platform contract
 boundary (SEP-0008).
 
 ## Prior art
 
-| Language | Stdlib approach | Comparison |
-|----------|----------------|------------|
-| **Rust** | `std` + `core` (no-std) | Similar layered approach; Spore's is smaller |
-| **Roc** | Platform-provided I/O | Direct inspiration for Spore's platform model |
-| **Haskell** | `Prelude` + `base` | Similar prelude concept; Spore avoids Haskell's large `base` |
-| **Go** | Batteries-included | Larger than Spore's approach |
-| **Elm** | Small core + packages | Similar philosophy; Spore adds cost annotations |
+| Language    | Stdlib approach         | Comparison                                                   |
+| ----------- | ----------------------- | ------------------------------------------------------------ |
+| **Rust**    | `std` + `core` (no-std) | Similar layered approach; Spore's is smaller                 |
+| **Roc**     | Platform-provided I/O   | Direct inspiration for Spore's platform model                |
+| **Haskell** | `Prelude` + `base`      | Similar prelude concept; Spore avoids Haskell's large `base` |
+| **Go**      | Batteries-included      | Larger than Spore's approach                                 |
+| **Elm**     | Small core + packages   | Similar philosophy; Spore adds cost annotations              |
 
 ## Backward compatibility and migration
 
@@ -767,14 +763,19 @@ This is a new specification — no backward compatibility concerns. However:
 
 1. **Mutable state API**: Should `Ref[T]` be in the prelude or `std.state`? Currently referenced in SEP-0001 but not fully specified here.
 
-2. **Concurrency primitives**: `Task[T]`, `Chan[T]`, `select` are defined in SEP-0007 — should they be re-exported via `std.concurrent` or remain as language primitives?
+2. **Concurrency primitives**: `Task[T]`, `Channel[T]`, and `select` are defined in SEP-0007 — should they be re-exported via `std.concurrent` or remain as language primitives?
 
 3. **String encoding**: Should `Str` expose byte-level access, or only scalar-oriented indexing? Current spec assumes UTF-8; there is no `Char` type (length-1 `Str` values instead).
 
-4. **Numeric tower**: The reference implementation exposes fixed widths (`I8`…`U64`, `F32`, `F64`). Stdlib APIs should choose explicit widths at each boundary rather than relying on abstract scalar aliases.
+4. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
 
-5. **Iterator protocol**: Should there be a lazy `Iterator[T]` trait instead of materializing `List[T]` for all operations? This would change cost signatures significantly.
+5. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
 
-6. **Error recovery**: How should `PanicError` interact with the effect system? Should `panic` require an effect?
+6. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `I64` ↔ `i64`, `Str` ↔ UTF-8 buffer)
 
-7. **FFI type mapping**: How do Spore types map to Rust/C types across the FFI boundary? (e.g., `I64` ↔ `i64`, `Str` ↔ UTF-8 buffer)
+### Resolved questions
+
+1. **Numeric tower**: Resolved by SEP-0002 and SEP-0001. The language surface
+   uses fixed-width numeric types (`I8` through `U64`, plus `F32` and `F64`),
+   and stdlib APIs should choose explicit widths at each boundary rather than
+   relying on abstract scalar aliases.

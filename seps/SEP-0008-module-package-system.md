@@ -8,7 +8,9 @@ authors:
 created: 2026-03-31
 requires:
   - 1
+  - 2
   - 3
+  - 4
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/8"
 pr: null
 superseded_by: null
@@ -16,11 +18,11 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
-> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where a selected Platform package declares its startup contract, host adapter, and handled effects via manifest metadata and package modules. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`) and `spore.toml` for project configuration. Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through explicit function-level effects plus Platform metadata. Broader project/file effect ceilings remain follow-up work rather than part of the current shipped contract.
+> **Executive Summary**: Defines a content-addressed package system (BLAKE3 dual-hash) with platform-as-package architecture, where a selected Platform package declares its startup contract, host adapter, and handled effects via manifest metadata and package modules. Uses 1-file-=1-module mapping with dot-separated import paths (`import billing.invoice`) and `spore.toml` for project configuration. Enforces visibility rules (pub/pub(pkg)/private) at module boundaries, supports multi-file compilation with explicit import resolution, and achieves supply-chain security through explicit function-level effects plus Platform metadata. Broader project/file effect ceilings remain follow-up work.
 
 ## Summary
 
-This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, and how IO is abstracted through selected Platform packages and startup contracts. Additional project-wide or file-level effect ceilings remain reserved for later SEP work instead of being part of the current implementation-aligned contract.
+This SEP specifies the complete module and package system for the Spore programming language. It defines how code is organized (one file = one module, no explicit `module` declarations), how modules are imported via dot-separated paths (`import billing.invoice`), how visibility is controlled (private / `pub(pkg)` / `pub`), how functions are content-addressed via a dual-hash scheme (signature hash + implementation AST hash using BLAKE3), how packages are structured around `spore.toml` manifests with a `.spore-lock` for reproducible builds, how dependencies are resolved without semantic versioning, and how IO is abstracted through selected Platform packages and startup contracts. Additional project-wide or file-level effect ceilings remain reserved for later SEP work.
 
 The design synthesizes ideas from Unison (content-addressing), Roc (platform/package separation), Elixir/Python (dot-separated import paths), Elm/Go (file-based modules, no circular dependencies), and Rust (three-level visibility), while introducing novel concepts such as the import/alias separation, reserved effect-ceiling design space, and the dual-hash content-addressing scheme that decouples API stability from implementation pinning.
 
@@ -57,7 +59,7 @@ Content hashes make semver redundant. Instead of trusting a human to correctly l
 - `sig` changed → Breaking change. The `spore --permit` command is required to explicitly accept the change.
 - `impl` changed, `sig` unchanged → Internal refactor. `.spore-lock` updates automatically.
 
-A human-readable `version` field remains available in `spore.toml` for documentation purposes, but it plays no role in dependency resolution. Named aliases (e.g., `"std-http-v2"`) provide stable human-readable identifiers that map to specific hashes.
+A human-readable release label may remain available in `spore.toml` for documentation purposes, but it plays no role in dependency resolution. Named aliases (e.g., `"std-http-stable"`) provide stable human-readable identifiers that map to specific hashes.
 
 ### Why platforms for IO?
 
@@ -77,14 +79,14 @@ Every `.sp` file is exactly one module. The module name is derived from the file
 The canonical source extension in docs and manifests is `.sp`. Compatibility-only
 `.spore` handling, where it exists, is secondary to this spelling.
 
-| File Path | Module Name |
-|---|---|
+| File Path                | Module Name       |
+| ------------------------ | ----------------- |
 | `src/billing/invoice.sp` | `billing.invoice` |
-| `src/auth/token.sp` | `auth.token` |
-| `src/utils.sp` | `utils` |
-| `src/main.sp` | `main` |
+| `src/auth/token.sp`      | `auth.token`      |
+| `src/utils.sp`           | `utils`           |
+| `src/main.sp`            | `main`            |
 
-There is no `module` keyword — the filesystem **is** the declaration. Current implementations do not require or standardize an additional file-level `#![uses(...)]` ceiling; effect requirements remain attached to individual function signatures.
+There is no `module` keyword — the filesystem **is** the declaration. Spore requires effect requirements attached to individual function signatures; no additional file-level `#![uses(...)]` ceiling is standardized.
 
 ```spore
 // src/billing/invoice.sp
@@ -114,8 +116,8 @@ Module names use **dot-separated** paths derived from the filesystem. There is n
 Spore uses **dot-separated** paths for module imports and for item selection:
 
 ```spore
-// Module import: brings the module into scope; current implementations then
-// register its pub items as unqualified local names
+// Module import: brings the module into scope;
+// registers its pub items as unqualified local names
 import billing.invoice
 
 // Module import with rename
@@ -126,13 +128,7 @@ alias gen = billing.invoice.generate_invoice
 alias Inv = billing.types.Invoice
 ```
 
-> **Note (D12):** Selective imports (`import billing.invoice.{calculate, Invoice}`) are not supported in v0.1. Use `import billing.invoice` and call the imported item by its current bare local name, or use `alias` for specific items.
->
-> **Current implementation note:** `import mod as alias` is the locked surface
-> syntax, but imported items are still registered unqualified in the current
-> checker/runtime path. Alias-qualified member access (`inv.generate_invoice()`)
-> remains follow-up work; today the safe implementation-aligned path is to
-> import the module and call the imported item by its bare local name.
+> **Note:** Selective imports (`import billing.invoice.{calculate, Invoice}`) are not part of the accepted surface. Use `import billing.invoice` and call the imported item by its bare local name, or use `alias` for specific items.
 
 Key rules:
 
@@ -151,11 +147,11 @@ Key rules:
 
 ### Visibility
 
-| Level | Keyword | Meaning |
-|---|---|---|
-| **Private** | *(default)* | Visible only within the defining module |
-| **Package-internal** | `pub(pkg)` | Visible to any module within the same package |
-| **Public** | `pub` | Visible to any importer, including external packages |
+| Level                | Keyword     | Meaning                                              |
+| -------------------- | ----------- | ---------------------------------------------------- |
+| **Private**          | _(default)_ | Visible only within the defining module              |
+| **Package-internal** | `pub(pkg)`  | Visible to any module within the same package        |
+| **Public**           | `pub`       | Visible to any importer, including external packages |
 
 ```spore
 // Public: any importer can call this
@@ -190,11 +186,11 @@ my-billing-lib/
 
 Three package types exist:
 
-| Type | Has Platform? | Can do IO? | Use Case |
-|---|---|---|---|
-| `package` | No | No (declares effect requirements) | Libraries, reusable components |
-| `application` | Yes | Yes (via Platform) | Executables, services |
-| `platform` | Is the Platform | Yes (raw syscalls) | Runtime providers |
+| Type          | Has Platform?   | Can do IO?                        | Use Case                       |
+| ------------- | --------------- | --------------------------------- | ------------------------------ |
+| `package`     | No              | No (declares effect requirements) | Libraries, reusable components |
+| `application` | Yes             | Yes (via Platform)                | Executables, services          |
+| `platform`    | Is the Platform | Yes (raw syscalls)                | Runtime providers              |
 
 ### Script Mode
 
@@ -205,7 +201,7 @@ manifest-backed packages and applications only.
 
 ### Platforms
 
-A Platform is the **only** package in a Spore application that bridges declared effects to the host runtime. In the current MVP it contributes:
+A Platform is the **only** package in a Spore application that bridges declared effects to the host runtime. It contributes:
 
 1. package modules that expose Platform-owned `foreign fn` surfaces,
 2. a contract module that defines the startup signature, and
@@ -223,7 +219,7 @@ fn main() -> () uses [Console, Exit] {
 
 For `basic-cli`, project mode currently requires `main() -> ()`. Explicit process termination is modeled as a Platform API (`basic_cli.cmd.exit`) requiring `uses [Exit]`; the runtime carries that as a structured project outcome and the CLI converts that outcome to a host exit status at the process boundary.
 
-In the current implementation, project mode also validates the selected entry's
+Project mode validates the selected entry's
 startup effect requirements against the selected Platform package's
 `[platform].handled-effects` manifest field. A manifest-backed application may only
 start if its entry function's required effects are listed in that Platform
@@ -287,7 +283,7 @@ Illustrative topological build order:
   6. main                (1 dependency: api.handler)
 ```
 
-Diamond dependencies are permitted (they are not cycles). The `.spore-lock` ensures a single canonical version via matching `sig` and `impl` hashes.
+Diamond dependencies are permitted (they are not cycles). The `.spore-lock` ensures a single canonical implementation via matching `sig` and `impl` hashes.
 
 #### Forward references
 
@@ -297,8 +293,8 @@ Within a single module, functions may reference each other regardless of declara
 
 ```text
 import_decl    ::= 'import' module_path ('as' IDENT)?
-                   // NOTE (D12): selective imports ('import' module_path '.' '{' IDENT (',' IDENT)* '}')
-                   // are not supported in v0.1
+	                   // NOTE: selective imports ('import' module_path '.' '{' IDENT (',' IDENT)* '}')
+	                   // are not part of the accepted surface
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT
@@ -362,20 +358,20 @@ For partial functions (those containing holes), `impl = None`. When a hole is fi
 
 #### What changes each hash
 
-| Change | `sig` changes? | `impl` changes? |
-|---|---|---|
-| Parameter name: `order` → `purchase_order` | **Yes** | **Yes** |
-| Parameter type: `Order` → `OrderRequest` | **Yes** | **Yes** |
-| Return type: `Invoice` → `InvoiceResult` | **Yes** | **Yes** |
-| Error type set: Add `[ValidationError]` | **Yes** | **Yes** |
-| Effects: `pure` → `deterministic` | **Yes** | **Yes** |
-| Cost bound: `≤ 3000` → `≤ 5000` | **Yes** | **Yes** |
-| Effects: Add `AuditLog` | **Yes** | **Yes** |
-| Generic constraints: `T: Eq` → `T: Eq + Hash` | **Yes** | **Yes** |
-| Function body: Refactor internals | **No** | **Yes** |
-| Hole filling: Replace `?logic` with code | **No** | `None` → concrete |
-| Comments: Add/remove/edit | **No** | **No** |
-| Formatting: Reformat code | **No** | **No** |
+| Change                                        | `sig` changes? | `impl` changes?   |
+| --------------------------------------------- | -------------- | ----------------- |
+| Parameter name: `order` → `purchase_order`    | **Yes**        | **Yes**           |
+| Parameter type: `Order` → `OrderRequest`      | **Yes**        | **Yes**           |
+| Return type: `Invoice` → `InvoiceResult`      | **Yes**        | **Yes**           |
+| Error type set: Add `[ValidationError]`       | **Yes**        | **Yes**           |
+| Effects: `pure` → `deterministic`             | **Yes**        | **Yes**           |
+| Cost bound: `≤ 3000` → `≤ 5000`               | **Yes**        | **Yes**           |
+| Effects: Add `AuditLog`                       | **Yes**        | **Yes**           |
+| Generic constraints: `T: Eq` → `T: Eq + Hash` | **Yes**        | **Yes**           |
+| Function body: Refactor internals             | **No**         | **Yes**           |
+| Hole filling: Replace `?logic` with code      | **No**         | `None` → concrete |
+| Comments: Add/remove/edit                     | **No**         | **No**            |
+| Formatting: Reformat code                     | **No**         | **No**            |
 
 Key insight: signature changes always change both hashes. Body-only changes update `impl` while leaving `sig` untouched—this prevents unnecessary downstream recompilation.
 
@@ -431,12 +427,12 @@ The `spore --permit` command updates `sig` entries in `.spore-lock`. Implementat
 
 Hashes cascade through three levels, all derived from `sig` only (implementation changes do not propagate):
 
-| Level | What is hashed | When it changes |
-|---|---|---|
-| **Function `sig`** | Canonical signature | Any signature component changes |
-| **Function `impl`** | Compiled AST | Body changes, hole filling, or signature changes |
-| **Module interface** | Sorted hash of all `pub` + `pub(pkg)` `sig` hashes | Any exported function's signature changes |
-| **Package API** | Sorted hash of module interface hashes | Any module's exported interface changes |
+| Level                | What is hashed                                     | When it changes                                  |
+| -------------------- | -------------------------------------------------- | ------------------------------------------------ |
+| **Function `sig`**   | Canonical signature                                | Any signature component changes                  |
+| **Function `impl`**  | Compiled AST                                       | Body changes, hole filling, or signature changes |
+| **Module interface** | Sorted hash of all `pub` + `pub(pkg)` `sig` hashes | Any exported function's signature changes        |
+| **Package API**      | Sorted hash of module interface hashes             | Any module's exported interface changes          |
 
 ### Visibility rules
 
@@ -542,7 +538,7 @@ alias invoice = billing.types.Invoice    // ERROR: 'invoice' conflicts with modu
 #### IO via Platform boundary
 
 Application code declares effect requirements and crosses the runtime
-boundary through the selected Platform package. In the current MVP,
+boundary through the selected Platform package.
 manifest-backed project mode resolves those calls through Platform-owned modules
 plus the Platform's startup contract:
 
@@ -570,7 +566,7 @@ A Platform declares three things:
 3. **Host adapter surface**: The package-owned adapter that bridges the
    application startup into the Platform runtime.
 
-For the current MVP bridge, the source of truth is split between the Platform
+The source of truth is split between the Platform
 package manifest and a dedicated contract module inside the package:
 
 ```toml
@@ -601,7 +597,7 @@ pub fn main_for_host(app_main: () -> ()) -> () {
 The hole-backed startup function in the Platform contract module is the
 authoritative startup signature. Applications targeting that Platform must
 implement the same startup function name plus the same parameter/return shape in
-their entry module. Current MVP effect requirements are checked separately:
+their entry module. Effect requirements are checked separately:
 the selected startup entry's `uses [...]` set must fit within `[platform].handled-effects`
 rather than being encoded into the adapter's callable Rust-facing shape. Any
 `spec` items attached to the Platform contract and the application
@@ -624,7 +620,7 @@ boundary accepts exit codes in `0..=255`; unsupported values are reported as
 errors rather than silently truncated.
 
 Parser-level `platform { ... }` blocks remain future sugar over the same
-package-owned contract; the MVP does not require that syntax to land first.
+package-owned contract; this SEP does not require that syntax to land first.
 
 Application-side Platform selection in `spore.toml`:
 
@@ -659,7 +655,7 @@ multiple Platforms.
 
 Since application code is decoupled from IO implementations, a future Test
 Platform can substitute mock handlers. The syntax below is illustrative future
-sugar rather than the current package-backed MVP surface:
+sugar rather than the package-backed surface:
 
 ```spore
 platform TestPlatform {
@@ -688,7 +684,7 @@ Running `spore test tests/fetch_weather_test.sp` automatically uses the Test Pla
 
 ```bash
 $ spore test tests/fetch_weather_test.sp
-   Using test platform: spore-platform/test v1.0.0
+   Using test platform: spore-platform/test
    Running 3 tests
 
 test fetch_weather_returns_valid_data ... ok (0.001s)
@@ -725,7 +721,7 @@ Package: billing-lib
 
 #### Effect checking today
 
-The current implementation-aligned model standardizes effect checking at two
+The normative model standardizes effect checking at two
 places:
 
 1. function signatures (`uses [...]`)
@@ -733,7 +729,7 @@ places:
 
 Additional project-wide or file-level ceilings such as `[effects].declared`
 or `#![uses(...)]` remain reserved for follow-up design work. They are not part
-of the shipped MVP contract today, and tooling should not treat them as
+of the this SEP contract, and tooling should not treat them as
 normative.
 
 #### Effect propagation
@@ -747,12 +743,11 @@ Importing a module does **not** grant its effects. If you call a function that r
 ```toml
 [package]
 name = "billing-lib"
-version = "1.2.0"                # human-readable, not used for resolution
+release = "stable"               # human-readable, not used for resolution
 type = "package"                  # "package" | "application" | "platform"
 description = "Invoice generation and tax calculation"
 license = "MIT"
 authors = ["Alice <alice@example.com>"]
-spore-version = ">=0.5.0"
 
 [dependencies]
 json-parser = {
@@ -764,7 +759,7 @@ json-parser = {
 [dev-dependencies]
 test-framework = {
     git = "https://github.com/spore-std/test",
-    alias = "spore-test-v1",
+    alias = "spore-test-stable",
     sig = "a1b2c3d4e5f6a7b8",
     impl = "1a2b3c4d5e6f7a8b"
 }
@@ -772,7 +767,7 @@ test-framework = {
 
 Dependencies are declared **per-project** in `spore.toml`, not per-file.
 Additional project-wide effect ceilings remain future design work rather than
-part of the current normative MVP surface.
+part of the normative surface.
 
 Package names are `kebab-case` and globally unique within a registry. Module paths within a package use `snake_case` segments.
 
@@ -780,12 +775,12 @@ Package names are `kebab-case` and globally unique within a registry. Module pat
 
 An application declares one or more named **entries** in `spore.toml`. Each
 entry selects an **entry module**, and the selected Platform then validates the
-module's **startup function** against its **startup contract**. Under the MVP
+module's **startup function** against its **startup contract**. The
 bridge, the selected Platform package manifest names the contract module and
 startup symbol, and that contract module owns the hole-backed startup
 definition whose `spec` items stack with the application's own implementation.
 
-Current CLI behavior also retains a compatibility path for explicit
+The CLI supports explicit
 `spore run src/...` file execution: when the file lives under a discovered
 project's `src/` tree, the tool derives a project-backed entry path from that
 file location. Named manifest entries remain the canonical durable project
@@ -814,10 +809,10 @@ path = "src/migrate.sp"
 ```
 
 Each entry path must point to a `.sp` file containing a startup function that
-satisfies the selected Platform's startup contract. Under the MVP bridge, the
+satisfies the selected Platform's startup contract. The
 selected Platform package manifest names the contract module and startup symbol,
 while that contract module owns the hole-backed startup definition and adapter.
-`basic-cli` currently uses `main` plus `main_for_host`.
+`basic-cli` uses `main` plus `main_for_host`.
 
 #### Content-addressed dependencies (BLAKE3, no semver)
 
@@ -861,7 +856,7 @@ Content hashes ensure integrity regardless of source. Community registries provi
 #### Effect-based trust model
 
 Packages declare dependencies and Platform selection in `spore.toml`. Current
-implementation-aligned effect control does **not** add a separate
+effect control does **not** add a separate
 project-wide `[effects].declared` ceiling. Instead:
 
 - libraries declare required effects on function signatures
@@ -870,7 +865,7 @@ project-wide `[effects].declared` ceiling. Instead:
 - tooling such as `spore audit` reports the resulting dependency/effect graph
 
 More granular dependency grants remain future design space rather than part of
-the current shipped MVP.
+the this SEP contract.
 
 #### Workspace support
 
@@ -897,12 +892,12 @@ A workspace uses a **single `.spore-lock`** at the workspace root. Individual me
 
 Spore recognizes four dependency types:
 
-| Type | `sig` required? | `impl` required? | When needed |
-|---|---|---|---|
-| **Interface** (sig-only) | Yes | No | Type-checking without fetching full source |
-| **Complete** (sig+impl) | Yes | Yes | Full build, linking, reproducible deployment |
-| **Dev** | Yes | Yes | Testing, benchmarking; excluded from production builds |
-| **Optional** | Yes | Yes (if enabled) | Controlled by feature flags |
+| Type                     | `sig` required? | `impl` required? | When needed                                            |
+| ------------------------ | --------------- | ---------------- | ------------------------------------------------------ |
+| **Interface** (sig-only) | Yes             | No               | Type-checking without fetching full source             |
+| **Complete** (sig+impl)  | Yes             | Yes              | Full build, linking, reproducible deployment           |
+| **Dev**                  | Yes             | Yes              | Testing, benchmarking; excluded from production builds |
+| **Optional**             | Yes             | Yes (if enabled) | Controlled by feature flags                            |
 
 ```toml
 [dependencies]
@@ -925,7 +920,7 @@ metrics = { sig = "e2f3a4b5c6d7e8f9", impl = "9f0a1b2c3d4e5f6a", optional = true
 mylib = {
     git = "https://github.com/user/repo",
     branch = "main",           # optional: track a branch
-    tag = "v1.2.3",            # optional: pin a tag
+    tag = "stable-release",    # optional: pin a tag
     rev = "abc123def456",      # optional: pin a commit
     sig = "a1b2c3d4e5f6a7b8",
     impl = "e5f6a7b8c9d0e1f2"
@@ -968,11 +963,10 @@ The `.spore-lock` file records the fully resolved dependency graph:
 
 ```toml
 # Auto-generated by `spore lock`. Do not edit.
-version = 1
+schema = "current"
 
 [metadata]
 generated-at = "2024-01-15T10:30:00Z"
-spore-version = "0.5.2"
 
 [[package]]
 name = "web-server"
@@ -982,7 +976,7 @@ impl = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
 
 [[package]]
 name = "http"
-alias = "std-http-v2"
+alias = "std-http-stable"
 source = { type = "git", url = "https://github.com/std/http", rev = "abc1234" }
 sig = "a3f9c2e1d8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1"
 impl = "7b8d4f2a1e9c3d5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d8c9"
@@ -1022,7 +1016,7 @@ platform = "wasm32"
 packages = ["json"]
 
 [build-metadata]
-compiler-version = "spore-0.5.2"
+compiler-id = "spore"
 build-timestamp = "2024-01-15T10:30:10Z"
 ```
 
@@ -1076,7 +1070,7 @@ pub trait StorageBackend {
 
 **Cache strategy**:
 
-- **Content-addressed**: Identical hashes share storage. Two packages using the same dependency version store it once.
+- **Content-addressed**: Identical hashes share storage. Two packages using the same dependency content store it once.
 - **Global shared**: By default `~/.spore-store` is shared across all projects. Configurable via `~/.sp/config.toml`.
 - **Offline-capable**: Once cached, dependencies are available without network access.
 
@@ -1091,7 +1085,7 @@ GC algorithm: (1) scan all `.spore-lock` files in known project directories, (2)
 
 ### Fine-grained effects (design direction)
 
-For v0.1, Spore uses **coarse-grained** effect names in the language-level type system:
+The accepted surface uses **coarse-grained** effect names in the language-level type system:
 
 ```spore
 fn read_config() -> Config ! IoError
@@ -1123,7 +1117,7 @@ network:          filesystem:        env:            process:
                                       monotonic       fast
 ```
 
-For v0.1, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained effects into the type system is reserved for a future SEP.
+For the accepted surface, the language-level `uses [FileRead]` maps to coarse categories. Fine-grained path restrictions are enforced in `spore.toml` and at runtime via platform policy / host configuration, not in the type system. Promoting fine-grained effects into the type system is reserved for a future SEP.
 
 ### Publish and discovery flow
 
@@ -1134,8 +1128,8 @@ Spore has **no central registry**. Publishing a package means pushing to a Git r
 spore test && spore audit
 
 # 2. Commit and tag
-git add . && git commit -m "Release v1.0.0"
-git tag v1.0.0
+git add . && git commit -m "Release stable"
+git tag stable-release
 
 # 3. Push
 git push origin main --tags
@@ -1202,12 +1196,12 @@ Module: billing.invoice
 
 Snapshots use `sig` hashes only at the module and package level (impl changes do not propagate):
 
-| Level | What is hashed | When it changes |
-|---|---|---|
-| Function `sig` | Canonical signature | Any signature component changes |
-| Function `impl` | Compiled AST | Body changes, hole filling |
-| Module interface | Sorted hash of `pub` + `pub(pkg)` `sig` hashes | Any exported signature changes |
-| Package API | Sorted hash of module interface hashes | Any module interface changes |
+| Level            | What is hashed                                 | When it changes                 |
+| ---------------- | ---------------------------------------------- | ------------------------------- |
+| Function `sig`   | Canonical signature                            | Any signature component changes |
+| Function `impl`  | Compiled AST                                   | Body changes, hole filling      |
+| Module interface | Sorted hash of `pub` + `pub(pkg)` `sig` hashes | Any exported signature changes  |
+| Package API      | Sorted hash of module interface hashes         | Any module interface changes    |
 
 #### Interaction with the Error System
 
@@ -1321,24 +1315,23 @@ Build: success (2 partial functions)
 
 #### Comparison with other approaches
 
-| Approach | IO Model | Testability | Platform Independence | Example |
-|---|---|---|---|---|
-| **Traditional** | Built-in IO | Needs mocking | Low | C, Go, Java |
-| **Monadic IO** | IO Monad | Medium | Low | Haskell |
-| **Effect System** | Algebraic Effects | High | Medium | Koka, Eff |
-| **Spore Platform** | Effect Handlers + Platform | **Very high** | **Very high** | Roc, Spore |
+| Approach           | IO Model                   | Testability   | Platform Independence | Example     |
+| ------------------ | -------------------------- | ------------- | --------------------- | ----------- |
+| **Traditional**    | Built-in IO                | Needs mocking | Low                   | C, Go, Java |
+| **Monadic IO**     | IO Monad                   | Medium        | Low                   | Haskell     |
+| **Effect System**  | Algebraic Effects          | High          | Medium                | Koka, Eff   |
+| **Spore Platform** | Effect Handlers + Platform | **Very high** | **Very high**         | Roc, Spore  |
 
 Spore and Roc share the same design philosophy: no built-in Platform; all
 Platforms are third-party packages.
 
 The examples below use illustrative future `platform { ... }` sugar. The
-current MVP surface remains package-backed manifests plus contract modules.
+package surface remains package-backed manifests plus contract modules.
 
 #### Web Platform example
 
 ```spore
 platform WebPlatform {
-    version: "1.0.0"
     handles [NetListen, Clock, Spawn, DbQuery]
     startup: fn(req: Request) -> Response ! NetListen | DbQuery
 
@@ -1354,7 +1347,6 @@ platform WebPlatform {
 
 ```spore
 platform LambdaPlatform {
-    version: "1.0.0"
     handles [NetConnect, S3Read, S3Write, DynamoRead, DynamoWrite]
     startup: fn(event: JsonValue) -> JsonValue ! S3Read | DynamoWrite
 
@@ -1486,7 +1478,6 @@ spore init my-platform --type platform
 
 ```spore
 platform EmbeddedPlatform {
-    version: "0.1.0"
     handles [GpioRead, GpioWrite, Timer, SerialRead, SerialWrite]
     startup: fn() -> Never ! GpioRead | GpioWrite | Timer
 
@@ -1532,13 +1523,13 @@ Platforms are content-addressed packages like any other, following the same `sig
 
 #### Platform subsystem interactions
 
-| Subsystem | Interaction |
-|---|---|
-| **Concurrency** | `Spawn` is an effect surfaced by Platform-owned modules; runtimes may back it with a thread pool, tokio, or another scheduler |
-| **Package management** | Platforms are ordinary Spore packages, fetched and cached via the same content-addressed system |
-| **Effect system** | Platform defines the manifest-declared effect contract. Current implementations verify the selected startup entry's required effects against `[platform].handled-effects`; broader whole-application enforcement remains follow-up work |
-| **Cost model** | Platform effects carry cost annotations: `File.read @cost(io=1)`. The compiler uses these for cost analysis |
-| **Compiler** | Resolves Platform package metadata and contract modules into the compiled runtime boundary |
+| Subsystem              | Interaction                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Concurrency**        | `Spawn` is an effect surfaced by Platform-owned modules; runtimes may back it with a thread pool, tokio, or another scheduler                                                                            |
+| **Package management** | Platforms are ordinary Spore packages, fetched and cached via the same content-addressed system                                                                                                          |
+| **Effect system**      | Platform defines the manifest-declared effect contract. The selected startup entry's required effects against `[platform].handled-effects`; broader whole-application enforcement remains follow-up work |
+| **Cost model**         | Platform effects carry cost annotations: `File.read @cost(io=1)`. The compiler uses these for cost analysis                                                                                              |
+| **Compiler**           | Resolves Platform package metadata and contract modules into the compiled runtime boundary                                                                                                               |
 
 #### Platform API reference
 
@@ -1576,14 +1567,14 @@ pub foreign fn exit(code: U8) -> Never uses [Exit]
 
 **Comparison with Roc, Elm, and Koka**:
 
-| Feature | Roc | Elm | Koka | Spore |
-|---|---|---|---|---|
-| Platform concept | ✓ | Partial (runtime) | ✗ | ✓ |
-| Effect system | ✗ (tag unions) | ✗ (Cmd/Sub) | ✓ | ✓ |
-| One Platform / project | ✗ | ✗ | N/A | ✓ |
-| Test Platform | Mock Platform | Mock Cmd | Manual mock | Test Platform |
-| Startup contract | Platform-defined | Fixed (main) | Fixed (main) | Platform-defined |
-| Concurrency | Platform-provided | Built-in runtime | Effect handler | Effect handler |
+| Feature                | Roc               | Elm               | Koka           | Spore            |
+| ---------------------- | ----------------- | ----------------- | -------------- | ---------------- |
+| Platform concept       | ✓                 | Partial (runtime) | ✗              | ✓                |
+| Effect system          | ✗ (tag unions)    | ✗ (Cmd/Sub)       | ✓              | ✓                |
+| One Platform / project | ✗                 | ✗                 | N/A            | ✓                |
+| Test Platform          | Mock Platform     | Mock Cmd          | Manual mock    | Test Platform    |
+| Startup contract       | Platform-defined  | Fixed (main)      | Fixed (main)   | Platform-defined |
+| Concurrency            | Platform-provided | Built-in runtime  | Effect handler | Effect handler   |
 
 ### CLI command reference
 
@@ -1713,12 +1704,12 @@ Two libraries depend on the same `utils` package with the same `sig` but differe
 $ spore deps
 my-app
 ├── lib-a@sig:aaa+impl:bbb
-│   └── utils@sig:v1+impl:v1
+│   └── utils@sig:same+impl:alpha
 └── lib-b@sig:ccc+impl:ddd
-    └── utils@sig:v1+impl:v2
+    └── utils@sig:same+impl:beta
 ```
 
-Both versions coexist. If `my-app` directly depends on `utils`, it must choose explicitly: `spore add utils --impl v1`.
+Both implementations coexist. If `my-app` directly depends on `utils`, it must choose explicitly: `spore add utils --impl alpha`.
 
 #### Scenario 4: Local monorepo development
 
@@ -1740,30 +1731,30 @@ spore build
 ```bash
 spore test && spore audit
 spore hash                      # record sig + impl hashes
-git add . && git commit -m "Release v1.0.0"
-git tag v1.0.0
+git add . && git commit -m "Release stable"
+git tag stable-release
 git push origin main --tags
 # Update README with spore.toml snippet including hashes
 ```
 
 ### Glossary
 
-| Term | Definition |
-|---|---|
-| **Content-addressed** | Identifying resources by the hash of their content rather than by name or location |
-| **Signature hash (`sig`)** | BLAKE3 hash of a function's public contract (params, return type, errors, effects, cost) |
-| **Implementation hash (`impl`)** | BLAKE3 hash of a function's compiled AST; `None` for partial functions |
-| **Named alias** | A human-readable identifier mapping to a specific set of content hashes |
-| **Dependency graph** | DAG of module/package import relationships |
-| **Effect** | A declared permission for a function to perform a specific category of operation |
-| **Effect ceiling** | A reserved follow-up concept for module- or project-level effect caps; not part of the shipped MVP contract today |
-| **Lock file (`.spore-lock`)** | Machine-generated file recording the full resolved dependency graph with hashes |
-| **Diamond dependency** | When the same module is reached via multiple paths in the dependency graph |
-| **Reproducible build** | A build that produces identical output from identical inputs (ensured by `impl` hashes) |
-| **Platform** | A Spore package that declares startup metadata/contracts and exposes the host-facing modules used by an application |
-| **Effect handler** | A runtime host implementation detail that may sit behind Platform package surfaces; not the primary package contract model |
-| **Hole** | A placeholder (`?name`) in a function body, marking incomplete code |
-| **Partial function** | A function containing holes; has `impl = None` until all holes are filled |
+| Term                             | Definition                                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Content-addressed**            | Identifying resources by the hash of their content rather than by name or location                                         |
+| **Signature hash (`sig`)**       | BLAKE3 hash of a function's public contract (params, return type, errors, effects, cost)                                   |
+| **Implementation hash (`impl`)** | BLAKE3 hash of a function's compiled AST; `None` for partial functions                                                     |
+| **Named alias**                  | A human-readable identifier mapping to a specific set of content hashes                                                    |
+| **Dependency graph**             | DAG of module/package import relationships                                                                                 |
+| **Effect**                       | A declared permission for a function to perform a specific category of operation                                           |
+| **Effect ceiling**               | A reserved follow-up concept for module- or project-level effect caps; not part of the this SEP contract                   |
+| **Lock file (`.spore-lock`)**    | Machine-generated file recording the full resolved dependency graph with hashes                                            |
+| **Diamond dependency**           | When the same module is reached via multiple paths in the dependency graph                                                 |
+| **Reproducible build**           | A build that produces identical output from identical inputs (ensured by `impl` hashes)                                    |
+| **Platform**                     | A Spore package that declares startup metadata/contracts and exposes the host-facing modules used by an application        |
+| **Effect handler**               | A runtime host implementation detail that may sit behind Platform package surfaces; not the primary package contract model |
+| **Hole**                         | A placeholder (`?name`) in a function body, marking incomplete code                                                        |
+| **Partial function**             | A function containing holes; has `impl = None` until all holes are filled                                                  |
 
 ## Human experience impact
 
@@ -1820,7 +1811,7 @@ The `.spore-lock` file is a TOML document that encodes the full dependency graph
 ```toml
 [[package]]
 name = "http"
-alias = "std-http-v2"
+alias = "std-http-stable"
 source = { type = "git", url = "https://github.com/std/http", rev = "abc1234" }
 sig = "a3f9c2e1d8b7a6f5"
 impl = "7b8d4f2a1e9c3d5b"
@@ -1845,7 +1836,7 @@ For interface-only dependencies, the compiler can produce `.spore-sig` files con
 ### Platform binding records
 
 The compiler resolves the selected Platform package's metadata, startup contract,
-and imported host-facing modules into the compiled output. Current MVP behavior
+and imported host-facing modules into the compiled output. The
 centers startup-contract validation plus the selected Platform package boundary;
 broader whole-program effect routing remains follow-up work.
 
@@ -1858,17 +1849,17 @@ of introducing a separate `E3xxx` / `E4xxx` namespace. Older draft placeholders
 in those ranges are retired in favor of the shared `M0xxx` and `C0xxx`
 registries.
 
-| Code | Category | Example |
-|---|---|---|
-| `M0201` | Visibility violation | Accessing a private function from another module |
-| `M0101` | Circular dependency | Module A → B → A |
-| `C0101` | Effect declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]` |
-| `M0401` | Signature change detected | `sig` hash mismatch in `.spore-lock` |
-| `M0204` | Alias chain | `pub alias` pointing to another alias |
-| `M0304` | Shadowing conflict | Import alias conflicts with module name |
-| `M0501` | Platform binding conflict | Project declares more than one Platform binding |
-| `C0201` | Unsupported startup effect | Selected startup entry requires an effect not listed in the Platform's `[platform].handled-effects` metadata |
-| `M0502` | Startup contract mismatch | Startup function signature doesn't match Platform requirement |
+| Code    | Category                    | Example                                                                                                      |
+| ------- | --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `M0201` | Visibility violation        | Accessing a private function from another module                                                             |
+| `M0101` | Circular dependency         | Module A → B → A                                                                                             |
+| `C0101` | Effect declaration mismatch | Function calls an operation requiring `FileWrite` without declaring `uses [FileWrite]`                       |
+| `M0401` | Signature change detected   | `sig` hash mismatch in `.spore-lock`                                                                         |
+| `M0204` | Alias chain                 | `pub alias` pointing to another alias                                                                        |
+| `M0304` | Shadowing conflict          | Import alias conflicts with module name                                                                      |
+| `M0501` | Platform binding conflict   | Project declares more than one Platform binding                                                              |
+| `C0201` | Unsupported startup effect  | Selected startup entry requires an effect not listed in the Platform's `[platform].handled-effects` metadata |
+| `M0502` | Startup contract mismatch   | Startup function signature doesn't match Platform requirement                                                |
 
 ### Diagnostic structure
 
@@ -1972,31 +1963,31 @@ Go's `go.sum` file shows that content hashing for dependency verification is mai
 
 ### From semantic versioning
 
-Existing ecosystems using semver can migrate by computing content hashes for each versioned release:
+Existing ecosystems using semver can migrate by computing content hashes for each labeled release:
 
 ```bash
-# Migration tool computes hashes from existing version tags
+# Migration tool computes hashes from existing release tags
 spore migrate --from package.json --to spore.toml
 ```
 
 The tool:
 
 1. Reads the existing manifest.
-2. Resolves Git tags corresponding to version numbers.
+2. Resolves Git tags corresponding to release labels.
 3. Computes BLAKE3 `sig` and `impl` hashes for each dependency.
 4. Generates `spore.toml` with hash-based declarations.
 
-The human-readable `version` field is preserved for documentation but plays no role in resolution.
+The human-readable release label is preserved for documentation but plays no role in resolution.
 
-### Lock file versioning
+### Lock file schema evolution
 
-The `.spore-lock` file carries a `version` field. Old tools refuse to process newer lock file versions. Migration scripts handle format upgrades:
+The `.spore-lock` file carries a schema marker. Old tools refuse to process newer schema shapes. Migration scripts handle format upgrades:
 
 ```bash
-spore lock upgrade --from 1 --to 2
+spore lock upgrade
 ```
 
-New fields added to `.spore-lock` are ignored by older tools (forward-compatible). Removal or semantic changes to existing fields trigger a version increment (backward-incompatible).
+New fields added to `.spore-lock` are ignored by older tools when possible. Removal or semantic changes to existing fields require an explicit schema migration.
 
 ### Incremental adoption
 
@@ -2004,29 +1995,38 @@ The module system does not require wholesale adoption:
 
 - Packages can adopt explicit `uses [...]` signatures incrementally at function boundaries; broader file- or project-level ceilings remain future work.
 - Dependencies can mix Git, local path, and registry sources.
-- The `version` field in `spore.toml` remains available for human communication during the transition from semver.
+- A human-readable release label in `spore.toml` remains available during the transition from semver.
 
 ## Unresolved questions
 
 1. **Hash truncation for display**: How many hex characters should be shown in human-facing output? 8? 16? Full 64? Should there be a configurable default?
 
-2. **~~Cross-package `pub(pkg)` boundaries in workspaces~~**: Resolved — `pub(pkg)` restricts visibility to the current package (member) only. Items must be promoted to `pub` for cross-member access.
+2. **Effect granularity**: The current design uses coarse-grained effect names (e.g., `FileRead`, `NetConnect`). Should fine-grained effects (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
 
-3. **Effect granularity**: The current design uses coarse-grained effect names (e.g., `FileRead`, `NetConnect`). Should fine-grained effects (e.g., `filesystem:read:/data`) be part of the language-level type system or remain a tooling concern in `spore.toml`?
+3. **Platform evolution**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
 
-4. **Platform versioning**: Platforms themselves evolve. When a Platform changes its handler interface, how are downstream applications notified? Is `spore --permit` sufficient, or do Platforms need a separate compatibility mechanism?
+4. **Module-level cost budgets**: The current design tracks cost per-function only. Should modules declare aggregate cost ceilings? What are the semantics when a module's total cost exceeds a declared budget?
 
-5. **Module-level cost budgets**: The current design tracks cost per-function only. Should modules declare aggregate cost ceilings? What are the semantics when a module's total cost exceeds a declared budget?
+5. **Diamond dependencies with different `impl` hashes**: When two transitive dependencies require the same module with the same `sig` but different `impl` hashes, the current design allows both to coexist. Should the linker deduplicate? Should the developer be warned? What are the binary size implications?
 
-6. **Alias chain depth**: Alias chains (alias → alias) are currently forbidden. Should single-level chains be permitted for ergonomic re-exports, or does the restriction stand?
+6. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are effect requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
 
-7. **Diamond dependencies with different `impl` hashes**: When two transitive dependencies require the same module with the same `sig` but different `impl` hashes, the current design allows both to coexist. Should the linker deduplicate? Should the developer be warned? What are the binary size implications?
+7. **Conditional compilation**: The `[features]` mechanism in `spore.toml` enables optional dependencies, but the interaction between features and content hashes is underspecified. Does enabling a feature change the `sig` hash?
 
-8. **Effect handler composition**: When an application-defined effect maps to Platform effects (e.g., `Logger` → `StdOut`/`StdErr`), how are effect requirements tracked through the composition? Is the current `uses [...]` propagation sufficient?
+8. **Offline-first workflows**: How should `spore add` and `spore update` behave when offline? Should the local cache be sufficient for all operations, or are some operations inherently online?
 
-9. **Conditional compilation**: The `[features]` mechanism in `spore.toml` enables optional dependencies, but the interaction between features and content hashes is underspecified. Does enabling a feature change the `sig` hash?
+### Resolved questions
 
-10. **Offline-first workflows**: How should `spore add` and `spore update` behave when offline? Should the local cache be sufficient for all operations, or are some operations inherently online?
+1. **File-to-module mapping**: Resolved by SEP-0001 and this SEP. Each `.sp`
+   file is one module, the module path is derived from the filesystem, and
+   there is no `module` keyword in the accepted surface.
+
+2. **Cross-package `pub(pkg)` boundaries in workspaces**: Resolved —
+   `pub(pkg)` restricts visibility to the current package/member only. Items
+   must be promoted to `pub` for cross-member access.
+
+3. **Alias chain depth**: Resolved for the accepted surface. Alias chains remain forbidden; a
+   `pub alias` must point directly to the original item.
 
 ---
 
@@ -2038,7 +2038,7 @@ effect     ::= UPPER_IDENT
 
 // Imports and aliases
 import_decl    ::= 'import' module_path ('as' IDENT)?
-                   // NOTE (D12): selective imports not supported in v0.1
+                   // NOTE: selective imports are not part of the accepted surface
 alias_decl     ::= visibility? 'alias' IDENT '=' qualified_item
 module_path    ::= IDENT ('.' IDENT)*
 qualified_item ::= module_path '.' IDENT
@@ -2053,7 +2053,7 @@ fn_decl        ::= visibility? 'fn' IDENT generic_params? '(' params ')' '->' ty
 generic_params ::= '[' IDENT (',' IDENT)* ']'
 params         ::= (param (',' param)*)?
 param          ::= IDENT ':' type
-error_clause   ::= '!' '[' type (',' type)* ']'
+error_clause   ::= '!' type ('|' type)*
 cost_clause    ::= 'cost' '[' expr ',' expr ',' expr ',' expr ']'
 uses_clause    ::= 'uses' cap_list
 
@@ -2065,8 +2065,7 @@ field          ::= IDENT ':' type
 
 // Platform declarations
 platform_decl  ::= 'platform' IDENT '{' platform_body '}'
-platform_body  ::= ('version:' STRING)?
-                   ('handles' cap_list)
+platform_body  ::= ('handles' cap_list)
                    ('startup:' type)
                    handler_decl*
 
@@ -2079,12 +2078,12 @@ effect_decl    ::= 'effect' IDENT '{' effect_fn* '}'
 effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 // spore.toml (TOML subset)
-// [package]       name, version, type, description, license, authors, spore-version, default-entry
+// [package]       name, release, type, description, license, authors, default-entry
 // [dependencies]  <name> = { git|path|alias, sig, impl?, optional?, branch?, tag?, rev? }
 // [dev-dependencies]
 // [features]      <name> = [deps/features]
 // [entries.<name>] path = STRING
-// [platform]      git|path, version?, handles?
+// [platform]      git|path, handles?
 // [overrides]     <name> = { sig, impl }
 // [build]         script
 // [metadata]      arbitrary key-value
@@ -2094,45 +2093,45 @@ effect_fn      ::= 'fn' IDENT '(' params ')' '->' type
 
 ### Module commands
 
-| Command | Description |
-|---|---|
-| `spore check [path...]` | Check one or more source / entry files |
-| `spore build [path]` | Build the current project or one explicit file |
-| `spore test [path...]` | Validate test / spec files |
-| `spore fmt [path...]` | Format source code (including import ordering) |
-| `sporec compile [path...]` | Compile explicit input files |
-| `sporec holes [path]` | List all holes in a source file |
-| `sporec query-hole [path] [id]` | Inspect one named hole in a source file |
-| `sporec explain [code]` | Explain one diagnostic code |
+| Command                         | Description                                    |
+| ------------------------------- | ---------------------------------------------- |
+| `spore check [path...]`         | Check one or more source / entry files         |
+| `spore build [path]`            | Build the current project or one explicit file |
+| `spore test [path...]`          | Validate test / spec files                     |
+| `spore fmt [path...]`           | Format source code (including import ordering) |
+| `sporec compile [path...]`      | Compile explicit input files                   |
+| `sporec holes [path]`           | List all holes in a source file                |
+| `sporec query-hole [path] [id]` | Inspect one named hole in a source file        |
+| `sporec explain [code]`         | Explain one diagnostic code                    |
 
 ### Snapshot and hash commands
 
-| Command | Description |
-|---|---|
-| `spore snapshot` | Show function, module, and package hashes |
-| `spore hash` | Compute current module/function hashes |
-| `spore --permit <fn>` | Accept a signature change, update `.spore-lock` |
-| `spore --permit --all` | Accept all pending signature changes |
-| `spore exports <module>` | List a module's public API with hashes |
-| `spore cost-report <mod>` | Show cost summary for a module |
+| Command                   | Description                                     |
+| ------------------------- | ----------------------------------------------- |
+| `spore snapshot`          | Show function, module, and package hashes       |
+| `spore hash`              | Compute current module/function hashes          |
+| `spore --permit <fn>`     | Accept a signature change, update `.spore-lock` |
+| `spore --permit --all`    | Accept all pending signature changes            |
+| `spore exports <module>`  | List a module's public API with hashes          |
+| `spore cost-report <mod>` | Show cost summary for a module                  |
 
 ### Package management commands
 
-| Command | Description |
-|---|---|
-| `spore init [name]` | Initialize new project |
-| `spore add <source>` | Add a dependency |
-| `spore remove <name>` | Remove a dependency |
-| `spore update [name]` | Update dependency hashes |
-| `spore lock` | Generate or update `.spore-lock` |
-| `spore lock --verify` | Verify `.spore-lock` integrity |
-| `spore fetch` | Download dependencies to local cache |
+| Command               | Description                          |
+| --------------------- | ------------------------------------ |
+| `spore init [name]`   | Initialize new project               |
+| `spore add <source>`  | Add a dependency                     |
+| `spore remove <name>` | Remove a dependency                  |
+| `spore update [name]` | Update dependency hashes             |
+| `spore lock`          | Generate or update `.spore-lock`     |
+| `spore lock --verify` | Verify `.spore-lock` integrity       |
+| `spore fetch`         | Download dependencies to local cache |
 
 ### Audit and inspection commands
 
-| Command | Description |
-|---|---|
-| `spore audit` | Audit package effects, hashes, cycles |
-| `spore deps` | Show dependency tree |
-| `spore deps --reverse <m>` | Show reverse dependencies |
-| `spore gc` | Clean unused cache entries |
+| Command                    | Description                           |
+| -------------------------- | ------------------------------------- |
+| `spore audit`              | Audit package effects, hashes, cycles |
+| `spore deps`               | Show dependency tree                  |
+| `spore deps --reverse <m>` | Show reverse dependencies             |
+| `spore gc`                 | Clean unused cache entries            |

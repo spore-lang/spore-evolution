@@ -40,7 +40,7 @@ These changes have broad, long-term consequences. Normal implementation pull req
 - the relationship between human UX and Agent UX
 - migration and compatibility implications
 
-Spore therefore needs a durable, versioned, reviewable design archive.
+Spore therefore needs a durable, reviewable design archive.
 
 ## Goals
 

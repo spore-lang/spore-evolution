@@ -7,6 +7,7 @@ authors:
   - Zhan Rongrui
 created: 2026-03-31
 requires:
+  - 1
   - 2
   - 3
   - 4
@@ -17,20 +18,20 @@ superseded_by: null
 
 # SEP-0005: Hole System & Agent Protocol
 
-> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, effect, and cost context. The current stable machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP keeps HoleReport on the current `v0.x` lineage, documents additive target extensions such as richer effect context, residual context, and rejection reasons, and preserves the richer long-term agent/watch protocol — dependency-aware fill ordering, cross-hole coordination, and the `DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT` workflow — while documenting that today's `spore watch --json` still emits `compile_result` plus a summary-style `hole_graph_update`, not the full target graph payload.
+> **Executive Summary**: Defines typed holes (`?name`) as first-class language constructs that carry type, effect, and cost context. The machine surface is a shared typed hole protocol: `sporec holes FILE --json` emits a root object with `holes` and `dependency_graph`, and `sporec query-hole FILE ?name --json` returns the same per-hole object directly. This SEP defines the HoleReport schema, the Hole Dependency Graph with layered topological sort and parallel fill scheduling, and the Agent state machine protocol (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous hole filling workflows.
 
 ## Summary
 
 This SEP specifies Spore's **Hole System** — a first-class language mechanism that treats unfinished code as a structured, typed, compiler-mediated collaboration interface between humans and AI Agents.
 
-A *hole* is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The stable machine protocol reuses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. That shared object now carries the fields agents actually consume today, including `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, a legacy `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`. That `cost_budget` field name remains on the current stable surface, but today it is still a scalar-style compatibility snapshot rather than a fully checked 4D residual context.
+A _hole_ is written `?name` (optionally `?name: Type`) in any expression position within a function body. The compiler accepts programs containing holes, classifies those functions as **partial**, and produces a shared typed hole report. The machine protocol uses one hole object across both batch and single-hole queries: `sporec holes FILE --json` emits `{ "holes": [...], "dependency_graph": ... }`, while `sporec query-hole FILE ?name --json` returns the matching hole object directly. Each hole object carries: `name`, `display_name`, `location`, `expected_type`, `type_inferred_from`, `function`, `enclosing_signature`, `bindings`, `binding_dependencies`, `available_effects`, `errors_to_handle`, `cost_budget`, `candidates`, `dependent_holes`, `confidence`, and `error_clusters`. The `cost_budget` field holds a scalar-style summary; a future extension may add checked 4D residual context.
 
-Multiple holes still form a **Hole Dependency Graph** (DAG), enabling topological ordering and parallel filling by multiple Agents. The long-term **Agent Protocol** defines a five-state machine (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous filling workflows. Today, however, `spore watch --json` remains a thinner transport: it emits per-cycle `compile_result` plus a summary `hole_graph_update`, while richer per-hole watch events remain the target architecture rather than the stable contract.
+Multiple holes form a **Hole Dependency Graph** (DAG), enabling topological ordering and parallel filling by multiple Agents. The **Agent Protocol** defines a five-state machine (DISCOVER → ANALYZE → PROPOSE → VERIFY → ACCEPT/REJECT) for autonomous filling workflows.
 
 Key components formalized in this SEP:
 
 - **Hole syntax and semantics** (`?name`, `?name: Type`, partial functions)
-- **HoleReport v0.x lineage**, with v0.3 target extensions for: (A) candidate scoring vector, (B) binding dependency graph, (C) confidence & ambiguity, (D) error clusters
+- **HoleReport schema**, with extensions for: (A) candidate scoring vector, (B) binding dependency graph, (C) confidence & ambiguity, (D) error clusters
 - **Hole Dependency Graph** with layered topological sort and parallel fill scheduling
 - **Agent state machine protocol** for autonomous hole filling
 - **JSON output protocol** via `--json` flag and NDJSON event stream
@@ -53,16 +54,16 @@ This creates two problems:
 
 Making holes a first-class language construct enables:
 
-- **Compiler-mediated collaboration**: The compiler produces HoleReports that are *information-self-sufficient* — an Agent reading a report needs zero additional context to attempt a fill.
+- **Compiler-mediated collaboration**: The compiler produces HoleReports that are _information-self-sufficient_ — an Agent reading a report needs zero additional context to attempt a fill.
 - **Incremental development**: Functions transition smoothly from `partial` to `complete`. Downstream callers are not invalidated because holes are body-only — they never affect signature hashes.
 - **Dependency-ordered filling**: The compiler can analyze data-flow between holes, build a DAG, and recommend an optimal filling order.
-- **Cost-bounded filling (target behavior)**: each hole should eventually carry the checked residual context inherited from the enclosing function's declared budget; today the stable payload still exposes only a legacy `cost_budget` snapshot, and the compiler does not yet compute authoritative per-hole 4D residuals for candidate scoring.
+- **Cost-bounded filling**: each hole carries a `cost_budget` inherited from the enclosing function's declared budget. A future extension may add checked 4D residual context.
 
 ### Why the Agent Protocol Matters
 
-AI Agents are not humans reading error messages. They are stateless processes that parse structured output. Spore's hole system is designed with Agents as a *primary* consumer:
+AI Agents are not humans reading error messages. They are stateless processes that parse structured output. Spore's hole system is designed with Agents as a _primary_ consumer:
 
-- **HoleReport v0.x** keeps evolving by additive fields rather than by a major naming reset; the current target v0.3 additions replace human-readable strings (e.g., `match_quality: "partial"`) with machine-comparable scoring vectors.
+- **HoleReport** keeps evolving by additive fields rather than by a detached schema-name reset; the current target additions replace human-readable strings (e.g., `match_quality: "partial"`) with machine-comparable scoring vectors.
 - **Binding dependency graphs** let Agents understand data-flow without re-analyzing source code.
 - **Confidence indicators** tell Agents when to auto-fill vs. when to request human guidance.
 - **NDJSON event streams** allow Agents to consume compiler output in real-time, reacting to each incremental compilation result.
@@ -134,12 +135,12 @@ The compiler infers that `?nav_items` must have the type `render_nav` expects as
 
 A function containing at least one hole is **partial**. Partial functions:
 
-| Property | Complete | Partial |
-|---|---|---|
-| Can be compiled | ✓ | ✓ |
-| Can be called at runtime | ✓ | ✗ |
-| Can be simulated | ✓ | ✓ |
-| Appears in module exports | ✓ | ✓ (marked `partial`) |
+| Property                       | Complete             | Partial                |
+| ------------------------------ | -------------------- | ---------------------- |
+| Can be compiled                | ✓                    | ✓                      |
+| Can be called at runtime       | ✓                    | ✗                      |
+| Can be simulated               | ✓                    | ✓                      |
+| Appears in module exports      | ✓                    | ✓ (marked `partial`)   |
 | Signature hash changes on fill | if signature changes | never (holes are body) |
 
 Partiality is transitive: a caller of a partial function is itself partial.
@@ -227,7 +228,7 @@ Empty function bodies desugar to a single hole named `{function_name}_body`.
 
 ### HoleInfo Structure
 
-The implementation (in `sporec-typeck`) represents a single hole as:
+The compiler-internal representation of a single hole uses the following structure:
 
 ```rust
 pub struct HoleInfo {
@@ -239,42 +240,35 @@ pub struct HoleInfo {
 }
 ```
 
-**HoleInfo vs HoleReport:** `HoleInfo` is the **compiler-internal** representation (Rust struct in `sporec-typeck`), while `HoleReport` is the **JSON output format** for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` via `to_json()` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
+**HoleInfo vs HoleReport:** `HoleInfo` is the compiler-internal representation, while `HoleReport` is the JSON output format for machine/Agent consumption. `HoleInfo` is converted to `HoleReport` with additional computed fields (scores, confidence, error clusters). They serve different purposes: HoleInfo for compiler passes, HoleReport for external tooling.
 
 The batch `sporec holes FILE --json` response aggregates all holes in a module by
 returning a root object with `holes` and `dependency_graph`; each element of
 `holes` is the same per-hole `HoleReport` object returned directly by
-`sporec query-hole FILE ?name --json`. Hand-rolled JSON serialization is used
-in v0.1 to minimize dependencies; serde migration is tracked as future work
-(see Unresolved Questions §10).
+`sporec query-hole FILE ?name --json`.
 
-### HoleReport v0.3 (within the v0.x lineage)
+### HoleReport schema
 
-HoleReport v0.3 is a **superset** of v0.2 on the same `v0.x` line. The
-project should not rename this family to a detached major-version scheme just
-because additive fields land. Current implementation payloads are effectively
-unversioned shared objects; if/when an explicit schema tag is emitted, it
-should remain on a `spore/hole-report/v0.x` identifier. All v0.2 fields are
-preserved; four new extensions are added.
+HoleReport evolves by additive fields. The base fields are preserved; four extension groups are documented below.
 
-#### Base Fields (v0.2)
+#### Base Fields
 
-| Field | Description |
-|---|---|
-| `hole.name` | Developer-assigned name |
-| `hole.location` | Source location (file, line, column) |
-| `hole.dependencies` | Names of upstream holes whose output feeds into this hole's context |
-| `type.expected` | The type this hole must produce, including error variants |
-| `type.inferred_from` | Human-readable explanation of why this type is expected |
-| `bindings` | Variables in scope with name, type, and simulated value (`symbolic` or `computed`) |
-| `available_effects` | The `uses` list available at the hole site |
-| `errors_to_handle` | Error types not yet handled before the hole |
-| `cost_budget.budget_total` | Legacy scalar-style compatibility field carried by today's stable payload |
-| `cost_budget.cost_before_hole` | Legacy prefix-cost snapshot; useful as schema context, not yet an authoritative checked residual |
-| `cost_budget.budget_remaining` | Legacy derived remainder; current implementations should not treat it as a precise 4D residual proof |
-| `candidates` | Functions in scope whose return type matches the hole's expected type |
-| `dependent_holes` | Holes that become reachable when this hole is filled |
-| `enclosing_function` | Full signature context of the containing function |
+| Field                          | Description                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `hole.name`                    | Developer-assigned name                                                                      |
+| `hole.location`                | Source location (file, line, column)                                                         |
+| `hole.dependencies`            | Names of upstream holes whose output feeds into this hole's context                          |
+| `type.expected`                | The type this hole must produce, including error variants                                    |
+| `type.inferred_from`           | Human-readable explanation of why this type is expected                                      |
+| `bindings`                     | Variables in scope with name, type, and simulated value (`symbolic` or `computed`)           |
+| `available_effects`            | The `uses` list available at the hole site                                                   |
+| `errors_to_handle`             | Error types not yet handled before the hole                                                  |
+| `cost_budget.budget_total`     | Scalar-style summary of the total declared budget                                            |
+| `cost_budget.cost_before_hole` | Cost accumulated before this hole (prefix snapshot)                                          |
+| `cost_budget.budget_remaining` | Estimated remaining budget (derived scalar; a future extension may add checked 4D residuals) |
+| `candidates`                   | Functions in scope whose return type matches the hole's expected type                        |
+| `dependent_holes`              | Holes that become reachable when this hole is filled                                         |
+| `enclosing_function`           | Full signature context of the containing function                                            |
 
 #### Hole Type Inference Rule
 
@@ -288,7 +282,7 @@ A hole's type is determined by the **intersection of all constraints** imposed b
 
 When multiple constraints agree, the intersection is the agreed-upon type. When constraints conflict, the compiler applies the **nearest constraint rule** (see Edge Cases §8.3) and emits a warning.
 
-When context provides **no constraints**, the hole is *unconstrained* — reported with type `_`. The HoleReport lists available bindings so the Agent can propose a type.
+When context provides **no constraints**, the hole is _unconstrained_ — reported with type `_`. The HoleReport lists available bindings so the Agent can propose a type.
 
 #### Hole as Match Scrutinee
 
@@ -310,12 +304,12 @@ The compiler infers: `?parsed_data` must have a type with at least variants `Val
 
 Replaces the coarse `match_quality: "exact" | "partial"` string with a four-dimensional numeric vector:
 
-| Dimension | Field | Range | Meaning |
-|---|---|---|---|
-| Type match | `type_match` | `[0, 1]` | Return type + parameter type match degree |
-| Cost fit | `cost_fit` | `[0, 1]` | Estimated cost vs. remaining budget fit |
-| Effect fit | `required_effects_fit` | `{0, 1}` | All required effects available (boolean) |
-| Error coverage | `error_coverage` | `[0, 1]` | Fraction of candidate's declared errors covered by context |
+| Dimension      | Field                  | Range    | Meaning                                                    |
+| -------------- | ---------------------- | -------- | ---------------------------------------------------------- |
+| Type match     | `type_match`           | `[0, 1]` | Return type + parameter type match degree                  |
+| Cost fit       | `cost_fit`             | `[0, 1]` | Estimated cost vs. remaining budget fit                    |
+| Effect fit     | `required_effects_fit` | `{0, 1}` | All required effects available (boolean)                   |
+| Error coverage | `error_coverage`       | `[0, 1]` | Fraction of candidate's declared errors covered by context |
 
 This scoring vector is still a **target** contract. In particular, `cost_fit`
 should ultimately be computed against checked residual context, but current
@@ -355,22 +349,19 @@ Each candidate also includes an `adjustments` array of human-readable notes (e.g
 
 #### Prospective additive extensions (not yet stable output)
 
-The next HoleReport additions should remain on the same `v0.x` lineage and are
-expected to be **additive** rather than schema-breaking:
+The following extensions to the HoleReport schema are defined for future adoption:
 
 1. **`effect_context`** — active handler stack, already-discharged effects, and
    the visible effect aliases / interfaces at the hole site.
 2. **`residual_context`** — remaining checked obligations after the current
    prefix, including a 4D cost vector (`budget_declared`, `cost_before`,
-   `budget_residual`) plus any still-unhandled effect / error obligations. This
-   stays on the `v0.x` line and is the planned successor to the legacy
-   scalar-style `cost_budget` snapshot once the compiler computes real residuals.
+   `budget_residual`) plus any still-unhandled effect / error obligations.
 3. **`rejection_reasons`** — structured VERIFY/REJECT feedback explaining why a
    proposed fill failed (for example: `type_mismatch`, `effect_leak`,
    `budget_exceeded`, `duplicate_handler_match`).
 
-These fields are target behavior for a future v0.x slice. Today's stable output
-remains the shared hole object described above.
+When adopted, these fields should be added to the existing schema as additive
+fields, preserving backward compatibility.
 
 #### Extension B: Binding Dependency Graph
 
@@ -425,22 +416,22 @@ Groups errors by their source operation with handling suggestions:
 
 Suggestion generation rules:
 
-| Pattern | Suggestion |
-|---|---|
-| Single error, propagable | `"early return with ?"` |
-| Multiple errors, same source | `"match on error type"` |
-| Retryable (contains `Timeout`/`Retry`) | `"retry with backoff"` |
+| Pattern                                | Suggestion              |
+| -------------------------------------- | ----------------------- |
+| Single error, propagable               | `"early return with ?"` |
+| Multiple errors, same source           | `"match on error type"` |
+| Retryable (contains `Timeout`/`Retry`) | `"retry with backoff"`  |
 | Error in enclosing function's `!` list | `"propagate to caller"` |
 
 #### Error System Integration (Three-Field Model)
 
 The enclosing function's declared error list (`! Err1 | Err2 | Err3`) is partitioned into three categories at each hole site:
 
-| Field | Meaning |
-|---|---|
-| `errors_to_handle` | Errors not yet handled by code before the hole. The filling should handle or propagate these. |
+| Field                    | Meaning                                                                                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `errors_to_handle`       | Errors not yet handled by code before the hole. The filling should handle or propagate these.                                           |
 | `errors_already_handled` | Errors that were caught/handled by code before the hole (e.g., via `catch` or `match`). The filling does not need to worry about these. |
-| `errors_passthrough` | Errors that can propagate upward to the caller. The filling may also propagate them but does not need explicit handling. |
+| `errors_passthrough`     | Errors that can propagate upward to the caller. The filling may also propagate them but does not need explicit handling.                |
 
 Example:
 
@@ -480,11 +471,11 @@ Given a module M, the Hole Dependency Graph G = (V, E) is:
 
 Edges are classified into three dependency types:
 
-| Type | Notation | Meaning |
-|---|---|---|
-| Type dependency | `type` | h₂'s expected type contains a type variable solvable only after h₁ is filled |
-| Value dependency | `value` | h₂'s available bindings include a value whose data-flow traces back to h₁ |
-| Cost dependency | `cost` | h₂'s target checked residual context depends on h₁'s actual cost |
+| Type             | Notation | Meaning                                                                      |
+| ---------------- | -------- | ---------------------------------------------------------------------------- |
+| Type dependency  | `type`   | h₂'s expected type contains a type variable solvable only after h₁ is filled |
+| Value dependency | `value`  | h₂'s available bindings include a value whose data-flow traces back to h₁    |
+| Cost dependency  | `cost`   | h₂'s target checked residual context depends on h₁'s actual cost             |
 
 #### Graph Construction
 
@@ -612,11 +603,11 @@ function compute_fill_order(G: Graph) -> Result[List[Set[Hole]], CycleError]:
 
 **Proof.** By induction on layer index k.
 
-**Base case (k = 0):** L₀ = { h ∈ V | in-degree(h) = 0 }. These holes have no predecessors — their types, bindings, and any target residual dependencies are fully determined. They are fillable. In current implementations the exposed `cost_budget` payload may still be a compatibility placeholder, but the dependency statement here is about the target checked-residual model. Since we take *all* zero in-degree nodes, no fillable hole is missed.
+**Base case (k = 0):** L₀ = { h ∈ V | in-degree(h) = 0 }. These holes have no predecessors — their types, bindings, and any cost dependencies are fully determined. They are fillable. Since we take _all_ zero in-degree nodes, no fillable hole is missed.
 
 **Inductive step (k → k+1):** Assume layers L₀ through Lₖ are correctly computed and all holes in them are filled. Let G' be the subgraph remaining after removing L₀ ∪ ... ∪ Lₖ.
 
-Lₖ₊₁ = { h ∈ V(G') | in-degree_{G'}(h) = 0 }
+Lₖ₊₁ = { h ∈ V(G') | in-degree\_{G'}(h) = 0 }
 
 For any h ∈ Lₖ₊₁: all predecessors of h in G lie in L₀ ∪ ... ∪ Lₖ (already filled), so h's constraints are fully resolved — h is fillable.
 
@@ -630,14 +621,14 @@ Therefore Lₖ₊₁ is exactly the set of newly fillable holes at round k+1. �
 
 #### Complexity Analysis
 
-| Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
-| Graph construction | O(\|V\| × B) | B = average bindings per hole |
-| Topological sort (layered) | O(\|V\| + \|E\|) | Kahn's algorithm variant |
-| Cycle detection | O(\|V\| + \|E\|) | DFS coloring (by-product of topo sort) |
+| Operation                        | Time Complexity  | Notes                                        |
+| -------------------------------- | ---------------- | -------------------------------------------- |
+| Graph construction               | O(\|V\| × B)     | B = average bindings per hole                |
+| Topological sort (layered)       | O(\|V\| + \|E\|) | Kahn's algorithm variant                     |
+| Cycle detection                  | O(\|V\| + \|E\|) | DFS coloring (by-product of topo sort)       |
 | Incremental update (single fill) | O(\|neighbors\|) | Only the filled hole's neighbors are touched |
-| Parallel scheduling | O(\|V\|) | Traverse in-degree array to find ready set |
-| JSON serialization | O(\|V\| + \|E\|) | Linear scan of graph structure |
+| Parallel scheduling              | O(\|V\|)         | Traverse in-degree array to find ready set   |
+| JSON serialization               | O(\|V\| + \|E\|) | Linear scan of graph structure               |
 
 **Space complexity:** O(\|V\| + \|E\|) for the graph structure and in-degree table.
 
@@ -724,7 +715,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
                ▼                                                 │
           ┌──────────┐                                           │
           │ ANALYZE  │── sporec query-hole FILE ?name --json   │
-          └────┬─────┘   receive full HoleReport v0.3            │
+          └────┬─────┘   receive full HoleReport                 │
                │                                                 │
                │ generate fill code                              │
                ▼                                                 │
@@ -752,17 +743,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
        └── no  → COMMIT (all holes filled)
 ```
 
-> **Current implementation status (2026-04):**
->
-> - `sporec holes FILE --json` is the stable batch discovery surface and emits a
->   root object with `holes` plus `dependency_graph`.
-> - `sporec query-hole FILE ?name --json` returns one hole object with the same
->   shared fields as each entry in the batch report.
-> - `spore watch --json` already emits NDJSON `compile_result` events and a
->   summary-style `hole_graph_update`, but it does **not** yet stream the full
->   dependency graph or per-hole `hole_update` payloads.
-
-**DISCOVER**: In the current stable workflow, the Agent discovers work either by reading `sporec holes FILE --json` or by listening to `spore watch --json` for `compile_result` plus summary `hole_graph_update` events. The long-term target is for watch mode to carry the full dependency graph, `ready_to_fill` set, and richer per-hole updates directly.
+**DISCOVER**: The Agent discovers work via `sporec holes FILE --json` (batch) or `spore watch --json` (event stream). Both surfaces expose hole metadata and dependency information.
 
 **ANALYZE**: For each selected hole, the Agent requests its HoleReport via
 `sporec query-hole FILE ?name --json`. It examines:
@@ -776,7 +757,7 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
 
 **PROPOSE**: The Agent writes fill code into the source file, replacing `?name`. This is an atomic operation — one hole per write. The Agent must only reference bindings visible at the hole site (as listed in `bindings`).
 
-**VERIFY**: The `spore watch` process detects the file change, triggers incremental compilation, and currently emits a `compile_result` event such as:
+**VERIFY**: The `spore watch` process detects the file change, triggers incremental compilation, and emits a `compile_result` event:
 
 ```json
 {
@@ -788,11 +769,9 @@ The Agent protocol defines a five-state machine with no explicit RETRY state:
 }
 ```
 
-Current watch output is compile-result oriented; richer transport states such as `accepted`, `rejected`, and `conflict` remain part of the long-term protocol vocabulary rather than the stable watch payload.
-
 **ACCEPT**: Compilation succeeded. The hole is marked `filled`. The dependency graph is recalculated, possibly unlocking blocked holes. The Agent returns to DISCOVER.
 
-**REJECT**: Compilation failed. Today that appears as a watch `compile_result` with `status: "error"` plus compiler diagnostics; the richer structured rejection payload below remains the target transport shape. A future additive `rejection_reasons` field should capture the normalized machine causes without changing the current v0.x lineage:
+**REJECT**: Compilation failed. The watch event carries compiler diagnostics. Structured `rejection_reasons` (defined in the Prospective extensions section above) provide normalized machine-readable failure causes. A sample rejection payload:
 
 ```json
 {
@@ -936,8 +915,19 @@ The HoleReport for `?process_with_config` includes both the closure parameter `d
 ```json
 {
   "bindings": [
-    { "name": "data", "type": "Data", "simulated_value": { "kind": "symbolic", "origin": "closure parameter" } },
-    { "name": "config", "type": "Config", "simulated_value": { "kind": "symbolic", "origin": "captured from make_processor" } }
+    {
+      "name": "data",
+      "type": "Data",
+      "simulated_value": { "kind": "symbolic", "origin": "closure parameter" }
+    },
+    {
+      "name": "config",
+      "type": "Config",
+      "simulated_value": {
+        "kind": "symbolic",
+        "origin": "captured from make_processor"
+      }
+    }
   ]
 }
 ```
@@ -1011,7 +1001,7 @@ This is the central section of SEP-0005. The hole system is designed with AI Age
 
 ### Information Self-Sufficiency
 
-A HoleReport on the current v0.x lineage is **self-contained**. An Agent
+A HoleReport object is **self-contained**. An Agent
 reading a report needs zero additional context to attempt a fill. The report
 includes:
 
@@ -1060,7 +1050,7 @@ In the **long-term richer protocol**, multiple Agents can fill independent holes
 4. On ACCEPT, a new `hole_graph_update` unlocks blocked holes
 5. Agents re-enter DISCOVER to claim newly available holes
 
-Today, the stable implementation approximates this by combining the shared batch hole report (`sporec holes FILE --json`) with summary watch events.
+Today, the stable implementation approximates this by combining the batch hole report (`sporec holes FILE --json`) with summary watch events.
 
 **Conflict handling**: If two Agents attempt the same hole, the first writer wins (file-level lock). The second receives a `CONFLICT` signal and selects another hole:
 
@@ -1090,23 +1080,23 @@ If an Agent fails repeatedly on a hole, it should:
 
 ### Real-Time Event Stream
 
-The **current stable** NDJSON contract from `spore watch --json` is intentionally summary-oriented:
+`spore watch --json` emits newline-delimited JSON events:
 
 ```text
 {"event":"compile_result","file":"/tmp/spore-step9-watch.sp","status":"ok","errors":[],"timestamp":1775999403}
 {"event":"hole_graph_update","holes_total":1,"filled_this_cycle":0,"ready_to_fill":1,"blocked":0}
 ```
 
-Current event types:
+Event types:
 
-| Event | Trigger | Data |
-|---|---|---|
-| `compile_result` | Each incremental compilation cycle | File path, status (`ok`/`error`), diagnostics payload, timestamp |
+| Event               | Trigger                                         | Data                                                                               |
+| ------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `compile_result`    | Each incremental compilation cycle              | File path, status (`ok`/`error`), diagnostics payload, timestamp                   |
 | `hole_graph_update` | After a compile cycle that still contains holes | Hole-count summary: `holes_total`, `filled_this_cycle`, `ready_to_fill`, `blocked` |
 
-This stream is already enough for a practical DISCOVER/VERIFY loop: agents can watch compile success or failure and use the hole summary to decide when to re-run `sporec holes FILE --json` or inspect a specific hole with `sporec query-hole FILE ?name --json`.
+This stream supports a practical DISCOVER/VERIFY loop: agents can watch compile success or failure and use the hole summary to decide when to re-run `sporec holes FILE --json` or inspect a specific hole with `sporec query-hole FILE ?name --json`.
 
-A **future richer transport** may add full dependency-graph payloads and per-hole update events, but those are not part of the current stable watch contract. When that richer transport lands, it should extend the shared hole/diagnostic model rather than inventing a separate schema.
+A future extension of this transport may add full dependency-graph payloads and per-hole update events. When that richer transport is adopted, it should extend the shared hole/diagnostic model rather than inventing a separate schema.
 
 ```pseudocode
 while line = read_line(stdin):
@@ -1168,12 +1158,9 @@ t13        COMMIT ── all holes filled ────────────�
 
 All hole-related commands support `--json` for machine consumption.
 
-**`sporec holes FILE --json`:** emits the batch hole report. The stable root object contains `holes` plus `dependency_graph`.
+**`sporec holes FILE --json`:** emits the batch hole report. The root object contains `holes` plus `dependency_graph`.
 
-The JSON example below intentionally shows today's stable `cost_budget` field
-name. Its numeric contents are illustrative compatibility data, not a claim that
-current releases already emit authoritative checked 4D residual vectors; that is
-the planned `residual_context` extension on the same `v0.x` lineage.
+The JSON example below shows the `cost_budget` field as a scalar summary. A future `residual_context` extension (see Prospective extensions) may add checked 4D residual vectors.
 
 ```json
 {
@@ -1258,7 +1245,12 @@ The `dependency_graph` embedded in the batch hole report is the authoritative ma
     { "from": "?process_order", "to": "?send_receipt", "kind": "type" }
   ],
   "roots": ["?validate_input", "?check_auth"],
-  "suggested_order": ["?validate_input", "?check_auth", "?process_order", "?send_receipt"]
+  "suggested_order": [
+    "?validate_input",
+    "?check_auth",
+    "?process_order",
+    "?send_receipt"
+  ]
 }
 ```
 
@@ -1278,15 +1270,15 @@ The hole system integrates with Language Server Protocol:
 
 ### Hole-specific diagnostics
 
-| Code | Severity | Message |
-|---|---|---|
-| `H0001` | Info | `hole ?name: expected type T` — standard hole report |
-| `H0002` | Warning | `hole-type-conflict: annotation T1 conflicts with inferred T2` |
-| `H0003` | Info | `partial function F depends on partial function G` |
-| `H0101` | Error | `duplicate hole name ?name in module M` |
-| `H0201` | Error | `hole ?name in signature position (not allowed)` |
-| `H0301` | Error | `circular hole dependency: ?A → ?B → ?A` |
-| `H0401` | Info | `filling of ?name revealed new hole ?other` |
+| Code    | Severity | Message                                                        |
+| ------- | -------- | -------------------------------------------------------------- |
+| `H0001` | Info     | `hole ?name: expected type T` — standard hole report           |
+| `H0002` | Warning  | `hole-type-conflict: annotation T1 conflicts with inferred T2` |
+| `H0003` | Info     | `partial function F depends on partial function G`             |
+| `H0101` | Error    | `duplicate hole name ?name in module M`                        |
+| `H0201` | Error    | `hole ?name in signature position (not allowed)`               |
+| `H0301` | Error    | `circular hole dependency: ?A → ?B → ?A`                       |
+| `H0401` | Info     | `filling of ?name revealed new hole ?other`                    |
 
 ### Cost diagnostics for partial functions
 
@@ -1314,7 +1306,7 @@ On failed fill: full diagnostic with `root_cause`, `fix_hints`, and `suggestion`
 
 4. **Scoring weight rigidity**: The hard-coded weights (0.40, 0.20, 0.25, 0.15) may not be optimal for all projects. However, making them configurable increases cognitive burden, and the expected variance across projects is low.
 
-5. **Hand-rolled JSON serialization**: The current implementation hand-rolls JSON serialization for v0.1 to minimize dependencies. This is intentionally simple but acknowledged as fragile for complex nested structures. serde migration is tracked as future work (see Unresolved Questions §10).
+5. **Serialization fragility**: The serialization format is intentionally simple. A more structured schema-driven encoder may be adopted in the future without changing the external payload contract.
 
 6. **Parallel fill coordination overhead**: File-level locking for multi-Agent fills adds synchronization cost. For small projects this overhead dominates the benefit.
 
@@ -1328,7 +1320,7 @@ Rejected. Anonymous holes create ambiguity in CLI queries (`sporec query-hole FI
 
 ### Alternative 2: Holes Affect Signature Hashes
 
-Rejected. If holes changed the signature hash, downstream dependents would need recompilation every time a hole is filled — even though the *contract* never changed. This breaks snapshot stability during development.
+Rejected. If holes changed the signature hash, downstream dependents would need recompilation every time a hole is filled — even though the _contract_ never changed. This breaks snapshot stability during development.
 
 ### Alternative 3: Explicit Priority Annotations on Holes
 
@@ -1391,18 +1383,18 @@ These are runtime markers with no compiler support. They provide no type informa
 
 ## Backward compatibility and migration
 
-### Schema Versioning
+### Schema Evolution
 
-- HoleReport stays on the current `v0.x` lineage; additive extensions must not
-  force a detached `v3` naming story
-- Current implementation payloads are shared JSON objects without an explicit
-  schema tag; any future schema identifier should stay in the
-  `spore/hole-report/v0.x` family
-- All v0.2 fields are preserved with identical semantics
-- New v0.3 fields (`binding_dependencies`, `confidence`, `error_clusters`,
-  `candidates[].scores`, `candidates[].overall`, `candidates[].adjustments`)
-  are additive
-- Tools that do not recognize newer v0.x fields can safely ignore them
+- HoleReport stays on the current schema; additive extensions
+  must not force a detached naming story.
+- HoleReport objects are JSON objects without an explicit
+  schema tag; any future schema identifier should avoid embedding a
+  design revision label.
+- Existing fields are preserved with identical semantics.
+- New fields such as `binding_dependencies`, `confidence`, `error_clusters`,
+  `candidates[].scores`, `candidates[].overall`, and
+  `candidates[].adjustments` are additive.
+- Tools that do not recognize newer fields can safely ignore them.
 
 ### CLI Flags
 
@@ -1420,11 +1412,13 @@ These are runtime markers with no compiler support. They provide no type informa
 
 1. **Existing complete code**: Unaffected. No holes means no HoleReports, no dependency graphs, no Agent protocol activation.
 2. **New code with holes**: Opt-in by writing `?name` in function bodies.
-3. **Agent tooling**: Agents should treat the payload as a `v0.x`-lineage schema and ignore unknown additive fields. If an explicit schema identifier is emitted, it should stay in the `"spore/hole-report/v0.x"` family.
+3. **Agent tooling**: Agents should treat the payload as an additive shared schema and ignore unknown additive fields. If an explicit schema identifier is emitted, it should avoid embedding a design revision label.
 
 ---
 
 ## Unresolved questions
+
+### Design questions
 
 1. **Cross-module hole dependencies**: The current dependency graph is scoped to a single module. How should holes that depend on partial functions in other modules be represented? The `partial` marker propagates, but the graph does not yet span modules.
 
@@ -1434,14 +1428,18 @@ These are runtime markers with no compiler support. They provide no type informa
 
 4. **Agent identity and coordination**: The multi-Agent protocol uses file-level locking. Should Agents have explicit identities? Should there be a coordinator process, or is the decentralized claim-and-lock protocol sufficient at scale?
 
-5. **Hole versioning**: When a hole is filled, rejected, and re-filled, should the system maintain a history of fill attempts? This would enable better Agent learning but increases storage.
+5. **Hole attempt history**: When a hole is filled, rejected, and re-filled, should the system maintain a history of fill attempts? This would enable better Agent learning but increases storage.
 
 6. **Partial function exports**: The current design marks partial functions in module exports. Should importers be able to depend on partial functions (receiving symbolic values), or should partial functions be hidden from external modules?
 
-7. **DAG visualization**: The specification includes ASCII DAG output. Should a standard visual format (DOT/Graphviz, Mermaid) be part of the protocol?
+7. **DAG visualization**: The specification includes ASCII DAG output. Should a standard visual format (DOT/Graphviz, Mermaid) be part of the protocol, or should visualization remain an editor/tooling concern outside the stable machine payload?
 
 8. **Dynamic priority adjustment**: Should the filling order adapt based on Agent performance history (e.g., prioritize holes similar to ones the Agent has successfully filled before)?
 
-9. **Cost dependency precision**: Cost dependencies currently assume sequential execution within a block. For branches, should cost dependencies be path-sensitive?
+9. **Cost dependency precision**: Cost dependencies assume sequential execution within a block. For branches, should cost dependencies be path-sensitive?
 
-10. **serde migration**: The hand-rolled JSON serializer should eventually be replaced. When should this migration happen, and should it be a breaking change to the internal API?
+### Implementation follow-up
+
+The hand-rolled JSON serializer should eventually be replaced with serde or a
+schema-driven encoder. That migration should preserve the external payload
+contract unless a future SEP deliberately defines a breaking schema split.
