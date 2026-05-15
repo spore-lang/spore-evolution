@@ -14,17 +14,17 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's core syntax as an expressions-only language with no loops — all iteration uses recursion and higher-order functions (map/fold/filter/each). Introduces unified function signatures with a fixed clause order (return → errors → where → cost → uses → spec → body), pattern matching as the primary control flow, and a clean separation between syntax ownership and semantic ownership. This SEP is the syntactic root for later SEPs: it fixes the surface forms that type, effect, cost, hole, concurrency, module, and standard-library SEPs assign deeper meaning to.
+> **Executive Summary**: Defines Spore's core syntax and function-signature layout. SEP-0001 fixes the shared surface forms that later SEPs interpret: type syntax, error clauses, effect clauses, cost clauses, holes, concurrency forms, imports, and `spec` blocks. Detailed type, effect, cost, hole, compiler, concurrency, module, and standard-library semantics are delegated to their corresponding SEPs.
 
 ## Summary
 
-This proposal defines the core syntax and function signature surface for the Spore programming language v0.1. Spore is an expression-based, statically typed language with explicit error, cost, effect, and specification clauses. The language draws from Rust, OCaml, Roc, Gleam, and Elm, combining curly-brace block scoping with Rust-style semicolon semantics, algebraic data types, exhaustive pattern matching, and a regular function signature structure that encodes generic constraints (`where`), error sets (`!`), a four-slot **`cost [compute, alloc, io, parallel]`** clause, effect requirements (`uses`), and behavioral `spec` metadata.
+This proposal defines the core syntax and function-signature surface for the Spore programming language. Spore uses expression-oriented curly-brace syntax, Rust-style semicolon rules, algebraic data type syntax, pattern matching, square-bracket generics, and a regular function signature structure with optional `!`, `where`, `cost`, `uses`, and `spec` clauses.
 
-This SEP deliberately owns the **surface grammar** and cross-SEP signature layout, not every semantic rule attached to that grammar. SEP-0002 owns type meaning and checking, SEP-0003 owns effect algebra and handler semantics, SEP-0004 owns cost verification, SEP-0005 owns the hole protocol, SEP-0007 owns concurrency semantics, SEP-0008 owns module/package resolution, and SEP-0009 owns the standard-library surface. SEP-0001 remains dependency-free so those later SEPs can depend on a stable syntactic root without creating cycles.
+This SEP specifies the **surface grammar** and cross-SEP signature layout. SEP-0002 specifies type meaning and checking, SEP-0003 specifies effect semantics, SEP-0004 specifies cost verification, SEP-0005 specifies holes, SEP-0006 specifies compiler behavior and diagnostics, SEP-0007 specifies concurrency semantics, SEP-0008 specifies module/package resolution, and SEP-0009 specifies the standard-library surface. SEP-0001 remains dependency-free so those later SEPs can depend on a stable syntactic root without creating cycles.
 
 ## Normative scope and dependency boundaries
 
-SEP-0001 is the root syntax SEP. Later SEPs may add semantics to forms defined here, but they should not re-specify incompatible grammar.
+SEP-0001 is the root syntax SEP. Later SEPs may assign semantics to forms defined here, but they must not re-specify incompatible grammar.
 
 | Surface area | SEP-0001 owns | Semantic owner |
 |---|---|---|
@@ -33,38 +33,32 @@ SEP-0001 is the root syntax SEP. Later SEPs may add semantics to forms defined h
 | Error clauses and `?` / `throw` syntax | spelling and placement | SEP-0002 for error-set typing and propagation |
 | `effect`, `handler`, `perform`, `handle` | declaration and expression grammar | SEP-0003 |
 | `cost [...]` | clause placement and expression syntax envelope | SEP-0004 |
+| `spec { ... }` | clause placement and item grammar | SEP-0006 for test execution, diagnostics, and spec hashing |
 | Holes (`?name`) | expression grammar | SEP-0005 |
 | `parallel_scope`, `spawn`, `select`, `await` | expression grammar | SEP-0007 |
 | `import`, `alias`, visibility | declaration grammar | SEP-0008 |
 | Prelude and library names | examples only | SEP-0009 |
 
-When this SEP includes a guide-level example using a type, effect, cost value, module path, or standard-library item, that example is illustrative unless this SEP explicitly says it is the normative grammar for that form.
+Unless explicitly marked as grammar, examples that mention type names, effect names, cost values, module paths, or standard-library items are illustrative.
 
 ## Motivation
 
-Modern programming languages force developers to choose between safety and ergonomics. Rust provides strong safety guarantees but with significant syntactic and cognitive overhead. Functional languages like Haskell and OCaml offer powerful type systems but often feel alien to developers from imperative backgrounds. Meanwhile, AI agents that generate and analyze code need languages whose structure is predictable and machine-parseable.
+Spore's syntax is designed to balance human readability with predictable machine processing. Curly-brace blocks, explicit delimiters, a fixed operator set, and ordered function clauses make source text regular enough for compilers, formatters, LSPs, and agents to process without relying on implicit layout or custom operator rules.
 
-Spore aims to occupy a unique design point:
+Spore aims to occupy a practical syntactic design point:
 
-1. **Human-first readability**: Expression-based syntax with familiar curly braces and semicolons reduces the learning curve for developers coming from Rust, TypeScript, or Kotlin, while the pipe operator and pattern matching enable expressive functional composition.
-
-2. **Agent-friendly structure**: A fixed operator set (no custom operators), regular grammar, and explicit function metadata (`where`, `cost`, `uses`) make Spore code trivially parseable by AI agents and static analysis tools. Every function signature is a structured contract.
-
-3. **Effect safety by default**: Rather than bolting on an effect system after the fact, Spore makes effect requirements a first-class part of function signatures. The compiler infers properties like `pure` and `deterministic` from the declared `uses` set, eliminating manual annotation burden while maintaining full transparency.
-
-4. **No loops — recursion with TCO guarantee**: By removing `for`, `while`, `loop`, `break`, and `continue`, Spore encourages a purely functional iteration style via recursion and higher-order functions (`map`, `fold`, `filter`). The compiler guarantees tail-call optimization, making recursion safe and efficient.
-
-5. **Incremental elaboration**: The signature system is designed so that a simple pure function has zero overhead (`fn add(x: I64, y: I64) -> I64`), while complex functions progressively add clauses only as needed. This avoids the "all or nothing" annotation burden seen in many effect systems.
-
-6. **Cost transparency**: The `cost` clause enables compile-time reasoning about resource consumption, supporting smart-contract use cases and agent-driven cost optimization.
+1. **Human-readable syntax**: expression-oriented syntax with familiar braces, semicolons, `let`, `fn`, `match`, and postfix type annotations.
+2. **Machine-readable structure**: a fixed operator set, explicit delimiters, and a predictable function-clause order.
+3. **Progressive signatures**: simple functions remain short, while functions that need additional metadata can add clauses in one canonical order.
+4. **One iteration style**: loop keywords are absent from the surface language; recursive and library-based iteration are the accepted syntactic idioms.
 
 ## Guide-level explanation
 
-This section introduces Spore's syntax from a user's perspective, building from the simplest forms to the most complex.
+This section introduces the surface forms defined by this SEP.
 
 ### Your first Spore function
 
-The simplest Spore function looks familiar to anyone who has used Rust, Go, or TypeScript:
+A minimal Spore function has a name, typed parameters, a return type, and a block body:
 
 ```spore
 fn add(a: I64, b: I64) -> I64 {
@@ -72,7 +66,7 @@ fn add(a: I64, b: I64) -> I64 {
 }
 ```
 
-Note: no `return` keyword is needed. The last expression in a block is its value. The compiler automatically infers that this function is `pure`, `deterministic`, and `total` because it uses no effects.
+The last expression in a block is the block value.
 
 ### Variables and immutability
 
@@ -84,14 +78,14 @@ let age = 30;
 let greeting = f"Hello, {name}! You are {age} years old.";
 ```
 
-Shadowing is allowed — you can rebind a name in the same scope:
+Shadowing reuses a binding name in a later binding:
 
 ```spore
 let x = 10;
 let x = x + 5;  // shadows the previous x
 ```
 
-For local mutable state, use `Ref[T]`. This is separate from the built-in external effect vocabulary standardized in SEP-0003, so it does not introduce a dedicated built-in `uses` name:
+For local mutable state, `Ref[T]` is written as a normal generic type:
 
 ```spore
 let counter = Ref.new(0);
@@ -133,7 +127,7 @@ let category = if age < 13 {
 
 ### Pattern matching
 
-`match` expressions must be exhaustive — the compiler ensures all cases are covered:
+`match` expressions use comma-terminated arms:
 
 ```spore
 type Shape =
@@ -166,9 +160,9 @@ let is_weekend = match day {
 };
 ```
 
-### No loops — recursion and HOFs
+### No loop syntax
 
-Spore has **no** `for`, `while`, `loop`, `break`, or `continue`. All iteration uses recursion (with guaranteed TCO) or higher-order functions:
+Spore has **no** `for`, `while`, `loop`, `break`, or `continue` syntax. Iteration is expressed with recursion or library functions:
 
 ```spore
 // Sum a list using fold
@@ -176,7 +170,7 @@ fn sum(numbers: List[I64]) -> I64 {
     numbers.fold(0, |acc, x| acc + x)
 }
 
-// Factorial using tail recursion (TCO guaranteed)
+// Factorial using recursion
 fn factorial(n: I64) -> I64 {
     fn go(n: I64, acc: I64) -> I64 {
         if n <= 1 { acc } else { go(n - 1, n * acc) }
@@ -184,7 +178,7 @@ fn factorial(n: I64) -> I64 {
     go(n, 1)
 }
 
-// Filter and transform using HOFs
+// Filter and transform using library functions
 let result = numbers
     |> filter(|x| x > 0)
     |> map(|x| x * 2)
@@ -277,58 +271,9 @@ fn read_config(path: Str) -> Config ! FileError | ParseError {
 }
 ```
 
-Current implementation note: the parser surface already accepts `! E1 | E2`, and
-the checker currently validates `?` through call/pipeline propagation rules. This
-wave standardizes the **target** canonicalization-first error-set semantics on top
-of that shipping surface. It does **not** require a new top-level
-`error Alias = ...` declaration form.
-
-#### Error conversion
-
-When a function's error set differs from a callee's, Spore can automatically convert errors if a conversion exists:
-
-```spore
-fn load_config(path: Str) -> Config ! ConfigError {
-    let content = read_file(path)?;       // FileError -> ConfigError (auto-converted)
-    let config = parse_toml(content)?;    // ParseError -> ConfigError (auto-converted)
-    config
-}
-```
-
-The compiler looks for a `From` trait implementation (e.g., `impl From[FileError] for ConfigError`) to perform the conversion. If no conversion exists, the error type must be listed in the function's error set directly.
-
-#### Error recovery patterns
-
-Use `match` on `Result` to provide fallback values or retry logic:
-
-```spore
-// Default value fallback
-fn get_config() -> Config {
-    match load_config("config.toml") {
-        Ok(config) => config,
-        Err(_) => Config.default(),
-    }
-}
-
-// Retry with tail recursion (TCO guaranteed)
-fn fetch_with_retry(url: Str, max_retries: I64) -> Data ! NetworkError
-    uses [NetConnect, Clock]
-{
-    fn retry(url: Str, attempts: I64, max: I64) -> Data ! NetworkError
-        uses [NetConnect, Clock]
-    {
-        match fetch(url) {
-            Ok(data) => data,
-            Err(NetworkError.Timeout) if attempts < max => {
-                sleep(1000);
-                retry(url, attempts + 1, max)  // tail recursion
-            },
-            Err(e) => throw e,
-        }
-    }
-    retry(url, 0, max_retries)
-}
-```
+Error-set typing, propagation, conversion, and recovery patterns are owned by
+SEP-0002. SEP-0001 only fixes the spelling and placement of `!`, `?`, and
+`throw`.
 
 ### Generic types with square brackets
 
@@ -355,7 +300,7 @@ fn identity[T](x: T) -> T {
 
 ### Function signatures: from simple to complex
 
-The full signature order is:
+The canonical signature order is:
 
 ```text
 fn name[T](params) -> ReturnType ! ErrorSet
@@ -363,58 +308,41 @@ where T: Bound
 cost [compute, alloc, io, parallel]
 uses [Effect1, Effect2]
 spec {
-    example "...": ...
-    property "...": |param: Type| ...
+    <spec-items>
 }
 {
     body
 }
 ```
 
-But you only write what you need:
+Only the clauses that are needed are written:
 
 ```spore
-// 1. Simple pure function — zero overhead
 fn add(a: I64, b: I64) -> I64 {
     a + b
 }
 
-// 2. Function with errors
 fn parse_int(input: Str) -> I64 ! InvalidFormat {
-    ...
+    ?parse_int_body
 }
 
-// 3. With generic constraints and behavioral spec
 fn serialize[T](value: T) -> Bytes ! SerializeError
 where T: Serialize
 cost [500, 50, 0, 1]
-spec {
-    example "empty struct": serialize(Empty {}) == Ok(b"")
-}
 {
-    ...
+    ?serialize_body
 }
 
-// 4. Side-effectful function with intent examples
-/// @idempotent
 fn sync_user_data(user_id: UserId, source: DataSource) -> SyncReport ! NetworkTimeout | AuthExpired
 cost [8500, 200, 800, 4]
 uses [NetConnect, FileRead, Clock]
-spec {
-    example "returns report on success" {
-        let report = sync_user_data(UserId(1), MockSource.success());
-        report.is_ok() && report.unwrap().records_synced > 0
-    }
-    property "idempotent": |id: UserId| {
-        let r1 = sync_user_data(id, MockSource.success());
-        let r2 = sync_user_data(id, MockSource.success());
-        r1 == r2
-    }
-}
 {
-    ...
+    ?sync_body
 }
 ```
+
+Detailed behavior of error sets, cost vectors, effect requirements, and `spec`
+execution is delegated to SEP-0002, SEP-0004, SEP-0003, and SEP-0006.
 
 ### Traits, effects, and the `uses` clause
 
@@ -443,90 +371,44 @@ effect HttpClient = NetConnect | Clock;
 effect CLI = Console | FileRead | FileWrite | Env | Spawn | Exit;
 ```
 
-Effect operations and handler binding are also centralized here. `perform` is a reserved keyword for effect-operation expressions. The settled handler grammar is `handler <Effect> as <HandlerName>(...) { ... }` for declarations and `handle { ... } with { ... }` for installation: the `with` block may contain inline effect arms via `on Effect.op(...) => ...` and/or named handler installations via `use HandlerName { ... }`. SEP-0003 defines the effect algebra and handler semantics; this SEP fixes the corresponding surface syntax.
-
-The `uses` clause declares what effects a function requires. SEP-0003 owns the full effect algebra and property inference rules; at the syntax level, the key shape is a bracketed list of atomic effect names or aliases. For example, SEP-0003 may derive properties like these from the written set:
-
-| `uses` set | Inferred properties |
-|---|---|
-| `uses []` (or omitted for pure) | `pure`, `deterministic`, `total` |
-| `uses [FileRead]` | `deterministic` |
-| Contains `Random` or `Clock` | neither `pure` nor `deterministic` |
-
-Properties such as `pure`, `deterministic`, and `total` are derived by semantic passes, not by the grammar itself. The `idempotent` property cannot be inferred and is annotated via doc comment: `/// @idempotent`.
-
-The `uses` clause can mix atomic effect names with named effect aliases:
+SEP-0001 fixes the grammar for `trait`, `effect`, `handler`, `perform`,
+`handle`, and `uses [...]`. SEP-0002 owns trait semantics; SEP-0003 owns effect
+algebra, handler behavior, inferred effect attributes, and alias expansion. At the
+syntax level, a `uses` clause is a bracketed list of effect names or aliases:
 
 ```spore
 fn query_database(sql: Str) -> Data ! DbError | Timeout
 uses [NetConnect]
 {
-    ...
+    ?query_database_body
 }
 
 fn run_cli(config_path: Str) -> () ! Error
 uses [CLI]
 {
-    ...
+    ?run_cli_body
 }
 ```
 
 ### Behavioral specification (`spec` clause)
 
-Spore functions can include a `spec` block that expresses behavioral intent as typechecked contracts. The `spec` clause sits after `where`, `cost`, and `uses`, immediately before the function body — making intent structurally part of the signature, visible to the compiler, surfaced in documentation, and available to testing and hole-reporting tooling.
+A function signature may include a `spec` block after `where`, `cost`, and `uses`, immediately before the function body. SEP-0001 fixes only the placement and item syntax:
 
 ```spore
-fn add(a: I64, b: I64) -> I64
+fn name(params) -> Return
 spec {
-    example "positive inputs": add(2, 3) == 5
-    example "identity":        add(0, 42) == 42
-    example "commutativity":   add(1, 2) == add(2, 1)
+    example "label": expr
+    law "label": |x: T| expr
+    law "refined": |x: I32 when self >= 0| expr
 }
 {
-    a + b
+    body
 }
 ```
 
-**`example` items** are concrete labeled test cases. The body must evaluate to `Bool`:
-
-```spore
-// Equality form (most common)
-example "parses ISO date": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
-
-// Boolean form
-example "rejects empty string": parse_date("").is_err()
-
-// Multi-line form — last expression (without semicolon) is the result
-example "handles leap year" {
-    let d = parse_date("2024-02-29");
-    d == Ok(Date(2024, 2, 29))
-}
-```
-
-**`property` items** express universally quantified assertions using explicitly typed lambda syntax. The compiler generates random inputs for property-based testing:
-
-```spore
-fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError
-spec {
-    example "ISO 8601":          parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
-    example "rejects ambiguous": parse_date("01/15/24")   == Err(AmbiguousFormat)
-
-    property "total":      |s: Str| parse_date(s).is_ok() || parse_date(s).is_err()
-    property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
-}
-{
-    ?parse_logic
-}
-```
-
-Key design properties:
-
-- **Spec metadata survives hole bodies**: A function with `{ ?hole }` still retains its `spec` items for type checking, documentation, and HoleReport output. However, executing those spec items still calls the function body, so a hole remains a runtime error until the body is filled.
-- **Current amendment scope**: This amendment defines the placement of `spec`
-  for ordinary function declarations, trait method signatures, and `impl`
-  methods with bodies. Trait-method `spec` inheritance and contract merging are
-  deferred to the type-system / trait semantics layer.
-- **MissingSpec warning**: `pub` functions without a `spec` block emit a compiler warning (not error), encouraging behavioral documentation without forcing it.
+`example` and `law` type checking, executable checking, diagnostics, and spec
+hashing are specified in SEP-0006. Hole-report projection of `spec` metadata is
+specified in SEP-0005.
 
 ### Struct and type definitions
 
@@ -546,7 +428,7 @@ impl Display for User {
 
 impl Serialize for User {
     fn serialize(self) -> Str ! SerializeError {
-        ...
+        ?serialize_body
     }
 }
 
@@ -634,62 +516,14 @@ let complex = |x, y| {
 
 ### Concurrency
 
+SEP-0001 fixes only the concurrency expression forms. Task lifetime, channel
+behavior, scheduling, cancellation, and timeout semantics are owned by SEP-0007.
+
 ```spore
 parallel_scope {
     let a = spawn { compute_a() };
     let b = spawn { compute_b() };
     [a.await, b.await]
-}
-```
-
-#### Channel communication
-
-Channels are multi-producer, single-consumer (MPSC). Senders can be cloned; receivers cannot:
-
-```spore
-let (tx, rx) = Channel.new[I64](buffer: 10);
-
-parallel_scope {
-    // Multiple producers via tx.clone()
-    let tx1 = tx.clone();
-    let tx2 = tx.clone();
-
-    spawn { tx1.send(1) };
-    spawn { tx2.send(2) };
-
-    spawn {
-        let a = rx.recv();
-        let b = rx.recv();
-        print(f"Received: {a}, {b}");
-    };
-}
-```
-
-#### Select and timeout
-
-`select` multiplexes across channels. Use recursion for event loops (no `for`/`loop`):
-
-```spore
-let (tx1, rx1) = Channel.new[I64](buffer: 1);
-let (tx2, rx2) = Channel.new[Str](buffer: 1);
-
-// Recursive event loop (TCO guaranteed)
-fn event_loop(rx1: Channel.Receiver[I64], rx2: Channel.Receiver[Str])
-    uses [Console]
-{
-    select {
-        value from rx1 => {
-            print(f"Got integer: {value}");
-        },
-        message from rx2 => {
-            print(f"Got string: {message}");
-        },
-        timeout(1000) => {
-            print("Timed out — stopping");
-            return;
-        },
-    }
-    event_loop(rx1, rx2)  // tail recursion
 }
 ```
 
@@ -712,7 +546,7 @@ import std.math as math;
 
 Spore source files are UTF-8 encoded. Identifiers may contain Unicode letters, ASCII digits, and underscores. Identifiers must begin with a letter or underscore.
 
-**Character literals.** Single-quoted `'_'` syntax is **not** part of the language. The reference compiler rejects it at lex time with `character literals are not supported` (see `spore` PR #113). Use a normal string literal for a single scalar (for example `"a"`, `"世"`); character-oriented helpers in `stdlib/char.sp` take `Str` values of length 1.
+**Character literals.** Single-quoted character literals are not part of the grammar. Length-1 text is written as a `Str` literal, for example `"a"` or `"世"`. Character-oriented standard-library helpers are specified by SEP-0009.
 
 #### Keywords
 
@@ -740,7 +574,7 @@ The complete reserved keyword table:
 | `cost` | Four-slot cost vector clause |
 | `spec` | Behavioral specification block in function declarations and `impl` methods |
 | `example` | Concrete labeled example item inside a `spec` block |
-| `property` | Universally quantified assertion inside a `spec` block |
+| `law` | Universally quantified assertion inside a `spec` block |
 | `spawn` | Spawn concurrent task |
 | `select` | Channel multiplex expression |
 | `parallel_scope` | Structured concurrency scope |
@@ -891,11 +725,11 @@ t"Dear {customer}, order {id}"    // template string
 
 ### EBNF Grammar
 
-For effect handling, the settled grammar is `perform <expr>`, top-level `handler <Effect> as <HandlerName>(...) { ... }`, and `handle { ... } with { ... }` where each item is either `use HandlerName { ... }` or `on Effect.op(...) => ...`.
+Effect handling uses `perform <expr>`, top-level `handler <Effect> as <HandlerName>(...) { ... }`, and `handle { ... } with { ... }`. Handler-block entries are either `use HandlerName { ... }` or `on Effect.op(...) => ...`.
 
 ```ebnf
 (* ═══════════════════════════════════════════════════ *)
-(*  Spore v0.1 — Complete EBNF Grammar                *)
+(*  Spore — Complete EBNF Grammar                     *)
 (* ═══════════════════════════════════════════════════ *)
 
 (* ─── Top-level ───────────────────────────────────── *)
@@ -918,10 +752,10 @@ TopLevelItem    = ImportDecl
 ImportDecl      = "import" ImportPath [ "as" Ident ] ";" ;
 ImportPath      = Ident { "." Ident } ;
 
-AliasDecl       = "alias" Ident "=" QualifiedIdent ";" ;
+AliasDecl       = [ Visibility ] "alias" Ident "=" QualifiedIdent ";" ;
 
 (* ─── Module ──────────────────────────────────────── *)
-(* REMOVED (D7): Module names are derived from file paths (see SEP-0008).
+(* REMOVED: Module names are derived from file paths (see SEP-0008).
    The `module` keyword is not part of the surface syntax. *)
 
 (* ─── Struct ──────────────────────────────────────── *)
@@ -1053,16 +887,16 @@ FunctionCall    = Ident "(" [ ArgList ] ")" ;
 SpecClause      = "spec" "{" { SpecItem } "}" ;
 
 SpecItem        = ExampleItem
-                | PropertyItem ;
+                | LawItem ;
 
 ExampleItem     = "example" StringLiteral ":" Expr
                 | "example" StringLiteral Block ;
 
-PropertyItem    = "property" StringLiteral ":" PropertyLambdaExpr ;
+LawItem         = "law" StringLiteral ":" LawLambdaExpr ;
 
-PropertyLambdaExpr = "|" [ PropertyParamList ] "|" ( Expr | Block ) ;
-PropertyParamList  = PropertyParam { "," PropertyParam } ;
-PropertyParam      = Ident ":" TypeExpr ;
+LawLambdaExpr   = "|" [ LawParamList ] "|" ( Expr | Block ) ;
+LawParamList    = LawParam { "," LawParam } [ "," ] ;
+LawParam        = Ident ":" TypeExpr [ "when" Expr ] ;
 
 (* ─── Type Expressions ────────────────────────────── *)
 
@@ -1248,57 +1082,28 @@ OctDigit        = "0".."7" ;
 BinDigit        = "0" | "1" ;
 ```
 
-### Function signature semantics
+### Function signature layout
 
-The function signature system is the heart of Spore's design. The clauses appear in this canonical order:
+Function clauses appear in this canonical order:
 
 ```text
 fn <name>[<generics>](<params>) -> <ReturnType> [! <ErrorTypes>]
 [where <GenericName>: <Constraint>, ...]
 [cost [<compute_expr>, <alloc_expr>, <io_expr>, <parallel_expr>]]
 [uses [<Effect>, ...]]
-[spec { <examples and properties> }]
+[spec { <examples and laws> }]
 {
     <body>
 }
 ```
 
-**Clause semantics:**
+SEP-0001 owns this order and the delimiter forms. Clause meaning is delegated:
+return and error typing to SEP-0002, cost checking to SEP-0004, effect checking
+to SEP-0003, `spec` execution and diagnostics to SEP-0006, and any
+hole-specific projection of signature metadata to SEP-0005.
 
-1. **`-> ReturnType`** — The return type. Omitted for functions returning `Unit`.
-
-2. **`! ErrorTypes`** — The error set. A function with `! E1 | E2` may produce
-   errors of type `E1` or `E2`. Absence of `!` means the function cannot fail.
-   Compatibility and `?` propagation use **canonicalized** error-set comparison:
-   resolve each written item to its canonical nominal identity, drop duplicates,
-   and compare by canonical subset/equivalence. Duplicate or canonically
-   equivalent items are redundant and should be diagnosed, even though signature
-   hashing remains conservative over the written surface form.
-
-3. **`where T: Bound + Bound2, U: Bound`** — Generic constraints. Each constraint is a `+`-separated list of trait bounds (`T: Eq + Hash`). The canonical form is a single `where` clause with comma-separated constraints.
-
-4. **`cost [c, a, i, p]`** — A four-slot cost vector (`compute`, `alloc`, `io`, `parallel`). Each slot may reference parameters or use the currently supported linear `O(n)` forms.
-
-5. **`uses [Effects]`** — The effect set required by this function. The compiler auto-infers effect properties:
-   - `uses []` → `pure`, `deterministic`, `total`
-   - `uses [FileRead]` → `deterministic`
-   - If `uses` contains `Random` or `Clock` → not deterministic
-   - `total` is inferred by the compiler's termination checker
-
-   **Implication chain:** `pure` ⊃ `deterministic` — a pure function is necessarily deterministic (same inputs always produce same outputs). A deterministic function is not necessarily pure (it may perform IO that doesn't introduce non-determinism). `total` is orthogonal: a function can be total without being pure.
-
-6. **`spec { ... }`** — Behavioral specification block. Contains `example` and `property` items that express the function's intended behavior as typechecked test metadata. When the enclosing function body is executable, `spore test` evaluates the `spec` block by calling the function by name. If the body still contains an unfilled hole, the `spec` block remains available to the compiler and HoleReport output, but executing it still reaches the hole and errors.
-
-   - **`example "label": expr`** — A concrete named test case. The body expression must be `Bool`. If using `==`, both sides must have the same type. Multi-line examples use block syntax: `example "label" { ... }`.
-   - **`property "label": |x: T, ...| expr`** — A universally quantified assertion. The compiler generates random inputs of the declared types and verifies the body evaluates to `true` for all trials. Type annotations on property parameters are required.
-
-   For `pub` functions without a `spec` block, the compiler emits a `MissingSpec` warning (not error). Private functions do not trigger this warning. Suppress with `@allow(missing_spec)`.
-
-   This amendment fixes where trait-method `spec` may appear, but does not
-   define trait-method `spec` inheritance or contract merging. That behavior is
-   reserved for the type-system / trait semantics layer.
-
-**Clause ordering** is not enforced by the parser's recovery mode, but the canonical source form and formatter order are: `where` → `cost` → `uses` → `spec`.
+**Clause ordering** is the canonical source and formatter order: `where` →
+`cost` → `uses` → `spec`.
 
 **`self` in trait and handler methods:** The `self` identifier is a regular parameter name used as the first parameter in trait method signatures. It is not a keyword with special scoping rules.
 
@@ -1318,30 +1123,22 @@ trait Collection {
 
 ### Expression forms
 
-All control flow constructs are expressions that produce values.
+This section summarizes syntax only. Expression typing, evaluation order,
+exhaustiveness checking, closure capture, lowering, and error propagation
+semantics are delegated to SEP-0002 and SEP-0006.
 
-**Block expressions** evaluate to their last expression (without semicolon). A block ending with a semicolon-terminated statement returns `Unit`.
+**Blocks** use `{ ... }` with semicolon-terminated statements and an optional
+tail expression.
 
-**If expressions** always have a value. When used as a statement (followed by `;`), the value is discarded.
+**If expressions** use `if Expr Block [else (IfExpr | Block)]`.
 
-**Match expressions** are exhaustive — the compiler rejects non-exhaustive matches at compile time.
+**Match expressions** use `match Expr { Pattern [if Expr] => Expr, ... }`.
 
-**Lambda expressions** use `|params| body` syntax. Closures capture variables from the enclosing scope.
+**Lambda expressions** use `|params| expr` or `|params| { ... }`.
 
-**Pipe expressions** desugar as follows:
+**Pipe expressions** use `left |> right`.
 
-- `x |> f` → `f(x)`
-- `x |> f(y, z)` → `f(x, y, z)`
-- `x |> f(_, y)` → `f(x, y)`
-- `x |> .method()` → `x.method()`
-
-**Error propagation (`?`)**: `expr?` evaluates `expr`. If the result is `Ok(v)`,
-yields `v`. If `Err(e)`, immediately returns `Err(e)` from the enclosing
-function. This check is performed by canonical subset comparison: the callee's
-canonical error set must be a subset of the enclosing function's canonical
-declared error set. The first slice keeps the current call/pipeline-oriented
-checker architecture; it does not require a richer expression-local `Try` model
-to land first.
+**Try expressions** use postfix `?`.
 
 ### Pattern matching details
 
@@ -1363,31 +1160,28 @@ Supported pattern forms:
 
 ### Type system
 
-This subsection is a syntax-facing overview. SEP-0002 is authoritative for primitive types, inference, refinement checking, trait resolution, and type display.
+This subsection is a syntax-facing overview. SEP-0002 is authoritative for primitive type meaning, inference, refinement checking, trait resolution, and type display.
 
-**Primitive types:** Fixed-width numerics `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, and `F64`; `Bool`; UTF-8 text as `Str`. There is **no** separate `Char` type. **Implementation note:** The reference compiler’s `Ty` enum in `sporec-typeck` uses exactly those numeric widths (plus `Str`, `Bool`, `Unit`, `Never`, tuples, refinements, …); **unsuffixed integer literals default to `I64`** and float literals to **`F64`**. `Int` and `Float` are not primitive names or authoritative shorthand in the language docs. Narrower ranges are expressed with **refinement types** on a fixed-width base (for example `alias Port = I64 when self >= 1 && self <= 65535`).
+**Primitive type names:** `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F32`, `F64`, `Bool`, `Str`, `Unit`, and `Never`.
 
-**Collection types:** **`List[T]`** (default—always unbounded); **`Vec[T, max: N]`** (bounded, **rarely needed**—only when `N` belongs in the type; see SEP-0002); **`Map[K, V]`**, **`Set[T]`**, **`Array[T, N]`**
+**Collection type syntax:** `List[T]`, `Vec[T, max: N]`, `Map[K, V]`, `Set[T]`, and `Array[T, N]`.
 
 **Special types:** `Option[T]`, `Result[T, E]`, `Ref[T]`, `Channel[T]`, `Unit`
 
 **Const generics:** `struct Array[T, const N: I64] { ... }`
 
 ```spore
-// Fixed-size array
 struct Array[T, const N: I64] {
-    data: List[T],  // length guaranteed to be N
+    data: List[T],
 }
 
-// Fixed-size matrix
 struct Matrix[T, const ROWS: I64, const COLS: I64] {
     data: Array[Array[T, COLS], ROWS],
 }
-
-// Usage
-let vec3: Array[F64, 3] = Array.new([1.0, 2.0, 3.0]);
-let identity: Matrix[F64, 3, 3] = Matrix.identity();
 ```
+
+Const-generic checking and collection invariants are specified by SEP-0002 and
+the relevant standard-library SEP.
 
 **Refinement types:** `type PositiveInt = I64 when self > 0;`
 
@@ -1395,259 +1189,76 @@ let identity: Matrix[F64, 3, 3] = Matrix.identity();
 
 ### Concurrency primitives
 
-Spore provides structured concurrency:
+Concurrency forms:
 
-- **`parallel_scope { ... }`** — All spawned tasks must complete before the scope exits.
-- **`spawn { expr }`** — Launch a concurrent task within a parallel scope.
-- **`select { ... }`** — Multiplex over multiple channels.
-- **`task.await`** — Wait for a spawned task's result.
-- **`Channel.new[T](buffer: N)`** — Create a bounded channel.
+- `parallel_scope { ... }`
+- `spawn { expr }`
+- `select { ... }`
+- `task.await`
+
+SEP-0007 owns the semantics of these forms.
 
 ### Hole syntax
 
-Holes (`?`, `?name`, `?name : Type`) enable incremental development. A function with holes is partial: checking and hole reporting can succeed, while executable build/run paths surface the partial code until the hole is filled. SEP-0005 owns the exact partial-function status, reporting protocol, and fill workflow.
-
-#### `@allows` annotation
-
-The `@allows` annotation constrains which functions the compiler (or an AI agent) may use to fill a hole:
+Holes are expressions:
 
 ```spore
-@allows(validate, sanitize, format)
-fn process_input(raw: Str) -> Str ! ValidationError {
-    let validated = validate(raw)?;
-    let sanitized = sanitize(validated);
-    ?final_step  // this hole can only call validate/sanitize/format
-}
-
-@allows(add, multiply, negate)
-fn arithmetic(a: I64, b: I64) -> I64 {
-    let x = ?step1 : I64;  // only add/multiply/negate
-    let y = ?step2 : I64;  // same constraint
-    x + y
-}
+?
+?name
+?name : Type
 ```
 
-#### Hole + pipeline type inference
-
-The compiler infers hole types through pipeline chains:
-
-```spore
-fn example() {
-    let list = [1, 2, 3, 4, 5];
-    let result = list
-        |> filter(?)        // hole: fn(I64) -> Bool
-        |> map(?)           // hole: fn(I64) -> ?R
-        |> fold(0, ?);     // hole: fn(I64, ?R) -> I64
-}
-```
-
-#### Hole protocol reference
-
-`sporec query-hole <file> <name> --json` returns one hole object from the shared typed-hole protocol, and `sporec holes <file> --json` returns the batch form with both `holes` and `dependency_graph`. SEP-0005 is the authoritative schema and workflow specification; SEP-0001 intentionally avoids freezing a second inline JSON shape here.
-
-At minimum, the shared hole object includes:
-
-- `name` / `display_name`
-- `location`
-- `expected_type` / `type_inferred_from`
-- `function` / `enclosing_signature`
-- `bindings` / `binding_dependencies`
-- `available_effects`, `errors_to_handle`, `cost_budget`
-- `candidates`, `dependent_holes`, `confidence`, `error_clusters`
-
-When a function has both a `spec` block and a hole body, that shared hole object may surface the `spec` items as additional behavioral context for tooling. The authoritative transport and evolution rules remain in SEP-0005 so SEP-0001 does not accidentally freeze a stale field layout.
+SEP-0001 owns these spellings only. Partial-function status, hole typing,
+pipeline inference, `@allows`, JSON output, and any `spec` metadata surfaced to
+hole tooling are owned by SEP-0005.
 
 ## Complete examples
 
-### Expression parser and evaluator
-
-This example demonstrates algebraic data types, pattern matching, recursion, error handling, and four-slot cost clauses working together:
+Complete semantic examples are intentionally deferred to the SEPs that own the
+corresponding behavior.
 
 ```spore
-// Expression AST
 type Expr =
     Literal(I64)
-    | Variable(name: Str)
-    | BinOp(op: Op, left: Expr, right: Expr)
-    | UnaryOp(op: UnaryOp, expr: Expr)
-    | Let(name: Str, value: Expr, body: Expr)
-    | If(condition: Expr, then_branch: Expr, else_branch: Expr);
+    | Add(left: Expr, right: Expr);
 
-type Op = Add | Sub | Mul | Div | Equal | LessThan;
-type UnaryOp = Negate | Not;
-
-type Env = Map[Str, I64];
-
-type EvalError =
-    UndefinedVariable(name: Str)
-    | DivisionByZero
-    | TypeError(message: Str);
-
-// Evaluator — pure recursion, no loops
-fn eval(expr: Expr, env: Env) -> I64 ! EvalError
-cost [expr_size(expr) * 10, expr_size(expr), 0, 1]
-{
+fn eval(expr: Expr) -> I64 {
     match expr {
         Literal(n) => n,
-
-        Variable(name) => match env.get(name) {
-            Some(value) => value,
-            None => throw EvalError.UndefinedVariable(name),
-        },
-
-        BinOp(op, left, right) => {
-            let left_val = eval(left, env)?;
-            let right_val = eval(right, env)?;
-            eval_binop(op, left_val, right_val)?
-        },
-
-        UnaryOp(op, e) => {
-            let val = eval(e, env)?;
-            match op {
-                Negate => -val,
-                Not => if val == 0 { 1 } else { 0 },
-            }
-        },
-
-        Let(name, value_expr, body) => {
-            let value = eval(value_expr, env)?;
-            let new_env = env.insert(name, value);
-            eval(body, new_env)?
-        },
-
-        If(cond, then_branch, else_branch) => {
-            let cond_val = eval(cond, env)?;
-            if cond_val != 0 {
-                eval(then_branch, env)?
-            } else {
-                eval(else_branch, env)?
-            }
-        },
-    }
-}
-
-fn eval_binop(op: Op, left: I64, right: I64) -> I64 ! EvalError {
-    match op {
-        Add => left + right,
-        Sub => left - right,
-        Mul => left * right,
-        Div => if right == 0 {
-            throw EvalError.DivisionByZero
-        } else {
-            left / right
-        },
-        Equal => if left == right { 1 } else { 0 },
-        LessThan => if left < right { 1 } else { 0 },
-    }
-}
-
-// Usage
-fn example() {
-    // let x = 10 in let y = 20 in x + y
-    let expr = Expr.Let(
-        "x",
-        Expr.Literal(10),
-        Expr.Let(
-            "y",
-            Expr.Literal(20),
-            Expr.BinOp(Op.Add, Expr.Variable("x"), Expr.Variable("y"))
-        )
-    );
-
-    match eval(expr, Map.empty()) {
-        Ok(result) => print(f"Result: {result}"),  // Result: 30
-        Err(e) => print(f"Error: {e}"),
+        Add(left, right) => eval(left) + eval(right),
     }
 }
 ```
 
-### Concurrent producer-consumer
-
-This example demonstrates channels, structured concurrency, tail-recursive message processing, and zero use of loop constructs:
-
-```spore
-type Task =
-    Process(id: I64, data: Str)
-    | Stop;
-
-// Producer generates tasks and sends them to a channel
-fn producer(tx: Channel.Sender[Task], task_count: I64) {
-    (1..=task_count)
-        .map(|i| Task.Process(i, f"Task data {i}"))
-        .for_each(|task| tx.send(task));
-    tx.send(Task.Stop);
-}
-
-// Consumer processes tasks via tail recursion
-fn consumer(id: I64, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Str]) {
-    fn process(id: I64, rx: Channel.Receiver[Task], result_tx: Channel.Sender[Str]) {
-        match rx.recv() {
-            Task.Process(task_id, data) => {
-                let result = f"Consumer {id} processed task {task_id}: {data}";
-                result_tx.send(result);
-                process(id, rx, result_tx)  // tail recursion
-            },
-            Task.Stop => {},
-        }
-    }
-    process(id, rx, result_tx)
-}
-
-// Result collector using tail recursion
-fn collector(rx: Channel.Receiver[Str], expected: I64)
-    uses [Console]
-{
-    fn collect(rx: Channel.Receiver[Str], remaining: I64)
-        uses [Console]
-    {
-        if remaining <= 0 { return }
-        let result = rx.recv();
-        print(result);
-        collect(rx, remaining - 1)  // tail recursion
-    }
-    collect(rx, expected)
-}
-
-fn main() {
-    let task_count = 10;
-    let consumer_count = 3;
-    let (result_tx, result_rx) = Channel.new[Str](buffer: 10);
-
-    parallel_scope {
-        // Each consumer gets its own dedicated channel — MPSC receivers cannot be cloned.
-        (1..=consumer_count).for_each(|i| {
-            let (task_tx, task_rx) = Channel.new[Task](buffer: 5);
-            let tx_clone = result_tx.clone();
-            spawn { producer(task_tx, task_count) };
-            spawn { consumer(i, task_rx, tx_clone) };
-        });
-
-        spawn { collector(result_rx, task_count * consumer_count) };
-    }
-
-    print("All tasks completed!");
-}
-```
+More complete examples for type checking, effects, cost, holes, concurrency,
+module resolution, and standard-library APIs belong to SEP-0002 through SEP-0009.
 
 ## Human experience impact
 
 ### Readability
 
-Spore's syntax prioritizes scannability. The fixed operator set means readers never encounter unfamiliar symbols. The pipe operator linearizes deeply nested function calls. Exhaustive `match` prevents overlooked cases. The absence of loops initially surprises imperative programmers, but the combination of `map`/`fold`/`filter` with guaranteed TCO quickly becomes natural. The `uses` clause makes side effects visible at a glance in the function signature.
+Spore's syntax prioritizes scannability. The fixed operator set prevents
+source-local operator definitions from changing parsing rules. The pipe operator
+linearizes deeply nested function calls. The `uses` clause makes side effects
+visible in the function signature. Exhaustiveness requirements for `match` are
+specified by SEP-0002.
 
 ### Learning curve
 
-- **Developers from Rust/TypeScript**: Very low barrier. Curly braces, semicolons, `let`, `match`, `fn`, and generic syntax are immediately familiar. The main novelty is `uses`/`cost`/`!` clauses and the no-loops philosophy.
-- **Developers from Python/JavaScript**: Moderate curve. Static types and explicit error handling require adjustment, but f-strings, lambdas, and pipe operators feel comfortable.
-- **Developers from Haskell/OCaml**: Low barrier. Pattern matching, ADTs, and expression-based design are familiar. Curly braces instead of significant whitespace is a stylistic shift.
+- **Developers from Rust/TypeScript**: Curly braces, semicolons, `let`, `match`, `fn`, and explicit generic syntax are familiar. The main additional forms are `uses`, `cost`, and `!` clauses.
+- **Developers from Python/JavaScript**: Static types and explicit error sets require adjustment. F-strings, lambdas, and pipe-style composition remain familiar entry points.
+- **Developers from Haskell/OCaml**: Pattern matching, ADTs, and expression-oriented syntax are familiar. Curly braces replace significant whitespace.
 
 ### Progressive disclosure
 
-Simple functions require zero ceremony — `fn add(a: I64, b: I64) -> I64 { a + b }` has no clauses to learn. Effects, error sets, and the `cost [...]` clause are introduced only when the code actually needs them.
+Simple functions do not require optional clauses:
+`fn add(a: I64, b: I64) -> I64 { a + b }`. Effects, error sets, `cost [...]`,
+and `spec { ... }` are introduced only when the function signature requires
+that metadata.
 
 ## Agent experience impact
 
-Spore is designed with AI code generation agents as first-class consumers:
+Code-generation agents are an explicit tooling audience for the syntax:
 
 ### Parsing predictability
 
@@ -1657,7 +1268,8 @@ Spore is designed with AI code generation agents as first-class consumers:
 
 ### Structured metadata
 
-Function signatures are machine-readable contracts. An agent can extract:
+Function signatures are machine-readable contracts. SEP-0001 defines stable
+positions and delimiters for:
 
 - **Input/output types** from the parameter list and return type
 - **Failure modes** from the `! ErrorSet`
@@ -1665,48 +1277,19 @@ Function signatures are machine-readable contracts. An agent can extract:
 - **Performance budget** from the `cost [compute, alloc, io, parallel]` clause
 - **Generic requirements** from `where` clauses
 
-This enables agents to:
-
-1. Select appropriate functions by matching effect requirements
-2. Estimate execution cost before generating call sequences
-3. Verify error handling completeness
-4. Compose pipelines with compatible effect sets
+How agents interpret those clauses is owned by the type, effect, cost, hole, and
+compiler SEPs.
 
 ### Code generation
 
-Agents can generate Spore code incrementally using holes (`?`). A function can be specified by its signature alone, then filled in step by step. The `@allows` annotation restricts the search space for hole completion.
+Agents can generate Spore code incrementally using holes (`?`). SEP-0005 owns the
+hole-filling workflow and related annotations.
 
 ### Snapshot hashing
 
-Any change to the following signature components produces a new snapshot hash and requires explicit `--permit` approval:
-
-| Component | Example change |
-|---|---|
-| Function name | `parse_config` → `load_config` |
-| Parameter names | `raw` → `input` |
-| Parameter order | `(a, b)` → `(b, a)` |
-| Parameter types | `Str` → `Bytes` |
-| Return type | `Config` → `Settings` |
-| Error clause surface | add/remove/reorder/rename/duplicate any written error item |
-| Cost slots | e.g. `[200, 20, 0, 1]` → `[300, 40, 50, 2]` |
-| Effect set | add/remove any effect |
-| Generic constraints | `T: Eq` → `T: Eq + Hash` |
-
-The `spec` block is tracked via a separate **spec hash**, independent of the snapshot hash:
-
-| Change | Snapshot hash | Spec hash | Required approval |
-|--------|--------------|-----------|------------------|
-| Add a `spec` block where none existed | unchanged | new | `--permit-spec` |
-| Add/modify/remove an `example` or `property` | unchanged | changed | `--permit-spec` |
-| Any signature clause change (types, effects, cost, etc.) | changed | unchanged | `--permit` |
-
-The lighter `--permit-spec` approval reflects that spec changes clarify behavioral contracts without altering calling conventions. Downstream callers need only re-run their own tests, not update call sites.
-
-For error clauses, this policy is intentionally **conservative**. Canonically
-equivalent declarations such as reordered items or duplicate spellings are
-treated as the same semantic error set for checking and diagnostics, but they
-still change the snapshot hash until a later compatibility policy explicitly
-relaxes that rule.
+SEP-0001 defines the surface components that can participate in hashing.
+Snapshot hashing, spec hashing, and approval flags are specified in SEP-0006 and
+SEP-0008.
 
 ## Structured representation / protocol impact
 
@@ -1735,11 +1318,7 @@ Program
     ├── cost?
     ├── spec?
     │   ├── examples[]
-    │   │   ├── label: Str
-    │   │   └── body: Expr
-    │   └── properties[]
-    │       ├── label: Str
-    │       └── predicate: LambdaExpr
+    │   └── laws[]
     └── body: Block
 
 Expr
@@ -1772,9 +1351,9 @@ Expr
 The regular, keyword-delimited syntax supports straightforward LSP provider implementations:
 
 - **Go to definition**: Every identifier resolves unambiguously through module paths and lexical scoping.
-- **Hover information**: Function signatures (including `uses`, `cost`, `spec` summary, inferred properties) can be displayed in full. The `spec` block is surfaced as a "behavioral contract" section showing example count and property count.
-- **Completions**: After `|>`, suggest functions whose first parameter matches the pipe source type. Inside `uses [...]`, suggest available effects. Inside `spec { }`, suggest `example` and `property` as the only valid item keywords.
-- **Diagnostics**: Missing match arms, undeclared effects, cost violations, incomplete error handling, missing spec on public functions, and spec failures can all be reported as structured diagnostics.
+- **Hover information**: Function signatures can be displayed in full because clause order is fixed.
+- **Completions**: Keyword-delimited positions such as `uses [...]` and `spec { ... }` are easy to identify.
+- **Diagnostics**: Parser and formatter diagnostics can point to exact clause positions; semantic diagnostics are owned by dependent SEPs.
 - **Signature help**: The ordered clause structure (`where` → `cost` → `uses` → `spec`) enables progressive parameter info display.
 
 ### Serialization
@@ -1783,117 +1362,23 @@ The AST serializes naturally to JSON, S-expressions, or any tree-structured form
 
 ## Diagnostics impact
 
-> **Note:** Numeric diagnostic codes (`E0xxx`, `C0xxx`, `W0xxx`, `K0xxx`, `M0xxx`) and the full code registry are defined in **SEP-0006 (Compiler Architecture)**. This section illustrates the *message format and context* that Spore's explicit syntax enables; the specific codes shown are examples only and the authoritative list lives in SEP-0006.
-
-### Error messages
-
-Spore's explicit syntax enables highly specific error messages:
-
-**Missing effect:**
-
-```text
-error: function `fetch_data` uses effect `NetConnect` but does not declare it
-  --> src/api.sp:12:5
-   |
-12 | fn fetch_data(url: Url) -> Data ! NetworkError {
-   |    ^^^^^^^^^^ missing `uses` clause
-   |
-   = help: add `uses [NetConnect]` to the function signature
-   = note: detected effect dependency via call to `http.get`
-```
-
-**Non-exhaustive match:**
-
-```text
-error: non-exhaustive match expression
-  --> src/main.sp:25:5
-   |
-25 | match color {
-   |       ^^^^^ missing variant `Blue`
-   |
-   = help: add `Blue => ...` arm or use `_ => ...` wildcard
-```
-
-**Loop keyword used:**
-
-```text
-error: `for` loops are not supported in Spore
-  --> src/main.sp:10:5
-   |
-10 | for x in list {
-   | ^^^ Spore uses recursion and higher-order functions instead of loops
-   |
-   = help: try `list.map(|x| ...)` or `list.fold(init, |acc, x| ...)`
-   = help: for recursive iteration, use tail recursion (TCO is guaranteed)
-```
-
-**Spec clause in wrong position:**
-
-```text
-error: `spec` must appear after all other signature clauses
-  --> src/lib.sp:5:1
-   |
- 5 | spec { ... }
- 6 | cost [500, 30, 50, 2]
-   |
-   = help: move `cost` before `spec`
-```
-
-**Spec example failure (runtime):**
-
-```text
-spec failure: `parse_date` — example "ISO 8601"
-  --> src/dates.sp:5:5
-   |
- 5 |     example "ISO 8601": parse_date("2024-01-15") == Ok(Date(2024, 1, 15))
-   |
-   body evaluated to: false
-   = note: equality-shaped examples may additionally report compared values when available
-```
-
-**Spec property counterexample (runtime):**
-
-```text
-spec counterexample: `parse_date` — property "round-trip"
-  --> src/dates.sp:9:5
-   |
- 9 |     property "round-trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
-   |
-   counterexample: d = Date { year: 2024, month: 2, day: 30 }
-   body evaluated to: false
-   = note: found after 47 trials
-```
-
-**Missing spec warning:**
-
-```text
-warning: public function `parse_date` has no `spec` block
-  --> src/dates.sp:3:1
-   |
- 3 | pub fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError {
-   |        ^^^^^^^^^^ no behavioral contract declared
-   |
-   = help: add a `spec { example "...": ... }` block before the function body
-   = note: suppress with `@allow(missing_spec)` if intentional
-```
-
-### Recovery strategies
-
-The parser can recover from common errors:
-
-1. **Missing semicolon**: Insert one after a statement and continue parsing.
-2. **Missing closing brace**: Match indentation heuristics to suggest where the brace should go.
-3. **Unknown keyword**: Suggest the closest valid keyword (e.g., `func` → `fn`, `for` → `map`/`fold`).
-4. **Angle brackets for generics**: Detect `List<I64>` and suggest `List[I64]`.
-5. **Missing `!` clause**: When a function body calls a failable function without `?`, suggest adding the error type to the signature.
+SEP-0001 enables precise syntax diagnostics because blocks, clauses, and
+operators have fixed delimiters and a fixed order. Diagnostic codes, recovery
+strategy, semantic errors, `spec` failures, and JSON diagnostic shape are owned
+by SEP-0006.
 
 ## Drawbacks
 
-1. **No loops**: Developers with imperative backgrounds may find the no-loop constraint frustrating initially, especially for simple counting patterns. The learning curve for converting loop-based thinking to recursion + HOFs is non-trivial.
+1. **No loops**: Developers with imperative backgrounds must express iteration
+   through recursion or library functions, including simple counting patterns.
 
-2. **Verbose error sets**: Functions that can fail in many ways produce long `! E1 | E2 | E3 | ...` lists. This is deliberate (errors are visible) but can clutter signatures.
+2. **Verbose error sets**: Functions that can fail in many ways produce long
+   `! E1 | E2 | E3 | ...` lists. This makes failures visible but can lengthen
+   signatures.
 
-3. **`cost` clause expressiveness**: The cost model is inherently limited — expressing accurate cost bounds for complex algorithms may be impractical. Wrong bounds are worse than no bounds.
+3. **`cost` clause expressiveness**: The cost expression envelope may be
+   insufficient for complex algorithms. SEP-0004 owns the verification model and
+   diagnostics for inaccurate bounds.
 
 4. **No custom operators**: Domains like linear algebra or DSLs sometimes benefit from custom operators. Spore sacrifices this for predictability.
 
@@ -1901,33 +1386,37 @@ The parser can recover from common errors:
 
 6. **Keyword count**: The reserved keyword set is large (40+), which constrains identifier names and increases the language surface area.
 
-7. **`with` removal**: Auto-inferring properties from `uses` is convenient but means developers cannot see or override the inferred properties at the declaration site without inspecting compiler output.
+7. **No explicit effect-property clause**: Effect attributes inferred from
+   `uses` are not written at the declaration site. SEP-0003 owns how those
+   attributes are reported by tooling.
 
 ## Alternatives considered
 
 ### Loop constructs
 
-We considered including a minimal loop construct (e.g., Rust's `loop` or a `foreach`) but rejected it because:
+We considered including a minimal loop construct, for example Rust's `loop` or a
+`foreach` form, but rejected it because:
 
-- It would undermine the functional-first philosophy.
-- TCO guarantee makes recursion safe and efficient.
-- HOFs (`map`, `fold`, `filter`) cover the vast majority of iteration patterns.
-- A single iteration paradigm reduces cognitive load once learned.
+- It would introduce a second iteration style into the core grammar.
+- Recursion and library functions provide the single accepted iteration style.
+- Higher-order library functions such as `map`, `fold`, and `filter` cover common iteration patterns.
+- A single iteration style simplifies formatter, analyzer, and agent behavior.
 
 ### Angle brackets for generics (`List<I64>`)
 
 Rejected because:
 
 - Angle brackets create parsing ambiguity with comparison operators (`a < b > c`).
-- Square brackets align with Python type hints (`List[int]`) which are increasingly familiar.
-- Gleam and other modern languages have validated this choice.
+- Square brackets align with Python type hints (`List[int]`).
+- The choice matches existing precedent in modern typed languages.
 
 ### `with` clause for explicit effect properties
 
-The original design included `with [pure, deterministic]` for explicit property annotation. This was removed because:
+The original design included `with [pure, deterministic]` for explicit effect
+attribute annotation. This was removed because:
 
-- Properties are fully deterministic given the `uses` set — annotation is redundant.
-- Redundant annotations can diverge from reality, creating false confidence.
+- Effect attributes are derivable from the `uses` set.
+- Redundant annotations can diverge from inferred effect facts.
 - The compiler can display inferred properties in IDE hover and `--explain` output.
 
 ### Significant whitespace (Python/Haskell style)
@@ -1961,7 +1450,7 @@ Rejected because:
 
 - Invisible control flow violates the principle of explicit effects.
 - Error sets in signatures enable static analysis and agent reasoning.
-- `?` provides comparable ergonomics to exceptions for the happy path.
+- `?` keeps the common success path concise while preserving explicit error sets.
 
 ## Prior art
 
@@ -1977,7 +1466,7 @@ Influence on: expression-based design, the trait/effect split design, no-loop ph
 
 ### Gleam
 
-Influence on: square brackets for generics, use of `|>` pipe operator as a core language feature, the philosophy of a small fixed-operator language that is easy for tools to process.
+Influence on: square brackets for generics, use of `|>` pipe operator as a core language feature, and a small fixed-operator language surface.
 
 ### Elm
 
@@ -1993,7 +1482,7 @@ Influence on: type classes (→ traits), purity by default, the idea of tracking
 
 ### TypeScript / Python
 
-Influence on: f-string syntax (`f"...{expr}..."`), postfix type annotations (`name: Type`), square brackets for generics (Python), the desire for a gentle learning curve.
+Influence on: f-string syntax (`f"...{expr}..."`), postfix type annotations (`name: Type`), and square brackets for generics (Python).
 
 ### Koka
 
@@ -2001,19 +1490,21 @@ Influence on: algebraic effect system design, the idea that effects should be in
 
 ## Backward compatibility and migration
 
-As this is the initial v0.1 specification, there are no backward compatibility concerns.
+As this is the initial root syntax specification, there are no backward compatibility concerns.
 
 ### Future compatibility considerations
 
 1. **Keyword reservation**: The large reserved keyword set is intentional — it preserves room for future features (e.g., `async`, `unsafe`, `macro`) without breaking existing code.
 
-2. **Signature evolution**: The snapshot hash system means any signature change requires explicit approval. Future SEPs that modify signature clause syntax must define migration tooling.
+2. **Signature evolution**: Future SEPs that modify signature clause syntax must
+   define migration tooling and specify their interaction with signature or
+   snapshot hashing.
 
-3. **Cost model changes**: The `cost` clause semantics may evolve. Future versions should define a cost model versioning scheme so that cost bounds written today remain meaningful.
+3. **Cost model changes**: The `cost` clause semantics may evolve. Future changes should define a migration story so that cost bounds written today remain meaningful.
 
 4. **New expression forms**: The grammar is designed to be extensible — new expression forms can be added as new `PrimaryExpr` alternatives without disturbing existing productions.
 
-5. **Standard library stability**: Type names like `Option`, `Result`, `List`, `Map` are part of the language surface. Renaming these would require a major version bump and automated migration.
+5. **Standard library stability**: Type names like `Option`, `Result`, `List`, `Map` are part of the language surface. Renaming these would require an explicit breaking-change migration.
 
 ## Unresolved questions
 
@@ -2028,7 +1519,7 @@ or signature layout:
    `f(_, y)` creates a lambda over the placeholder argument. Pipe use such as
    `x |> f(_, y)` is a direct application of that same rule.
 
-3. **Interpolation boundaries** are fixed for v0.1: both `f"..."` and `t"..."`
+3. **Interpolation boundaries** are fixed for this accepted surface: both `f"..."` and `t"..."`
    embed Spore expressions. SEP-0009 owns template rendering and sanitization.
 
 4. **String patterns** are literal patterns only. Regex, prefix, suffix, or
@@ -2038,8 +1529,8 @@ or signature layout:
    trait method signatures, and `impl` methods. Trait-method contract
    inheritance or merging is not part of SEP-0001.
 
-6. **Negative examples** are not part of the v0.1 `spec` grammar. `example` and
-   `property` items evaluate to `Bool`.
+6. **Negative examples** are not part of the accepted `spec` grammar. The only
+   accepted `spec` item keywords are `example` and `law`.
 
 ### Delegated to dependent SEPs
 
@@ -2053,7 +1544,7 @@ or signature layout:
 - **Hole reporting and partial-function status**: SEP-0005 owns HoleReport
   fields, dependency graphs, and agent workflow.
 - **Compiler/runtime guarantees**: SEP-0006 owns formatter enforcement,
-  diagnostics, lowering, and TCO implementation details.
+  diagnostics, lowering, and runtime implementation details.
 - **Concurrency behavior**: SEP-0007 owns `spawn`, `await`, `select`, task
   lifetime, cancellation, and channel semantics.
 - **Module resolution**: SEP-0008 owns circular dependencies, import resolution,
@@ -2061,346 +1552,9 @@ or signature layout:
 - **Standard-library names and behavior**: SEP-0009 owns prelude items,
   collection APIs, string helpers, and platform-facing library modules.
 
-## Appendix A: Small-step operational semantics
-
-This appendix formalizes the evaluation rules for core Spore expressions using small-step operational semantics. All Spore code evaluates under a **call-by-value** strategy.
-
-### Notation
-
-- `e ↝ e'` — expression `e` reduces to `e'` in one step
-- `v` — a value (fully evaluated: literal, closure, struct/enum instance, list)
-- `E[·]` — evaluation context (position where the next reduction occurs)
-- `σ` — runtime environment (variable → value mapping)
-- `H` — effect handler table (effect → handler mapping)
-- `e[x ↦ v]` — substitute `v` for `x` in `e`
-
-### Values
-
-```text
-v ::= n                           (integer literal)
-    | f                           (float literal)
-    | true | false                (boolean)
-    | "s"                         (string literal)
-    | ()                          (unit)
-    | S { f₁: v₁, ..., fₙ: vₙ } (struct instance)
-    | V(v₁, ..., vₙ)             (enum variant instance)
-    | V                           (zero-field enum variant)
-    | [v₁, ..., vₙ]              (list)
-    | <closure: λ(x₁...xₙ).e, σ> (closure with captured env)
-```
-
-### Evaluation contexts
-
-Evaluation contexts define the order of evaluation (left-to-right, call-by-value):
-
-```text
-E ::= □                                            (hole)
-    | E op e₂                                      (left of binop)
-    | v₁ op E                                      (right of binop)
-    | f(v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ)         (function argument)
-    | let x = E; e₂                                (let initializer)
-    | if E { e₁ } else { e₂ }                      (if condition)
-    | match E { arms }                              (match scrutinee)
-    | S { f₁: v₁, ..., fᵢ: E, ..., fₙ: eₙ }      (struct field)
-    | V(v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ)         (enum constructor arg)
-    | E.field                                       (field access receiver)
-    | E |> f                                        (pipe left-hand side)
-    | [v₁, ..., vᵢ₋₁, E, eᵢ₊₁, ..., eₙ]          (list element)
-    | E?                                            (try operator operand)
-    | spawn E                                       (spawn body — eager eval)
-```
-
-### Core reduction rules
-
-**Literals and variables:**
-
-```text
-[E-Var]
-  σ(x) = v
-  ──────────────
-  σ ⊢ x ↝ v
-
-(Variables resolve to their bound value in the environment.)
-```
-
-**Arithmetic and comparison:**
-
-```text
-[E-BinOp]
-  v₁ op v₂ = v₃   (where op is +, -, *, /, %, ==, !=, <, >, <=, >=, &&, ||)
-  ──────────────────
-  v₁ op v₂ ↝ v₃
-
-[E-StrConcat]
-  "s₁" + "s₂" ↝ "s₁s₂"
-
-[E-UnaryNeg]
-  -n ↝ (-n)
-
-[E-UnaryNot]
-  !b ↝ ¬b
-```
-
-**Let binding:**
-
-```text
-[E-Let]
-  σ ⊢ let x = v; e₂ ↝ σ[x ↦ v] ⊢ e₂
-
-(Bind the value and continue evaluating the body with extended environment.)
-```
-
-**Function application (β-reduction):**
-
-```text
-[E-App]
-  σ ⊢ f(v₁, ..., vₙ)
-  where f is defined as fn f(x₁, ..., xₙ) { body }
-  ─────────────────────────────────────────────────
-  σ[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ⊢ body
-
-[E-ClosureApp]
-  <closure: λ(x₁...xₙ).body, σ_captured>(v₁, ..., vₙ)
-  ─────────────────────────────────────────────────────
-  σ_captured[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ⊢ body
-
-(Closures evaluate in their captured environment, extended with arguments.)
-```
-
-**Lambda creation:**
-
-```text
-[E-Lambda]
-  σ ⊢ |x₁, ..., xₙ| body ↝ <closure: λ(x₁...xₙ).body, σ>
-
-(Captures the current environment.)
-```
-
-**Conditionals:**
-
-```text
-[E-IfTrue]
-  if true { e₁ } else { e₂ } ↝ e₁
-
-[E-IfFalse]
-  if false { e₁ } else { e₂ } ↝ e₂
-```
-
-**Pattern matching:**
-
-```text
-[E-Match]
-  match v { p₁ => e₁, ..., pₙ => eₙ }
-  where pᵢ is the first pattern matching v with bindings B
-  ──────────────────────────────────────────────────────
-  ↝ eᵢ[B]
-
-(Try patterns top-to-bottom. First match wins. Apply bindings to body.)
-```
-
-Pattern matching sub-rules:
-
-```text
-[Pat-Wildcard]
-  _ matches any v, bindings = ∅
-
-[Pat-Var]
-  x matches any v, bindings = {x ↦ v}
-
-[Pat-Literal]
-  n matches n, bindings = ∅     (and similarly for string, bool literals)
-
-[Pat-Constructor]
-  V(p₁, ..., pₖ) matches V(v₁, ..., vₖ)
-  if each pᵢ matches vᵢ with bindings Bᵢ
-  bindings = B₁ ∪ ... ∪ Bₖ
-
-[Pat-Struct]
-  S { f₁: p₁, ..., fₖ: pₖ } matches S { ..., fᵢ: vᵢ, ... }
-  if each pᵢ matches vᵢ with bindings Bᵢ
-  bindings = B₁ ∪ ... ∪ Bₖ
-
-[Pat-Or]
-  (p₁ | p₂) matches v if p₁ matches v or p₂ matches v
-
-[Pat-List-Empty]
-  [] matches []
-
-[Pat-List-Cons]
-  [p₁, ..rest] matches [v₁, v₂, ..., vₙ]
-  if p₁ matches v₁ with bindings B₁
-  rest binds to [v₂, ..., vₙ]
-  bindings = B₁ ∪ {rest ↦ [v₂, ..., vₙ]}
-
-[Pat-Guard]
-  p if cond => e
-  p matches v with bindings B, and B ⊢ cond ↝ true
-```
-
-**Struct and enum construction:**
-
-```text
-[E-StructLit]
-  S { f₁: v₁, ..., fₙ: vₙ } ↝ S { f₁: v₁, ..., fₙ: vₙ }
-
-(Struct literals with all fields evaluated are values.)
-
-[E-EnumConstruct]
-  V(v₁, ..., vₙ) ↝ V(v₁, ..., vₙ)
-
-(Fully evaluated variant constructors are values.)
-```
-
-**Field access:**
-
-```text
-[E-FieldAccess]
-  S { ..., f: v, ... }.f ↝ v
-```
-
-**Pipe operator:**
-
-```text
-[E-Pipe]
-  v |> f ↝ f(v)
-
-(Pipe desugars to function application.)
-```
-
-**Block expressions:**
-
-```text
-[E-Block]
-  { stmt₁; stmt₂; ...; stmtₙ; tail }
-  ↝ evaluate stmt₁, then { stmt₂; ...; stmtₙ; tail }
-
-[E-BlockTail]
-  { v } ↝ v
-```
-
-**Try (? operator):**
-
-```text
-[E-TryOk]
-  Ok(v)? ↝ v
-
-[E-TryErr]
-  Err(e)? ↝ throw Err(e)
-
-(Unwraps Ok, propagates Err to the nearest error boundary.)
-```
-
-**Throw and error propagation:**
-
-```text
-[E-Throw]
-  throw v ↝ RuntimeError(v)
-
-(Propagates up the call stack until caught by a match or error boundary.)
-```
-
-### Effect dispatch
-
-```text
-[E-ForeignCall]
-  H(effect, fn_name) = handler
-  handler(v₁, ..., vₙ) ↝ᵢₒ v
-  ──────────────────────────────────
-  foreign_fn(v₁, ..., vₙ) ↝ v
-
-(Foreign function calls are dispatched to the platform's effect handler table.
-The handler may perform real I/O — this is the only impure reduction rule.)
-```
-
-### Concurrency (structured)
-
-```text
-[E-Spawn]
-  spawn e ↝ Task(e, fresh_id)
-
-(Creates a new task. In the PoC interpreter, evaluates synchronously.
-In a production runtime, this would fork a lightweight thread.)
-
-[E-Await]
-  await Task(v, id) ↝ v
-
-(Blocks until the task completes and extracts its value.
-In PoC, this is a no-op since spawn already evaluated.)
-
-[E-Select]
-  select { task₁ => e₁, ..., taskₙ => eₙ }
-  where taskᵢ is the first to complete with value v
-  ────────────────────────────────────────────────
-  ↝ eᵢ[result ↦ v]
-```
-
-### Hole evaluation
-
-```text
-[E-Hole]
-  ?name ↝ RuntimeError("hit unfilled hole `?name`")
-
-(Holes are compile-time constructs. Reaching one at runtime is always an error.)
-```
-
-### Spec evaluation
-
-```text
-[E-SpecExample]
-  spec_example("label", body_expr)
-  body_expr ↝* true
-  ──────────────────────────────────
-  SpecResult("label", Pass)
-
-[E-SpecExampleFail]
-  spec_example("label", body_expr)
-  body_expr ↝* false
-  ──────────────────────────────────
-  SpecResult("label", Fail(left_value, right_value))
-
-[E-SpecProperty]
-  spec_property("label", |x₁: T₁, ..., xₙ: Tₙ| body)
-  ∀ generated (v₁, ..., vₙ): body[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ↝* true
-  ──────────────────────────────────
-  SpecResult("label", Pass)
-
-[E-SpecPropertyCounterexample]
-  spec_property("label", |x₁: T₁, ..., xₙ: Tₙ| body)
-  ∃ (v₁, ..., vₙ): body[x₁ ↦ v₁, ..., xₙ ↦ vₙ] ↝* false
-  ──────────────────────────────────
-  SpecResult("label", Counterexample(v₁, ..., vₙ))
-
-(Spec items are evaluated by `spore test`, not during normal program execution.
-Each example/property is compiled as a standalone test case that calls the function
-by name. If that function body still contains a hole, the ordinary hole runtime-error
-rule applies, so the `spec` remains useful metadata but not a normal runnable path yet.)
-```
-
-### List operations (builtins)
-
-```text
-[E-ListLen]
-  len([v₁, ..., vₙ]) ↝ n
-
-[E-ListMap]
-  map([v₁, ..., vₙ], f) ↝ [f(v₁), ..., f(vₙ)]
-
-[E-ListFilter]
-  filter([v₁, ..., vₙ], p) ↝ [vᵢ | p(vᵢ) = true]
-
-[E-ListFold]
-  fold([v₁, ..., vₙ], init, f) ↝ f(...f(f(init, v₁), v₂)..., vₙ)
-
-[E-ListEach]
-  each([v₁, ..., vₙ], f) ↝ f(v₁); ...; f(vₙ); ()
-```
-
-### Properties
-
-1. **Determinism**: All pure reduction rules are deterministic. Non-determinism arises only from `select` (which task completes first) and `Random` effects.
-
-2. **Type preservation (subject reduction)**: If `Γ; S ⊢ e : T` and `e ↝ e'`, then `Γ; S ⊢ e' : T`. (Proof sketch: by induction on the typing derivation — see SEP-0002 typing judgments.)
-
-3. **Progress**: If `Γ; S ⊢ e : T` and `e` is not a value, then either `e ↝ e'` for some `e'`, or `e` is a `foreign fn` call awaiting I/O. (Holes are ruled out at type-check time in complete programs.)
-
-4. **Effect soundness**: If a function has `uses []` (no effects), its evaluation never reaches an `[E-ForeignCall]` rule. (By the effect subset check in SEP-0003.)
+## Appendix A: Delegated semantics
+
+SEP-0001 intentionally does not define operational semantics. Evaluation order,
+type preservation, effect soundness, hole runtime behavior, `spec` execution,
+standard-library operations, and concurrency runtime rules are delegated to
+SEP-0002 through SEP-0009.

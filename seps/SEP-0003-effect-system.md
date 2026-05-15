@@ -818,9 +818,9 @@ effect Env {
 }
 ```
 
-Declaring `uses [FileRead]` authorizes the effect, but operations remain explicit: `perform FileRead.read_file(path)` dispatches to the active `FileRead` handler. Canonical v0.1 semantics require the corresponding `effect` interface to be declared explicitly; undeclared pseudo-effect paths are compatibility-only.
+Declaring `uses [FileRead]` authorizes the effect, but operations remain explicit: `perform FileRead.read_file(path)` dispatches to the active `FileRead` handler. Canonical semantics require the corresponding `effect` interface to be declared explicitly; undeclared pseudo-effect paths are compatibility-only.
 
-Effect aliases are part of the committed v0.1 surface:
+Effect aliases are part of the committed surface:
 
 ```spore
 effect FileIO = FileRead | FileWrite;
@@ -901,9 +901,9 @@ handle {
 }
 ```
 
-#### User-defined effects (allowed from v1)
+#### User-defined effects
 
-Users may define their own effects from the first version of Spore:
+Users may define their own effects:
 
 ```spore
 effect RateLimit {
@@ -1114,7 +1114,7 @@ Algebraic effect handlers (as in Koka or OCaml 5) allow effects to be intercepte
 Spore's handler model is intentionally simpler than full algebraic effects:
 handlers are lexical, non-resumable, and one-shot. A matching handler arm
 computes the value of the corresponding `perform` expression directly; there is
-no continuation capture or `resume()` path in canonical v0.1 semantics.
+no continuation capture or `resume()` path in canonical semantics.
 Discharge is explicit: handled effects are removed from the local residual set,
 while handler implementation effects remain visible to the enclosing scope.
 Normal, mock, and Platform handlers all follow this same rule.
@@ -1215,7 +1215,7 @@ Should effect tokens have a runtime representation (e.g., for dependency injecti
 
 ### Resolved or delegated questions
 
-- **Effect subtraction syntax** is not part of v0.1. Spore does not support
+- **Effect subtraction syntax** is not part of the accepted surface. Spore does not support
   `uses [All \ Spawn]`; developers enumerate effects explicitly.
 - **Platform ceilings** are delegated to SEP-0008. If standardized, the expected
   model is static constraint checking (`S_function ⊆ S_platform`), not

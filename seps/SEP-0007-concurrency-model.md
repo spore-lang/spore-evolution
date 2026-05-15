@@ -1040,7 +1040,7 @@ $ sporec --query-task-tree handle_request
 
 ### Handler binding as protocol
 
-At the application boundary (the `main` function or service entry point), handler binding forms a protocol specification: *"this application uses real parallelism with a pool of N threads, real network IO, and PostgreSQL for database"*. This binding can be serialized and versioned as part of the deployment configuration.
+At the application boundary (the `main` function or service entry point), handler binding forms a protocol specification: *"this application uses real parallelism with a pool of N threads, real network IO, and PostgreSQL for database"*. This binding can be serialized as part of the deployment configuration.
 
 ### Integration with Spore subsystems
 
@@ -1136,7 +1136,7 @@ This timeline can be rendered as a Gantt chart, flame graph, or task dependency 
 
 **Rejected.** Lock contention cost is unpredictable (spin/retry count depends on runtime scheduling). Deadlock detection in the presence of shared memory and locks is NP-hard. The effect handler + continuation model does not compose cleanly with lock semantics.
 
-**Consequences of rejection:** Performance-critical lock-free patterns (e.g., atomic counters) are unavailable in safe Spore. A future `unsafe_shared` extension point is reserved but not in v0.1.
+**Consequences of rejection:** Performance-critical lock-free patterns (e.g., atomic counters) are unavailable in safe Spore. A future `unsafe_shared` extension point is reserved but not in the accepted surface.
 
 ### Alternative 6: Unstructured spawning with optional scoping
 

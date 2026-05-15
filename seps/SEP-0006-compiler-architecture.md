@@ -468,6 +468,18 @@ comments, internal hole states.
 **impl hash** covers: the fully type-checked module content. Partial functions
 (with holes) have `impl hash = None`.
 
+**spec hash** covers: `spec` blocks attached to functions, trait method
+signatures, and `impl` methods. It is separate from `sig hash` so behavioral
+contracts can be edited without changing the callable API. It is also separate
+from `impl hash` so test metadata can be tracked even when a body is still
+partial.
+
+| Change | Signature hash | Spec hash | Required approval |
+|--------|----------------|-----------|-------------------|
+| Add a `spec` block where none existed | unchanged | changed | `--permit-spec` |
+| Add, modify, or remove an `example` or `law` | unchanged | changed | `--permit-spec` |
+| Change a callable signature clause | changed | unchanged unless `spec` also changed | `--permit` |
+
 Incremental scenarios:
 
 | Scenario | Example | What happens |
@@ -1029,7 +1041,7 @@ Target latencies (aspirational, not hard guarantees):
 | End-to-end latency (file save → diagnostics) | < 200ms | Including 100ms debounce |
 | Hole graph update | < 50ms | Incremental hole summary / `HoleGraphUpdate` regeneration |
 
-**Cache strategy:** Watch mode maintains in-memory caches for hashes, dependency graph, compilation artifacts, and hole state. Persistence to disk is not required for v0.1 but is a future option.
+**Cache strategy:** Watch mode maintains in-memory caches for hashes, dependency graph, compilation artifacts, and hole state. Persistence to disk is not required for the current design but is a future option.
 
 **Parallelism:** Default = CPU core count. Override with `--jobs N`.
 
@@ -1067,6 +1079,56 @@ than fixing types first, then effects, then costs.
 is passed.
 
 **Lint warnings** (severity = Warning, code prefix `W`) follow the same rule.
+
+#### `spore test`
+
+`spore test` evaluates test files and function-level `spec` blocks. SEP-0001
+owns the syntax of `spec { ... }`; this SEP owns the compiler and runner behavior
+for executing examples, generating law inputs, reporting failures, and
+tracking spec hashes.
+
+```spore
+fn add(a: I64, b: I64) -> I64
+spec {
+    example "positive inputs": add(2, 3) == 5
+    example "identity": add(0, 42) == 42
+}
+{
+    a + b
+}
+```
+
+Examples may use expression or block form. In block form, the final expression is
+the assertion result:
+
+```spore
+example "handles leap year" {
+    let d = parse_date("2024-02-29");
+    d == Ok(Date { year: 2024, month: 2, day: 29 })
+}
+```
+
+Laws use explicitly typed lambda parameters and must evaluate to `Bool`:
+
+```spore
+fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError
+spec {
+    example "ISO date": parse_date("2024-01-15").is_ok()
+    law "round trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
+}
+{
+    ?parse_logic
+}
+```
+
+If a `spec` calls a function body that still contains a hole, normal hole
+runtime behavior applies during test execution. The `spec` remains available as
+compiler metadata and may be surfaced through hole tooling as described in
+SEP-0005.
+
+`property` is not a compatibility alias. The accepted spec item set is exactly
+`example` and `law`; source that still uses `property` is rejected and must be
+rewritten by migration tooling or by hand.
 
 #### `spore format` / `spore fmt`
 
@@ -1409,6 +1471,40 @@ note[H0101]: hole `tax_logic` requires filling
 help: run `sporec query-hole src/tax.sp ?tax_logic` for full HoleReport
 ```
 
+**Spec example failure:**
+
+```text
+error[S0101]: spec example failed
+  --> src/dates.sp:5:5
+   |
+ 5 |     example "ISO date": parse_date("2024-01-15").is_ok()
+   |     ^^^^^^^^^^^^^^^^^^ evaluated to false
+```
+
+**Spec law counterexample:**
+
+```text
+error[S0102]: spec law counterexample
+  --> src/dates.sp:9:5
+   |
+ 9 |     law "round trip": |d: Date| parse_date(d.to_iso_string()) == Ok(d)
+   |     ^^^^^^^^^^^^^^^^ counterexample found
+   |
+   = note: d = Date { year: 2024, month: 2, day: 30 }
+```
+
+**Missing spec warning:**
+
+```text
+warning[W0401]: public function has no spec block
+  --> src/dates.sp:3:1
+   |
+ 3 | pub fn parse_date(s: Str) -> Result[Date, ParseError] ! ParseError {
+   |        ^^^^^^^^^^ no behavioral contract declared
+   |
+help: add a `spec { example "...": ... }` block before the function body
+```
+
 ### Recovery strategies
 
 The compiler employs error recovery to report as many errors as possible per
@@ -1482,6 +1578,7 @@ All diagnostics carry a categorized code. Every code is queryable: `sporec expla
 | `W0203` | redundant-parentheses | Unnecessary parentheses around expression |
 | `W0301` | shadowing | Variable shadows binding in outer scope |
 | `W0302` | implicit-discard | Expression result discarded without explicit `_` |
+| `W0401` | missing-spec | Public function has no `spec` block |
 
 #### C0xxx — Effect Violations
 
@@ -1524,6 +1621,14 @@ Canonical enum and messages: `spore` repo `crates/sporec-typeck/src/error.rs`.
 | `H0302` | circular hole dependency | Dependency cycle |
 
 Canonical enum: `spore` repo `crates/sporec-typeck/src/error.rs` (SEP tables may lag other `H` variants).
+
+#### S0xxx — Spec Diagnostics
+
+| Code | Name | Description |
+|------|------|-------------|
+| `S0101` | spec-example-failed | `example` item evaluated to false |
+| `S0102` | spec-law-counterexample | `law` item produced a counterexample |
+| `S0201` | spec-body-hit-hole | Spec execution reached an unfilled hole |
 
 #### M0xxx — Module Errors
 
@@ -1801,9 +1906,8 @@ Error codes (E0xxx, W0xxx, etc.) are considered stable once assigned. The
 meaning of a code does not change, though the message text may be improved.
 CI/CD pipelines and agents should filter on error codes, not message strings.
 
-If the JSON schema needs breaking changes, the `"version"` field will be
-incremented and a migration period provided where both old and new schemas are
-emitted.
+If the JSON schema needs breaking changes, the schema identifier will change and
+a migration period will provide both old and new schema shapes.
 
 ### Future IR additions
 
@@ -1856,7 +1960,7 @@ TypedHIR layer; a new "opt hash" could gate the MIR → Cranelift translation.
 
 7. **Internationalization of diagnostics.** Error codes are language-independent,
    but message text is currently English-only. Should `sporec explain` support
-   localized explanations in a future version? This would require a translation
+   localized explanations in a future release? This would require a translation
    infrastructure.
 
 8. **Cost visualization in verbose mode.** Should `--verbose` include ASCII bar
