@@ -4,7 +4,7 @@
     {
       "path": "seps/SEP-0000-process.md",
       "sep": 0,
-      "title": "SEP-0000: Spore Enhancement Proposal Process",
+      "title": "SEP-0000: Spore Evolution Proposal Process",
       "status": "Accepted",
       "type": "Process",
       "authors": [
@@ -69,7 +69,7 @@
     {
       "path": "seps/SEP-0004-cost-analysis.md",
       "sep": 4,
-      "title": "SEP-0004: Cost Analysis & Decidability",
+      "title": "SEP-0004: Budget Constraints & Realization Shape",
       "status": "Draft",
       "type": "Standards Track",
       "authors": [

@@ -11,6 +11,7 @@ REQUIRED_CHECKBOXES = [
     "- [x] I linked the canonical discussion thread.",
     "- [x] I used the correct SEP template for this proposal type.",
     "- [x] I updated front matter metadata and required sections.",
+    "- [x] I considered the SEP-0000 guiding questions in the relevant proposal sections.",
 ]
 
 

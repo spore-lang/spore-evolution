@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
 
 from sep_common import ROOT
 
@@ -35,7 +34,27 @@ FORBIDDEN_PATTERNS = (
     ),
     (
         re.compile(r"cost\s*<="),
-        "retired ASCII syntax `cost <=`; use four-slot `cost [compute, alloc, io, parallel]`",
+        "retired resource syntax `cost <=`; use `budget { ... }` when realization shape must be constrained",
+    ),
+    (
+        re.compile(r"\bcost\s*\["),
+        "retired positional resource syntax; use `budget { ... }`",
+    ),
+    (
+        re.compile(r"\bCostVector\b|\bCostExpr\b|@unbounded|with_cost_limit"),
+        "retired resource-cost terminology; use budget and evidence terminology",
+    ),
+    (
+        re.compile(r"\bspec\s*\{|\bexample\s+\"|\blaw\s+\""),
+        "retired spec syntax; use `properties { name(params): expr }`",
+    ),
+    (
+        re.compile(r"\bwhere\s+[A-Z][A-Za-z0-9_]*(?:\[[^\]]+\])?\s*:"),
+        "retired standalone generic-bound syntax; use inline type parameter bounds",
+    ),
+    (
+        re.compile(r"\bsig hash\b|\bimpl hash\b|\bspec hash\b"),
+        "retired hash labels; use Signature v2 provenance hash names",
     ),
 )
 
