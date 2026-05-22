@@ -81,7 +81,7 @@ Evidence is checked support, not a stamp of correctness.
 | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [**Agda**](https://github.com/agda/agda)                                                                                          | Typed holes as goal-shaped program positions                          |
 | [**Idris 2**](https://idris-lang.org/)                                                                                            | Elaboration and type-directed development                             |
-| [**Unison**](https://www.unison-lang.org/)                                                                                        | Content-addressed code and reproducible references                    |
+| [**Unison**](https://github.com/unisonweb/unison)                                                                                 | Content-addressed code and reproducible references                    |
 | [**Nix**](https://nixos.org/)                                                                                                     | Reproducible dependency inputs and explicit build provenance          |
 | [**Elm compiler errors**](https://elm-lang.org/news/compiler-errors-for-humans)                                                   | Human-friendly diagnostics as a design goal                           |
 | [**Roc**](https://github.com/roc-lang/roc)                                                                                        | Managed effects through explicit platform boundaries                  |

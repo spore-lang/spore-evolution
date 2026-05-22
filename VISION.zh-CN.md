@@ -72,7 +72,7 @@ Big-O 标记，也不是机器资源模型。
 | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | [**Agda**](https://github.com/agda/agda)                                                                                          | 将类型洞作为目标形状的程序位置         |
 | [**Idris 2**](https://idris-lang.org/)                                                                                            | elaboration 与类型引导式开发           |
-| [**Unison**](https://www.unison-lang.org/)                                                                                        | 内容寻址代码与可复现引用               |
+| [**Unison**](https://github.com/unisonweb/unison)                                                                                 | 内容寻址代码与可复现引用               |
 | [**Nix**](https://nixos.org/)                                                                                                     | 可复现依赖输入与显式构建来源           |
 | [**Elm compiler errors**](https://elm-lang.org/news/compiler-errors-for-humans)                                                   | 以人类友好的诊断作为设计目标           |
 | [**Roc**](https://github.com/roc-lang/roc)                                                                                        | 通过显式平台边界管理效应               |
