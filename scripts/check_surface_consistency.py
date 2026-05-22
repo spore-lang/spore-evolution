@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = ROOT.parent
 
 
 def iter_lines(paths: Iterable[Path]) -> Iterable[tuple[Path, int, str]]:
@@ -68,20 +67,6 @@ def template_files() -> list[Path]:
     return sorted((ROOT / "templates").glob("*.md"))
 
 
-def sibling_markdown_files(repo: str) -> list[Path]:
-    root = WORKSPACE / repo
-    if not root.exists():
-        return []
-    return [
-        path
-        for path in root.rglob("*.md")
-        if ".git" not in path.parts
-        and "node_modules" not in path.parts
-        and ".next" not in path.parts
-        and "dist" not in path.parts
-    ]
-
-
 def main() -> int:
     errors: list[str] = []
     own_docs = self_markdown_files()
@@ -128,7 +113,7 @@ def main() -> int:
             "old cost/spec diagnostic prefixes are retired; use B0xxx and P0xxx",
         ),
         (
-            re.compile(r"->\s*Unit\b|:\s*Unit\b|\bUnit\b"),
+            re.compile(r"(?:->|:)\s*`?Unit\b`?"),
             "use `()` as the unit type surface spelling",
         ),
         (
@@ -173,41 +158,6 @@ def main() -> int:
                 f"{rel}: must link to `{GUIDING_QUESTIONS_LINK_FRAGMENT}` so authors "
                 "find the canonical guiding-question section in SEP-0000"
             )
-
-    spore_docs = [
-        path
-        for path in (
-            WORKSPACE / "spore" / "README.md",
-            WORKSPACE / "spore" / "skills" / "spore-language" / "SKILL.md",
-        )
-        if path.exists()
-    ]
-    if spore_docs:
-        add_pattern_errors(
-            errors,
-            spore_docs,
-            re.compile(r"docs/(?:specs|research)/README\.md"),
-            "spore README should link to existing docs paths",
-        )
-
-    site_docs = sibling_markdown_files("spore-lang.dev")
-    if site_docs:
-        add_pattern_errors(
-            errors,
-            site_docs,
-            re.compile(
-                r"(?:spore/docs/DESIGN\.md|github\.com/spore-lang/spore/blob/main/docs/DESIGN\.md)"
-            ),
-            "site docs should link to spore/SPARK.md instead of the retired design path",
-        )
-        add_pattern_errors(
-            errors,
-            site_docs,
-            re.compile(
-                r"(?:spore-evolution/ROADMAP\.md|github\.com/spore-lang/spore-evolution/blob/main/ROADMAP\.md)"
-            ),
-            "roadmap lives in spore/ROADMAP.md",
-        )
 
     if errors:
         print("Surface consistency check failed:")

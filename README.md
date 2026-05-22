@@ -52,8 +52,8 @@ The generated machine-readable index is [`seps-index.json`](seps-index.json).
 
 Read [Spore Language Vision](VISION.md) first for the design philosophy; a
 Chinese version is available at [孢子语言愿景](VISION.zh-CN.md). Implementation
-planning lives in the sibling [`../spore/ROADMAP.md`](../spore/ROADMAP.md).
-Then use SEPs in dependency order:
+planning lives in the sibling language repository's `ROADMAP.md`. Then use SEPs
+in dependency order:
 
 1. [SEP-0000](seps/SEP-0000-process.md) for how decisions are made and the guiding
    questions used in review.
