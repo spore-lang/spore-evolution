@@ -22,6 +22,7 @@ jobs:
       - name: Check PR title
         uses: zendev-lab/zendev/actions/validate-title@v0.0.6
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: 0.0.6
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ZENDEV: 0.0.6
         with:
           text: ${{ github.event.pull_request.title }}
@@ -50,6 +51,7 @@ jobs:
         if: steps.changes.outputs.is_sep == 'true'
         uses: zendev-lab/zendev/actions/validate-body@v0.0.6
         env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: 0.0.6
           SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ZENDEV: 0.0.6
         with:
           body: ${{ github.event.pull_request.body }}
