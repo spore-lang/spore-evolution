@@ -109,7 +109,7 @@ HIR owns:
 - canonical Base Signature representation;
 - Intent Signature representation;
 - import and visibility resolution;
-- effect and capability name resolution;
+- effect name resolution;
 - property-to-claim lowering stubs;
 - hole registration.
 
@@ -119,7 +119,7 @@ TypedHIR owns:
 
 - bidirectional type checking;
 - trait resolution;
-- runtime effect checking;
+- effect checking;
 - budget shape checking;
 - hole report generation;
 - Claim construction from properties;
@@ -211,15 +211,15 @@ Default text, JSON, LSP, and watch outputs are renderings over these records.
 
 Diagnostic categories are:
 
-| Prefix  | Category                                 |
-| ------- | ---------------------------------------- |
-| `E0xxx` | Type errors                              |
-| `C0xxx` | Capability and runtime-effect violations |
-| `B0xxx` | Budget violations                        |
-| `H0xxx` | Hole diagnostics                         |
-| `P0xxx` | Property and claim diagnostics           |
-| `M0xxx` | Module and package errors                |
-| `W0xxx` | Warnings                                 |
+| Prefix  | Category                       |
+| ------- | ------------------------------ |
+| `E0xxx` | Type errors                    |
+| `F0xxx` | Effect violations              |
+| `B0xxx` | Budget violations              |
+| `H0xxx` | Hole diagnostics               |
+| `P0xxx` | Property and claim diagnostics |
+| `M0xxx` | Module and package errors      |
+| `W0xxx` | Warnings                       |
 
 Property diagnostics include failed property checks, counter-witnesses, and
 properties that reached an open hole.

@@ -18,7 +18,7 @@ superseded_by: null
 
 # SEP-0005: Hole System & Agent Protocol
 
-> **Executive Summary**: Defines holes as typed absence constrained by Base Signature and Intent Signature context. HoleReport exposes expected type, visible bindings, capability context, budget context, property context, candidates, dependencies, and confidence data for human and Agent realization workflows.
+> **Executive Summary**: Defines holes as typed absence constrained by Base Signature and Intent Signature context. HoleReport exposes expected type, visible bindings, effect context, budget context, property context, candidates, dependencies, and confidence data for human and Agent realization workflows.
 
 ## Summary
 
@@ -51,7 +51,7 @@ compiler-visible so a human or Agent can receive enough context to propose a
 property-preserving realization.
 
 HoleReport is the collaboration boundary. It must expose not only type context,
-but also capabilities, budgets, and properties.
+but also effects, budgets, and properties.
 
 ## Guide-level explanation
 
@@ -95,8 +95,8 @@ The Agent workflow is:
 DISCOVER -> ANALYZE -> PROPOSE -> VERIFY -> ACCEPT or REJECT
 ```
 
-A proposed fill is accepted only when type, capability, budget, and property
-checks pass or produce approved evidence states.
+A proposed fill is accepted only when type, effect, budget, and property checks
+pass or produce approved evidence states.
 
 ## Reference-level explanation
 
@@ -113,25 +113,25 @@ space and are not specified here.
 
 The per-hole object includes:
 
-| Field | Meaning |
-|---|---|
-| `name` | Developer-assigned hole name |
-| `display_name` | Source spelling with `?` |
-| `location` | File and span |
-| `expected_type` | Type the realization must produce |
-| `type_inferred_from` | Explanation of the expected type |
-| `function` | Enclosing callable name |
-| `enclosing_signature` | Normalized Base Signature and Intent Signature summary |
-| `bindings` | Visible local bindings and types |
-| `binding_dependencies` | Data-flow among visible bindings |
-| `capability_context` | Available runtime and tool capabilities |
-| `budget_context` | Relevant budget constraints and observed shape data |
-| `property_context` | Properties the realization must preserve |
-| `errors_to_handle` | Error variants still not handled at the site |
-| `candidates` | Visible functions or templates that may fit |
-| `dependent_holes` | Holes unlocked by this realization |
-| `confidence` | Type and candidate confidence data |
-| `rejection_reasons` | Structured reasons from failed verification attempts |
+| Field                  | Meaning                                                |
+| ---------------------- | ------------------------------------------------------ |
+| `name`                 | Developer-assigned hole name                           |
+| `display_name`         | Source spelling with `?`                               |
+| `location`             | File and span                                          |
+| `expected_type`        | Type the realization must produce                      |
+| `type_inferred_from`   | Explanation of the expected type                       |
+| `function`             | Enclosing callable name                                |
+| `enclosing_signature`  | Normalized Base Signature and Intent Signature summary |
+| `bindings`             | Visible local bindings and types                       |
+| `binding_dependencies` | Data-flow among visible bindings                       |
+| `effect_context`       | Available effects and handler context                  |
+| `budget_context`       | Relevant budget constraints and observed shape data    |
+| `property_context`     | Properties the realization must preserve               |
+| `errors_to_handle`     | Error variants still not handled at the site           |
+| `candidates`           | Visible functions or templates that may fit            |
+| `dependent_holes`      | Holes unlocked by this realization                     |
+| `confidence`           | Type and candidate confidence data                     |
+| `rejection_reasons`    | Structured reasons from failed verification attempts   |
 
 ### Type inference rule
 
@@ -140,10 +140,10 @@ position, annotations, function arguments, match arms, operators, and sibling
 branch types. If constraints conflict, the nearest syntactic constraint is used
 for reporting and a diagnostic is emitted.
 
-### Capability context
+### Effect context
 
-`capability_context` includes declared capability names, resolved runtime
-effects, active handlers, discharged effects, and tool capabilities.
+`effect_context` includes declared effect names, expanded effect sets, active
+handlers, and discharged effects.
 
 ### Budget context
 
@@ -159,13 +159,13 @@ any local obligations produced by refinements or earlier checks.
 
 Edges are classified as:
 
-| Kind | Meaning |
-|---|---|
-| `type` | Later hole type depends on earlier realization |
-| `value` | Later hole binding depends on earlier value |
-| `capability` | Capability availability changes after earlier realization |
-| `budget` | Shape allowance depends on earlier realization |
-| `property` | Property obligation depends on earlier realization |
+| Kind       | Meaning                                               |
+| ---------- | ----------------------------------------------------- |
+| `type`     | Later hole type depends on earlier realization        |
+| `value`    | Later hole binding depends on earlier value           |
+| `effect`   | Effect availability changes after earlier realization |
+| `budget`   | Shape allowance depends on earlier realization        |
+| `property` | Property obligation depends on earlier realization    |
 
 The graph must be acyclic for automatic scheduling.
 
@@ -177,7 +177,7 @@ Reports are concrete enough to review one missing realization at a time.
 ## Agent experience impact
 
 Agents can rank candidates using typed context and reject proposals that exceed
-capabilities, budgets, or properties before asking for human review.
+effects, budgets, or properties before asking for human review.
 
 ## Structured representation / protocol impact
 
@@ -189,7 +189,7 @@ Batch output:
     {
       "name": "validate_body",
       "expected_type": "ValidOrder ! ValidationError",
-      "capability_context": { "declared": ["DbRead"] },
+      "effect_context": { "declared": ["DbRead"] },
       "budget_context": { "branches": { "limit": 5 } },
       "property_context": { "properties": ["accepted"] }
     }
@@ -206,13 +206,13 @@ Single-hole queries return the same per-hole object directly.
 
 Hole diagnostics use `H0xxx` codes:
 
-| Code | Name | Meaning |
-|---|---|---|
-| `H0101` | hole-report | Informational report for an open hole |
-| `H0102` | duplicate-hole-name | Hole name reused in a module |
-| `H0201` | hole-outside-expression | Hole appears outside permitted expression position |
-| `H0301` | circular-hole-dependency | Dependency graph has a cycle |
-| `H0401` | realization-rejected | Proposed fill failed verification |
+| Code    | Name                     | Meaning                                            |
+| ------- | ------------------------ | -------------------------------------------------- |
+| `H0101` | hole-report              | Informational report for an open hole              |
+| `H0102` | duplicate-hole-name      | Hole name reused in a module                       |
+| `H0201` | hole-outside-expression  | Hole appears outside permitted expression position |
+| `H0301` | circular-hole-dependency | Dependency graph has a cycle                       |
+| `H0401` | realization-rejected     | Proposed fill failed verification                  |
 
 ## Drawbacks
 
@@ -246,8 +246,8 @@ machine-readable reports and Agent workflows primary design constraints.
 ## Backward compatibility and migration
 
 Hole syntax remains source-compatible with named holes. Payload consumers must
-adapt from older resource-oriented fields to `capability_context`,
-`budget_context`, and `property_context`.
+adapt from older resource-oriented fields to `effect_context`, `budget_context`,
+and `property_context`.
 
 ## Unresolved questions
 

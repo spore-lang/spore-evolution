@@ -9,37 +9,37 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## Multilingual terminology
 
-| Term               | zh-CN        |
-| ------------------ | ------------ |
-| Spore              | 孢子         |
-| Agent              | 智能体       |
-| Signature          | 签名         |
-| Base Signature     | 基础签名     |
-| Intent Signature   | 意图签名     |
-| Property           | 性质         |
-| Hole               | 洞           |
-| Typed absence      | 有类型的缺失 |
-| Realization        | 实现         |
-| Evidence           | 证据         |
-| Claim              | 检查主张     |
-| Budget             | 预算         |
-| Realization shape  | 实现形态     |
-| Capability surface | 能力表面     |
-| Effect             | 效应         |
-| Runtime effect     | 运行时效应   |
-| Effect handler     | 效应处理器   |
-| Platform           | 平台         |
-| Content-addressed  | 内容寻址     |
-| Content identity   | 内容身份     |
-| Provenance hash    | 来源哈希     |
-| Diagnostic         | 诊断         |
-| HoleReport         | 洞报告       |
-| Dependency         | 依赖         |
-| Checker            | 检查器       |
+| Term              | zh-CN        |
+| ----------------- | ------------ |
+| Spore             | 孢子         |
+| Agent             | 智能体       |
+| Signature         | 签名         |
+| Base Signature    | 基础签名     |
+| Intent Signature  | 意图签名     |
+| Property          | 性质         |
+| Hole              | 洞           |
+| Typed absence     | 有类型的缺失 |
+| Realization       | 实现         |
+| Evidence          | 证据         |
+| Claim             | 检查主张     |
+| Budget            | 预算         |
+| Realization shape | 实现形态     |
+| Effect surface    | 效应表面     |
+| Effect            | 效应         |
+| Effect context    | 效应上下文   |
+| Effect handler    | 效应处理器   |
+| Platform          | 平台         |
+| Content-addressed | 内容寻址     |
+| Content identity  | 内容身份     |
+| Provenance hash   | 来源哈希     |
+| Diagnostic        | 诊断         |
+| HoleReport        | 洞报告       |
+| Dependency        | 依赖         |
+| Checker           | 检查器       |
 
 ## A
 
-**Atomic effect** (SEP-0003): One of the built-in runtime effect capabilities in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit.
+**Atomic effect** (SEP-0003): One of the built-in effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit.
 
 **`await`** (SEP-0007): Expression that blocks until a `Task[T]` completes and extracts its result value of type `T`.
 
@@ -55,15 +55,13 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## C
 
-**Capability surface** (SEP-0001, SEP-0003): The `uses [...]` list attached to an intent signature. Runtime effect names are checked by SEP-0003; logical and checker capabilities are interpreted by tooling layers.
-
 **Claim** (SEP-0006): Internal compiler representation derived from a source `properties` item.
 
 **Content-addressed package** (SEP-0008): Package identified by hashes of normalized signatures, intents, properties, realizations, evidence, and dependency inputs.
 
 ## D
 
-**Declared effects** (SEP-0003): Runtime effect names explicitly written on a function or platform surface.
+**Declared effects** (SEP-0003): Effect names explicitly written on a function or platform surface.
 
 **Default literals** (SEP-0002): Unsuffixed integer literals synthesize as `I64` and float literals as `F64` unless a signature or context fixes another width.
 
@@ -71,13 +69,17 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## E
 
-**Effect** (SEP-0003): Runtime capability for an observable interaction with the outside world.
+**Effect** (SEP-0003): Observable interaction with the outside world that must be declared in a `uses [...]` effect surface.
 
 **Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written with `|`.
 
+**Effect context** (SEP-0005): The declared effects, expanded effect set, active handlers, and discharged effects visible at a hole or realization candidate.
+
 **Effect handler** (SEP-0003, SEP-0008): Implementation of effect operations, often provided by a selected Platform package.
 
-**Effect set** (SEP-0003): Unordered collection of runtime effects associated with a function or scope.
+**Effect set** (SEP-0003): Unordered collection of effects associated with a function or scope.
+
+**Effect surface** (SEP-0001, SEP-0003): The `uses [...]` list attached to an intent signature. SEP-0003 defines the accepted effect names, aliases, handlers, and checking rules.
 
 **Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant(T) }`.
 
@@ -97,11 +99,11 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## H
 
-**Hole** (SEP-0005): Typed absence in source code, written as `?name`, constrained by base signature, capability context, budget context, and property context.
+**Hole** (SEP-0005): Typed absence in source code, written as `?name`, constrained by base signature, effect context, budget context, and property context.
 
-**Hole context** (SEP-0005): The type environment, visible bindings, capability context, budget context, property context, and dependency information associated with a typed hole.
+**Hole context** (SEP-0005): The type environment, visible bindings, effect context, budget context, property context, and dependency information associated with a typed hole.
 
-**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, capability, budget, and property dependencies for fill scheduling.
+**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, effect, budget, and property dependencies for fill scheduling.
 
 **Hole realization workflow** (SEP-0005): Agent-facing realization loop: DISCOVER -> ANALYZE -> PROPOSE -> VERIFY -> ACCEPT or REJECT.
 
@@ -159,7 +161,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Signature hash** (SEP-0006, SEP-0008): Hash of the normalized Base Signature that participates in dependency tracking.
 
-**`spawn`** (SEP-0007): Expression that creates a scoped `Task[T]`, requiring the `Spawn` runtime capability.
+**`spawn`** (SEP-0007): Expression that creates a scoped `Task[T]`, requiring the `Spawn` effect.
 
 **spore** (SEP-0006, SEP-0008): Project and package workflow CLI.
 
@@ -181,7 +183,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## U
 
-**uses clause** (SEP-0001, SEP-0003): Signature clause declaring capability names, written as `uses [Name1, Name2]`.
+**uses clause** (SEP-0001, SEP-0003): Signature clause declaring effect names, written as `uses [Name1, Name2]`.
 
 ## V
 

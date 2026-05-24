@@ -64,8 +64,8 @@ fn private_helper() -> () { return }
 
 ### Platform packages
 
-A Platform package provides runtime effect handlers and validates the startup
-contract for an application.
+A Platform package provides effect handlers and validates the startup contract
+for an application.
 
 ```spore
 pub fn main() -> ()

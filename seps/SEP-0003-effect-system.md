@@ -16,12 +16,12 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines runtime effect capabilities inside Signature v2's `uses [...]` capability surface. SEP-0003 owns effect declarations, handlers, alias expansion, and runtime-effect checking; logical and checker capabilities are interpreted by the hole, property, and evidence layers.
+> **Executive Summary**: Defines Signature v2's `uses [...]` effect surface. SEP-0003 owns effect declarations, handlers, alias expansion, and effect checking. Non-effect constraints belong to `budget`, `properties`, or future tooling metadata rather than `uses`.
 
 ## Summary
 
 Spore effects describe observable interactions with the outside world. A
-function lists required capabilities in `uses [...]`:
+function lists required effects in `uses [...]`:
 
 ```spore
 effect Console {
@@ -35,19 +35,18 @@ uses [Console]
 }
 ```
 
-`uses` is broader than runtime effects. Runtime effect names are checked by this
-SEP. Other capability names may guide property checking, generation, or Agent
-behavior and are interpreted outside this SEP.
+`uses` is an effect surface. Every name in `uses [...]` must resolve to an effect
+or to an alias that expands to effects.
 
 ## Motivation
 
 Effects make external interactions visible at the signature boundary. They help
-humans review code, help Agents avoid unauthorized operations, and let Platforms
+humans review code, help Agents avoid unavailable operations, and let Platforms
 supply replaceable handlers.
 
-Runtime effect checking should not absorb every non-type constraint. Signature
-v2 therefore treats `uses` as a capability surface, while this SEP specifies the
-runtime-effect subset.
+Effect checking should not absorb every non-type constraint. Signature v2 keeps
+runtime interaction in `uses`, realization shape in `budget`, and semantic
+requirements in `properties`.
 
 ## Guide-level explanation
 
@@ -73,8 +72,8 @@ uses [FileRead]
 }
 ```
 
-The body may only perform runtime effects included in the declared capability
-surface or provided by a narrower local handler context.
+The body may only perform effects included in the declared effect surface or
+provided by a narrower local handler context.
 
 ### Effect aliases
 
@@ -88,7 +87,7 @@ uses [CliIO]
 }
 ```
 
-Aliases expand to sets of atomic runtime effects.
+Aliases expand to sets of atomic effects.
 
 ### Handlers
 
@@ -104,50 +103,35 @@ handle {
 }
 ```
 
-Handlers discharge or reinterpret runtime effects inside a lexical scope.
+Handlers discharge or reinterpret effects inside a lexical scope.
 
-### Capability surface and checker capabilities
+### Non-effect requirements
 
-A signature may include capability names that are not runtime effects:
-
-```spore
-fn sort[T: Ord](xs: List[T]) -> List[T]
-uses [Compare]
-properties {
-    ordered(xs: List[T]): is_ordered(sort(xs))
-}
-{
-    ?sort_body
-}
-```
-
-`Compare` can be consumed by a checker or Agent even when it has no runtime
-effect declaration.
+Properties, checker guidance, and Agent-generation requirements do not appear in
+`uses [...]`. They should be expressed through `properties`, `budget`, package
+metadata, or future tooling metadata owned by a separate SEP.
 
 ## Reference-level explanation
 
-### Runtime effect set
+### Effect set
 
-Each checked body has an available runtime effect set `E_available`. A `perform`
+Each checked body has an available effect set `E_available`. A `perform`
 operation requiring effect `E` is valid when `E` is in the available set after
 alias expansion and local handler narrowing.
 
-### Capability resolution
+### Effect resolution
 
 The compiler resolves names in `uses [...]` into:
 
-- runtime effects owned by this SEP;
-- aliases that expand to runtime effects;
-- non-runtime capabilities passed through for other tooling layers.
+- effects owned by this SEP;
+- aliases that expand to effects.
 
-Unknown names are diagnostics unless a project declares them as tool
-capabilities in manifest metadata.
+Unknown names are diagnostics.
 
 ### Handler checking
 
 A handler must implement every operation of the effect it handles. Handler
-methods use ordinary function typing and may declare their own required
-capabilities.
+methods use ordinary function typing and may declare their own required effects.
 
 ### Interaction with properties
 
@@ -157,24 +141,23 @@ SEP-0006.
 
 ## Human experience impact
 
-A reader can inspect `uses [...]` to know what outside-world interaction or tool
-capability a function depends on. Runtime effects stay explicit without forcing
-separate source keywords for checker-only needs.
+A reader can inspect `uses [...]` to know what outside-world interaction a
+function depends on. Effect names stay explicit without mixing runtime behavior
+with checker-only guidance.
 
 ## Agent experience impact
 
-HoleReport exposes `capability_context`, allowing Agents to avoid proposing
-fills that require unavailable runtime effects or checker capabilities.
+HoleReport exposes `effect_context`, allowing Agents to avoid proposing fills
+that require unavailable effects.
 
 ## Structured representation / protocol impact
 
-Effect checking emits normalized runtime-effect metadata:
+Effect checking emits normalized effect metadata:
 
 ```text
-CapabilityContext
+EffectContext
 ├── declared[]
-├── runtime_effects[]
-├── tool_capabilities[]
+├── expanded_effects[]
 ├── active_handlers[]
 └── discharged_effects[]
 ```
@@ -183,44 +166,47 @@ SEP-0005 embeds this context in HoleReport. SEP-0006 may embed it in evidence.
 
 ## Diagnostics impact
 
-Effect diagnostics use `C0xxx` codes:
+Effect diagnostics use `F0xxx` codes:
 
-- unknown runtime effect
+- unknown effect
 - operation performed outside available effect set
 - missing handler method
-- handler capability escape
-- platform does not provide required runtime effect
+- handler effect escape
+- platform does not provide required effect
 
 ## Drawbacks
 
-A shared `uses` surface means tools must agree on capability names. Manifest
-metadata and package documentation should define non-runtime names clearly.
+Tools that need non-effect guidance require a separate surface rather than
+piggybacking on `uses [...]`. The benefit is that the language effect model stays
+clear and handler checking remains local.
 
 ## Alternatives considered
 
-### Runtime effects only in `uses`
+### Broader `uses` surface
 
-Rejected because property checkers and Agents need the same concise signature
-surface for non-runtime capabilities.
+Rejected because mixing effects with checker or Agent guidance made `uses [...]`
+an unclear heterogeneous bucket.
 
-### Separate checker capability keyword
+### Separate checker keyword in core syntax
 
-Rejected because it fragments intent and makes signatures harder to scan.
+Deferred because checker-specific guidance needs its own design rather than a
+second ad hoc signature list in SEP-0003.
 
 ## Prior art
 
 Koka influenced algebraic effects. Roc influenced platform-provided handlers.
 Rust influenced explicit trait boundaries, though Spore separates traits from
-runtime effects.
+effects.
 
 ## Backward compatibility and migration
 
-Existing runtime effect declarations stay conceptually valid. Signatures that
-used `uses [...]` for runtime effects continue to map to the runtime-effect
-subset; additional capability names require manifest or tooling interpretation.
+Existing effect declarations stay conceptually valid. Signatures that used
+`uses [...]` for effects continue to map directly. Non-effect names that were
+previously placed in `uses [...]` should move to properties, package metadata, or
+a future tooling surface.
 
 ## Unresolved questions
 
-1. Should non-runtime capabilities be namespaced by package?
-2. Should capability aliases be allowed to mix runtime and non-runtime names?
+1. Should effect names be partitioned by namespace?
+2. Should effect aliases be allowed to reference package-qualified effect names?
 3. How much inferred purity and determinism data should be visible in normal diagnostics?

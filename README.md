@@ -33,18 +33,18 @@ other fixed widths.
 
 ## SEP status
 
-| SEP                                                | Title                                  | Status   | Role                                                                |
-| -------------------------------------------------- | -------------------------------------- | -------- | ------------------------------------------------------------------- |
-| [SEP-0000](seps/SEP-0000-process.md)               | Spore Evolution Proposal Process       | Accepted | Repository process and lifecycle                                    |
-| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Accepted | Root surface grammar and Signature v2 layout                        |
-| [SEP-0002](seps/SEP-0002-type-system.md)           | Type System                            | Draft    | Type semantics, inline generic bounds, and callable boundaries      |
-| [SEP-0003](seps/SEP-0003-effect-system.md)         | Effect System                          | Draft    | Runtime effect capabilities inside the `uses` capability surface    |
-| [SEP-0004](seps/SEP-0004-cost-analysis.md)         | Budget Constraints & Realization Shape | Draft    | Quantitative realization-shape budgets                              |
-| [SEP-0005](seps/SEP-0005-hole-system.md)           | Hole System & Agent Protocol           | Draft    | Typed absence and agent-facing reports                              |
-| [SEP-0006](seps/SEP-0006-compiler-architecture.md) | Compiler Architecture                  | Draft    | Compiler pipeline, properties, claims, and evidence records         |
-| [SEP-0007](seps/SEP-0007-concurrency-model.md)     | Concurrency Model                      | Draft    | Structured concurrency semantics under capability and budget checks |
-| [SEP-0008](seps/SEP-0008-module-package-system.md) | Module & Package System                | Draft    | Modules, manifests, platforms, packages, and provenance hashes      |
-| [SEP-0009](seps/SEP-0009-standard-library.md)      | Standard Library Surface               | Draft    | Prelude, core modules, and platform libraries                       |
+| SEP                                                | Title                                  | Status   | Role                                                            |
+| -------------------------------------------------- | -------------------------------------- | -------- | --------------------------------------------------------------- |
+| [SEP-0000](seps/SEP-0000-process.md)               | Spore Evolution Proposal Process       | Accepted | Repository process and lifecycle                                |
+| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Accepted | Root surface grammar and Signature v2 layout                    |
+| [SEP-0002](seps/SEP-0002-type-system.md)           | Type System                            | Draft    | Type semantics, inline generic bounds, and callable boundaries  |
+| [SEP-0003](seps/SEP-0003-effect-system.md)         | Effect System                          | Draft    | Effects inside the `uses` effect surface                        |
+| [SEP-0004](seps/SEP-0004-cost-analysis.md)         | Budget Constraints & Realization Shape | Draft    | Quantitative realization-shape budgets                          |
+| [SEP-0005](seps/SEP-0005-hole-system.md)           | Hole System & Agent Protocol           | Draft    | Typed absence and agent-facing reports                          |
+| [SEP-0006](seps/SEP-0006-compiler-architecture.md) | Compiler Architecture                  | Draft    | Compiler pipeline, properties, claims, and evidence records     |
+| [SEP-0007](seps/SEP-0007-concurrency-model.md)     | Concurrency Model                      | Draft    | Structured concurrency semantics under effect and budget checks |
+| [SEP-0008](seps/SEP-0008-module-package-system.md) | Module & Package System                | Draft    | Modules, manifests, platforms, packages, and provenance hashes  |
+| [SEP-0009](seps/SEP-0009-standard-library.md)      | Standard Library Surface               | Draft    | Prelude, core modules, and platform libraries                   |
 
 The generated machine-readable index is [`seps-index.json`](seps-index.json).
 

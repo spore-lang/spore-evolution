@@ -51,7 +51,7 @@ ideas:
 - intent-first signatures and properties
 - structured collaboration between humans and Agents
 - holes as first-class collaboration points
-- explicit capability and budget surfaces
+- explicit effect and budget surfaces
 - evidence-backed, machine-readable diagnostics and protocols
 
 These changes have broad, long-term consequences. Ordinary implementation pull

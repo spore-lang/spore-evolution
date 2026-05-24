@@ -25,12 +25,11 @@ Spore = Signature -> Property -> Hole -> Realization -> Evidence
 ```
 
 A function's Base Signature defines possible implementation space. Its optional
-Intent Signature constrains that space with capabilities, quantitative
+Intent Signature constrains that space with effects, quantitative
 realization-shape budgets, and semantic properties.
 
 ```spore
 fn group_by[T, K: Eq](xs: List[T], key: Fn[T, K]) -> Dict[K, List[T]] ! Error
-uses [Compare]
 budget {
     branches: 4
     nesting: 3
@@ -55,7 +54,7 @@ remaining readable to programmers.
 Signature v2 separates two concerns:
 
 1. **Base Signature**: the callable type boundary the compiler must understand.
-2. **Intent Signature**: capabilities, budgets, and properties that guide
+2. **Intent Signature**: effects, budgets, and properties that guide
    verification, review, realization, and evidence generation.
 
 This keeps type checking, Agent filling, and evidence review connected without
@@ -113,8 +112,8 @@ properties {
 }
 ```
 
-`uses` is the capability surface. Runtime effect capabilities are specified by
-SEP-0003. Logical and checker capabilities are interpreted by tooling layers.
+`uses` is the effect surface. Effect declarations, aliases, handlers, and checking
+rules are specified by SEP-0003.
 
 `budget` is a named block of integer upper bounds over realization shape. SEP-0004
 owns the accepted fields and checking model.
@@ -183,7 +182,7 @@ The canonical order is:
 
 ```text
 fn <name>[<type-params>](<params>) -> <ReturnType> [! <ErrorTypes>]
-[uses [<Capability>, ...]]
+[uses [<Effect>, ...]]
 [budget { <name>: <integer>, ... }]
 [properties { <property-items> }]
 {
@@ -208,8 +207,8 @@ ParamList         = Param { "," Param } [ "," ] ;
 Param             = Ident ":" TypeExpr ;
 ErrorClause       = "!" TypeExpr { "|" TypeExpr } ;
 
-UsesClause        = "uses" "[" [ CapabilityList ] "]" ;
-CapabilityList    = Ident { "," Ident } ;
+UsesClause        = "uses" "[" [ EffectList ] "]" ;
+EffectList        = Ident { "," Ident } ;
 
 BudgetBlock       = "budget" "{" { BudgetItem } "}" ;
 BudgetItem        = Ident ":" IntLiteral ;
@@ -240,16 +239,16 @@ values.
 
 ### Delegated semantics
 
-| Surface | Semantic owner |
-|---|---|
-| Type meaning, inference, traits, refinements | SEP-0002 |
-| Runtime effects and handlers | SEP-0003 |
-| Budget fields and checking | SEP-0004 |
-| Holes and HoleReport projection | SEP-0005 |
-| Properties, claims, diagnostics, evidence | SEP-0006 |
-| Concurrency forms | SEP-0007 |
-| Modules, packages, provenance hashes | SEP-0008 |
-| Standard library names | SEP-0009 |
+| Surface                                      | Semantic owner |
+| -------------------------------------------- | -------------- |
+| Type meaning, inference, traits, refinements | SEP-0002       |
+| Effects and handlers                         | SEP-0003       |
+| Budget fields and checking                   | SEP-0004       |
+| Holes and HoleReport projection              | SEP-0005       |
+| Properties, claims, diagnostics, evidence    | SEP-0006       |
+| Concurrency forms                            | SEP-0007       |
+| Modules, packages, provenance hashes         | SEP-0008       |
+| Standard library names                       | SEP-0009       |
 
 ## Human experience impact
 
@@ -260,8 +259,8 @@ used by review, verification, or Agents.
 ## Agent experience impact
 
 Agents can parse signatures without inferring hidden conventions. `uses` limits
-available capabilities, `budget` limits realization shape, and `properties`
-state the validity criteria the realization must preserve.
+available effects, `budget` limits realization shape, and `properties` state the
+validity criteria the realization must preserve.
 
 ## Structured representation / protocol impact
 
@@ -289,7 +288,7 @@ This structure feeds HoleReport, Claim, and EvidenceRecord generation.
 Parser diagnostics should point to the specific signature layer:
 
 - base signature syntax errors
-- unknown capability names
+- unknown effect names
 - malformed budget items
 - malformed property declarations
 - body or hole syntax errors
@@ -343,5 +342,5 @@ Signature v2 is a breaking surface update. Migration tools should:
 
 1. Should long inline bounds allow line breaks after each type parameter?
 2. Which property expression subset should be accepted for generated checking?
-3. Should capability names be partitioned by namespace, or is a single capability
-   surface sufficient?
+3. Should effect names be partitioned by namespace, or is a single effect surface
+   sufficient?

@@ -18,7 +18,7 @@ superseded_by: null
 
 # SEP-0007: Concurrency Model
 
-> **Executive Summary**: Defines structured concurrency under Signature v2. Concurrency is introduced through scoped expressions and runtime capabilities, while acceptable fan-out and nesting are constrained by `budget` fields and recorded in evidence.
+> **Executive Summary**: Defines structured concurrency under Signature v2. Concurrency is introduced through scoped expressions and effects, while acceptable fan-out and nesting are constrained by `budget` fields and recorded in evidence.
 
 ## Summary
 
@@ -30,8 +30,8 @@ Spore provides structured concurrency primitives:
 - `select { ... }`
 - `Channel[T]`
 
-A concurrent function declares the required runtime capability and may constrain
-its realization shape with budget fields:
+A concurrent function declares the required effects and may constrain its
+realization shape with budget fields:
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Page] ! NetworkError
@@ -97,11 +97,11 @@ select {
 
 ## Reference-level explanation
 
-### Capability requirement
+### Effect requirement
 
-`spawn`, scoped task creation, and task scheduling require the `Spawn` runtime
-capability. Channel operations require the channel capability defined by the
-standard library or platform package that supplies them.
+`spawn`, scoped task creation, and task scheduling require the `Spawn` effect.
+Channel operations require the channel effects defined by the standard library
+or platform package that supplies them.
 
 ### Scope rule
 
@@ -112,7 +112,7 @@ awaited, cancelled, or automatically cancelled before the scope returns.
 
 `parallelism` bounds maximum fan-out inside the realization. `nesting` bounds
 nested concurrency scopes together with other control expressions. `effects`
-can bound runtime effect operation sites performed by concurrent branches.
+can bound effect operation sites performed by concurrent branches.
 
 ### Type rule for tasks
 
@@ -132,7 +132,7 @@ budgets. Reviewers can see whether fan-out is intended before reading the body.
 
 ## Agent experience impact
 
-Agents filling concurrent holes receive capability and budget context, making it
+Agents filling concurrent holes receive effect and budget context, making it
 possible to reject unbounded fan-out or missing awaits before proposing code.
 
 ## Structured representation / protocol impact
@@ -151,7 +151,7 @@ HoleReport may include concurrency-specific budget and dependency context.
 
 Concurrency diagnostics use existing categories:
 
-- `C0xxx` for missing runtime capabilities;
+- `F0xxx` for missing effects;
 - `B0xxx` for fan-out or nesting budget violations;
 - `P0xxx` when a schedule-related property fails;
 - `W0xxx` for suspicious but accepted patterns.
@@ -173,7 +173,7 @@ shape difficult to verify.
 ### Async coloring
 
 Rejected because splitting function colors makes refactors viral. Spore uses
-capabilities and handlers instead.
+effects and handlers instead.
 
 ### Runtime-only concurrency checks
 
@@ -188,7 +188,7 @@ platform boundaries inform this model.
 ## Backward compatibility and migration
 
 Concurrent code should move fan-out constraints into `budget { parallelism: N }`
-and retain explicit `uses [Spawn]` capability declarations.
+and retain explicit `uses [Spawn]` effect declarations.
 
 ## Unresolved questions
 

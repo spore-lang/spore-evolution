@@ -40,7 +40,7 @@ The design goals are:
 
 - make callable boundaries explicit;
 - keep body inference local and predictable;
-- distinguish traits from runtime effects;
+- distinguish traits from effects;
 - expose typed holes as useful collaboration points;
 - produce stable machine facts for downstream protocols.
 
@@ -154,8 +154,8 @@ A type parameter has this normalized shape:
 TypeParam { name, kind?, bounds[] }
 ```
 
-Bounds are trait requirements. Runtime effects do not appear in type parameter
-bounds; effect capability checking belongs to SEP-0003.
+Bounds are trait requirements. Effects do not appear in type parameter bounds;
+effect checking belongs to SEP-0003.
 
 ### Inference boundary
 

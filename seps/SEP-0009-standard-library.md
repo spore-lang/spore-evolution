@@ -36,8 +36,8 @@ part of the contract.
 ## Motivation
 
 The standard library should demonstrate idiomatic Signature v2: compact Base
-Signatures, inline bounds, runtime capabilities through `uses`, and properties
-for behavior that users rely on.
+Signatures, inline bounds, effects through `uses`, and properties for behavior
+that users rely on.
 
 ## Guide-level explanation
 
@@ -126,8 +126,8 @@ properties {
 ### Prelude
 
 The prelude exports primitive traits, common data types, and small helpers that
-are safe to use without imports. Platform-specific runtime effects remain in
-Platform packages.
+are safe to use without imports. Platform-specific effects remain in Platform
+packages.
 
 ### Trait style
 
@@ -144,9 +144,9 @@ fn to_debug_string[T: Debug](value: T) -> Str
 fn contains[T: Eq](xs: List[T], value: T) -> Bool
 ```
 
-### Runtime capabilities
+### Effects
 
-Platform functions declare runtime capabilities through `uses`:
+Platform functions declare effects through `uses`:
 
 ```spore
 foreign fn read_file(path: Path) -> Str ! IoError
@@ -178,7 +178,7 @@ StdItem
 ├── name
 ├── signature
 ├── properties[]
-├── required_capabilities[]
+├── required_effects[]
 └── evidence_policy
 ```
 
@@ -187,7 +187,7 @@ StdItem
 Standard-library diagnostics reuse core categories:
 
 - `E0xxx` for missing trait bounds or type mismatch;
-- `C0xxx` for runtime capability misuse;
+- `F0xxx` for effect misuse;
 - `P0xxx` for failed standard properties;
 - `M0xxx` for import or visibility issues.
 
@@ -211,8 +211,8 @@ a public realization-shape contract.
 
 ### Platform operations in the prelude
 
-Rejected because runtime effects should remain explicit through selected
-Platform packages.
+Rejected because effects should remain explicit through selected Platform
+packages.
 
 ## Prior art
 

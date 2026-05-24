@@ -48,7 +48,7 @@ Budget fields are named integer upper bounds. The initial field set is:
 | `recursion` | Maximum recursive-call depth; `0` forbids recursion |
 | `parallelism` | Maximum parallel fan-out |
 | `calls` | Function-call count upper bound |
-| `effects` | Runtime effect operation count upper bound |
+| `effects` | Effect operation count upper bound |
 | `holes` | Remaining hole count upper bound |
 
 ## Motivation
@@ -152,7 +152,7 @@ expressions.
 
 `calls` counts ordinary function-call sites in the realization body.
 
-`effects` counts runtime effect operation sites after handler expansion.
+`effects` counts effect operation sites after handler expansion.
 
 `holes` counts remaining holes admitted in the realization. Public complete
 artifacts normally use `holes: 0`.

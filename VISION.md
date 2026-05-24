@@ -24,7 +24,7 @@ inline bounds, value parameters, return type, and error boundary. It defines
 the possible implementation space without fixing any particular member of it.
 
 The **Intent Signature** adds the constraints that guide reviewers, tools, and
-Agents: capability surface, realization-shape budget, and properties. Budgets
+Agents: effect surface, realization-shape budget, and properties. Budgets
 are named bounds on acceptable realization shape, not Big-O notation and not a
 machine-resource model.
 
@@ -45,7 +45,7 @@ checkable to preserve.
 
 A program with holes is partial, not broken. A hole is not a comment or a
 TODO; it is typed absence constrained by the Base Signature, visible bindings,
-capability context, budget context, and property context that surround it.
+effect context, budget context, and property context that surround it.
 
 A hole report should expose enough context for any reader — human or machine —
 to propose a realization without further conversation. The compiler should make

@@ -8,14 +8,30 @@ import sys
 from sep_common import ROOT
 
 TARGETS = (
+    ROOT / "README.md",
+    ROOT / "VISION.md",
+    ROOT / "VISION.zh-CN.md",
     ROOT / "GLOSSARY.md",
-    ROOT / "seps" / "SEP-0003-effect-system.md",
-    ROOT / "seps" / "SEP-0004-cost-analysis.md",
-    ROOT / "seps" / "SEP-0006-compiler-architecture.md",
-    ROOT / "seps" / "SEP-0008-module-package-system.md",
+    *sorted((ROOT / "seps").glob("SEP-*.md")),
 )
 
 FORBIDDEN_PATTERNS = (
+    (
+        re.compile(r"\b[Cc]apab(?:ility|ilities)\b"),
+        "retired non-effect terminology; use `effect`, `effect surface`, or `effect context`",
+    ),
+    (
+        re.compile(r"\bruntime[- ]effects?\b", re.IGNORECASE),
+        "retired split term `runtime effect`; use `effect` unless contrasting with runtime behavior generally",
+    ),
+    (
+        re.compile(r"能力表面|能力上下文|运行时效应"),
+        "retired zh-CN terminology; use `效应表面`, `效应上下文`, or `效应`",
+    ),
+    (
+        re.compile(r"\bC0xxx\b"),
+        "retired effect diagnostic prefix `C0xxx`; use `F0xxx`",
+    ),
     (
         re.compile(r"\bNetRead\b"),
         "retired term `NetRead`; use `NetConnect` or `NetListen` depending on intent",
