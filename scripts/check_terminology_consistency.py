@@ -70,7 +70,7 @@ FORBIDDEN_PATTERNS = (
     ),
     (
         re.compile(r"\bsig hash\b|\bimpl hash\b|\bspec hash\b"),
-        "retired hash labels; use Signature v2 provenance hash names",
+        "retired hash labels; use named signature provenance hash fields",
     ),
 )
 

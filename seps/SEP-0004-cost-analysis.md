@@ -41,19 +41,19 @@ properties {
 
 Budget fields are named integer upper bounds. The initial field set is:
 
-| Field | Meaning |
-|---|---|
-| `branches` | Conditional or match branch count upper bound |
-| `nesting` | Maximum nested control-expression depth |
-| `recursion` | Maximum recursive-call depth; `0` forbids recursion |
-| `parallelism` | Maximum parallel fan-out |
-| `calls` | Function-call count upper bound |
-| `effects` | Effect operation count upper bound |
-| `holes` | Remaining hole count upper bound |
+| Field         | Meaning                                             |
+| ------------- | --------------------------------------------------- |
+| `branches`    | Conditional or match branch count upper bound       |
+| `nesting`     | Maximum nested control-expression depth             |
+| `recursion`   | Maximum recursive-call depth; `0` forbids recursion |
+| `parallelism` | Maximum parallel fan-out                            |
+| `calls`       | Function-call count upper bound                     |
+| `effects`     | Effect operation count upper bound                  |
+| `holes`       | Remaining hole count upper bound                    |
 
 ## Motivation
 
-Signature v2 uses budgets to shape valid realizations. The question is not an
+The signature model uses budgets to shape valid realizations. The question is not an
 abstract resource formula; it is whether the implementation is small enough,
 reviewable enough, and constrained enough for humans, Agents, and checkers to
 trust.
@@ -217,13 +217,13 @@ HoleReport embeds relevant constraints under `budget_context`.
 
 Budget diagnostics use `B0xxx` codes:
 
-| Code | Name | Meaning |
-|---|---|---|
-| `B0101` | budget-exceeded | Observed realization shape exceeds a declared field |
+| Code    | Name                 | Meaning                                                     |
+| ------- | -------------------- | ----------------------------------------------------------- |
+| `B0101` | budget-exceeded      | Observed realization shape exceeds a declared field         |
 | `B0102` | unknown-budget-field | Field is not built in and not enabled by extension metadata |
-| `B0103` | invalid-budget-value | Value is not a non-negative integer literal |
-| `B0201` | recursion-disallowed | Realization uses recursion while `recursion: 0` |
-| `B0202` | hole-budget-exceeded | Realization leaves more holes than allowed |
+| `B0103` | invalid-budget-value | Value is not a non-negative integer literal                 |
+| `B0201` | recursion-disallowed | Realization uses recursion while `recursion: 0`             |
+| `B0202` | hole-budget-exceeded | Realization leaves more holes than allowed                  |
 
 ## Drawbacks
 
@@ -243,7 +243,7 @@ accounting, and are hard to extend.
 ### Complexity notation in signatures
 
 Rejected because asymptotic notation belongs to algorithm analysis, not to the
-core Signature v2 realization workflow.
+core signature realization workflow.
 
 ### No quantitative constraints
 

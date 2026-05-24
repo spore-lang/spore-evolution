@@ -6,7 +6,7 @@ type: Standards Track
 authors:
   - Spore Contributors
 created: 2026-04-01
-requires: [1, 2, 3, 4, 7, 8]
+requires: [1, 2, 3, 4, 6, 7, 8]
 discussion: "https://github.com/spore-lang/spore-evolution/discussions"
 pr: null
 superseded_by: null
@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0009: Standard Library Surface
 
-> **Executive Summary**: Defines the standard library surface under Signature v2. Standard APIs use inline generic bounds, routine functions omit budget annotations, and core behavior is documented through properties where the property is part of public intent.
+> **Executive Summary**: Defines the standard library surface under the signature model. Standard APIs use inline generic bounds, routine functions omit budget annotations, and core behavior is documented through properties where the property is part of public intent.
 
 ## Summary
 
@@ -35,7 +35,7 @@ part of the contract.
 
 ## Motivation
 
-The standard library should demonstrate idiomatic Signature v2: compact Base
+The standard library should demonstrate the idiomatic signature model: compact Base
 Signatures, inline bounds, effects through `uses`, and properties for behavior
 that users rely on.
 

@@ -446,15 +446,25 @@ addressed differs:
 Accepted SEPs should not be silently rewritten to mean something substantially different.
 
 - small clarifications may be merged as ordinary edits
-- significant semantic changes should go through a new SEP
+- explicitly declared bootstrap amendments may revise repository-defining SEPs
+  when the pull request names the accepted documents being materially revised,
+  explains why direct amendment is appropriate, and asks reviewers whether a
+  follow-up Process or Standards Track SEP should supersede the change
+- outside that bootstrap exception, significant semantic changes should go
+  through a new SEP
 - superseding SEPs should link to the older document they replace
 
 ### Amending this document
 
 Non-semantic clarification edits to SEP-0000 itself may be merged directly by the
-maintainer. Substantive changes that alter the decision model, the lifecycle, the
-SEP type taxonomy, or the required section templates must go through a new Process
-SEP that supersedes or amends this document.
+maintainer. During bootstrap, substantive changes to SEP-0000 may be merged as
+explicit bootstrap amendments only when the pull request identifies the affected
+process rules, calls out the amendment risk, and invites review on whether a
+separate Process SEP is required.
+
+After bootstrap, substantive changes that alter the decision model, the
+lifecycle, the SEP type taxonomy, or the required section templates must go
+through a new Process SEP that supersedes or amends this document.
 
 ## Drawbacks
 

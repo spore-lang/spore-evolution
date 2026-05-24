@@ -19,7 +19,7 @@ superseded_by: null
 
 # SEP-0006: Compiler Architecture
 
-> **Executive Summary**: Defines the Spore compiler pipeline under Signature v2. The compiler parses Base and Intent Signatures, lowers source properties into internal Claims, verifies realizations, and emits EvidenceRecords with provenance hashes for signatures, intents, properties, realizations, checkers, and dependencies.
+> **Executive Summary**: Defines the Spore compiler pipeline under the signature model. The compiler parses Base and Intent Signatures, lowers source properties into internal Claims, verifies realizations, and emits EvidenceRecords with provenance hashes for signatures, intents, properties, realizations, checkers, and dependencies.
 
 ## Summary
 
@@ -257,8 +257,8 @@ claim/evidence separation.
 
 ## Backward compatibility and migration
 
-Tooling must migrate from older diagnostic prefixes and hash labels to Signature
-v2 names. JSON consumers should key on explicit record fields rather than parse
+Tooling must migrate from older diagnostic prefixes and hash labels to signature
+model names. JSON consumers should key on explicit record fields rather than parse
 human messages.
 
 ## Unresolved questions

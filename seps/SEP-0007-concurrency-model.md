@@ -11,6 +11,8 @@ requires:
   - 2
   - 3
   - 4
+  - 5
+  - 6
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/7"
 pr: null
 superseded_by: null
@@ -18,7 +20,7 @@ superseded_by: null
 
 # SEP-0007: Concurrency Model
 
-> **Executive Summary**: Defines structured concurrency under Signature v2. Concurrency is introduced through scoped expressions and effects, while acceptable fan-out and nesting are constrained by `budget` fields and recorded in evidence.
+> **Executive Summary**: Defines structured concurrency under the signature model. Concurrency is introduced through scoped expressions and effects, while acceptable fan-out and nesting are constrained by `budget` fields and recorded in evidence.
 
 ## Summary
 
@@ -177,7 +179,7 @@ effects and handlers instead.
 
 ### Runtime-only concurrency checks
 
-Rejected because Signature v2 needs Agent-visible constraints before a
+Rejected because the signature model needs Agent-visible constraints before a
 realization is written.
 
 ## Prior art

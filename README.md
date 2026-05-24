@@ -21,7 +21,7 @@ This repository is authoritative for proposal history and accepted design
 direction. During bootstrap, Draft SEPs may include target behavior, protocol
 shapes, or samples that are ahead of the compiler.
 
-**Signature v2 baseline:** Spore is organized around
+**Signature baseline:** Spore is organized around
 `Signature -> Property -> Hole -> Realization -> Evidence`. Base signatures
 carry the callable type boundary. Intent signatures add `uses`, `budget`, and
 `properties` clauses for verifier, Agent, and Evidence workflows.
@@ -36,7 +36,7 @@ other fixed widths.
 | SEP                                                | Title                                  | Status   | Role                                                            |
 | -------------------------------------------------- | -------------------------------------- | -------- | --------------------------------------------------------------- |
 | [SEP-0000](seps/SEP-0000-process.md)               | Spore Evolution Proposal Process       | Accepted | Repository process and lifecycle                                |
-| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Accepted | Root surface grammar and Signature v2 layout                    |
+| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Accepted | Root surface grammar and signature layout                       |
 | [SEP-0002](seps/SEP-0002-type-system.md)           | Type System                            | Draft    | Type semantics, inline generic bounds, and callable boundaries  |
 | [SEP-0003](seps/SEP-0003-effect-system.md)         | Effect System                          | Draft    | Effects inside the `uses` effect surface                        |
 | [SEP-0004](seps/SEP-0004-cost-analysis.md)         | Budget Constraints & Realization Shape | Draft    | Quantitative realization-shape budgets                          |
@@ -51,7 +51,7 @@ The generated machine-readable index is [`seps-index.json`](seps-index.json).
 ## Reading path
 
 Read [Spore Language Vision](VISION.md) first for the design philosophy; a
-Chinese version is available at [孢子语言愿景](VISION.zh-CN.md). Implementation
+Chinese translation is available at [孢子语言愿景](VISION.zh-CN.md). Implementation
 planning lives in the sibling language repository's `ROADMAP.md`. Then use SEPs
 in dependency order:
 

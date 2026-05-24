@@ -41,6 +41,17 @@ def self_markdown_files() -> list[Path]:
     ]
 
 
+def user_facing_markdown_files() -> list[Path]:
+    return [
+        ROOT / "README.md",
+        ROOT / "GLOSSARY.md",
+        *VISION_FILES,
+        *sorted((ROOT / "seps").glob("*.md")),
+        *sorted((ROOT / "drafts").glob("*.md")),
+        *sorted((ROOT / "templates").glob("*.md")),
+    ]
+
+
 GUIDING_QUESTIONS_HEADING = "## Guiding questions for every design decision"
 GUIDING_QUESTIONS_LINK_FRAGMENT = (
     "SEP-0000-process.md#guiding-questions-for-every-design-decision"
@@ -128,6 +139,17 @@ def main() -> int:
 
     for pattern, message in forbidden_self_patterns:
         add_pattern_errors(errors, own_docs, pattern, message)
+
+    add_pattern_errors(
+        errors,
+        user_facing_markdown_files(),
+        re.compile(
+            r"\bSignature\s+v[0-9]+\b|\bV[0-9]+\b|\bv[0-9]+(?:\.[0-9]+)*\b|"
+            r"\bver" r"sion[- ]range\b|\bSemantic ver" r"sion\b|\bChinese ver" r"sion\b|"
+            r"版本" r"号|小设计" r"版本"
+        ),
+        "avoid numbered narrative labels in user-facing prose; use stable names instead",
+    )
 
     add_pattern_errors(
         errors,

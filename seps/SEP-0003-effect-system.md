@@ -16,7 +16,7 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines Signature v2's `uses [...]` effect surface. SEP-0003 owns effect declarations, handlers, alias expansion, and effect checking. Non-effect constraints belong to `budget`, `properties`, or future tooling metadata rather than `uses`.
+> **Executive Summary**: Defines the signature model's `uses [...]` effect surface. SEP-0003 owns effect declarations, handlers, alias expansion, and effect checking. Non-effect constraints belong to `budget`, `properties`, or future tooling metadata rather than `uses`.
 
 ## Summary
 
@@ -44,7 +44,7 @@ Effects make external interactions visible at the signature boundary. They help
 humans review code, help Agents avoid unavailable operations, and let Platforms
 supply replaceable handlers.
 
-Effect checking should not absorb every non-type constraint. Signature v2 keeps
+Effect checking should not absorb every non-type constraint. The signature model keeps
 runtime interaction in `uses`, realization shape in `budget`, and semantic
 requirements in `properties`.
 

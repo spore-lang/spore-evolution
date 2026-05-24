@@ -11,6 +11,8 @@ requires:
   - 2
   - 3
   - 4
+  - 5
+  - 6
 discussion: "https://github.com/spore-lang/spore-evolution/discussions/8"
 pr: null
 superseded_by: null
@@ -18,14 +20,14 @@ superseded_by: null
 
 # SEP-0008: Module & Package System
 
-> **Executive Summary**: Defines file-based modules, package manifests, Platform packages, visibility, and content-addressed provenance under Signature v2. Packages bind signatures, intents, properties, realizations, evidence, and dependencies through named hashes rather than release ranges.
+> **Executive Summary**: Defines file-based modules, package manifests, Platform packages, visibility, and content-addressed provenance under the signature model. Packages bind signatures, intents, properties, realizations, evidence, and dependencies through named hashes rather than release ranges.
 
 ## Summary
 
 A Spore module is one source file. Its module path is derived from its file path.
 Packages are described by `spore.toml`, lock data, and content-addressed inputs.
 
-Signature v2 changes the package identity model from callable-only API identity
+The signature model changes package identity from callable-only API identity
 to provenance over:
 
 - `signature_hash`
@@ -101,7 +103,7 @@ may introduce a local alias. Selective and wildcard imports are outside this SEP
 Private items are visible only inside their defining module. `pub(pkg)` items
 are visible inside the package. `pub` items are visible to downstream packages.
 
-### Signature v2 package identity
+### Signature package identity
 
 A package API hash is derived from exported signature and intent hashes. A
 package evidence hash is derived from evidence records selected by the package
@@ -169,7 +171,7 @@ Module diagnostics use `M0xxx` codes:
 
 ## Drawbacks
 
-Multiple hash categories are more complex than version ranges. Tooling must
+Multiple hash categories are more complex than release-label ranges. Tooling must
 render concise labels and explain which category changed.
 
 Evidence-aware package gates may slow publication until checkers have produced
@@ -177,7 +179,7 @@ records for required claims.
 
 ## Alternatives considered
 
-### Semantic version ranges
+### Release-label ranges
 
 Rejected because labels cannot prove compatibility or realization identity.
 
@@ -197,7 +199,7 @@ lock data and reproducible dependency review. Roc influenced Platform packages.
 
 ## Backward compatibility and migration
 
-Package metadata must migrate to named Signature v2 hash categories. Existing
+Package metadata must migrate to named signature hash categories. Existing
 manifest fields can remain when they describe package names, paths, and Platform
 selection rather than compatibility identity.
 

@@ -15,7 +15,7 @@ superseded_by: null
 
 # SEP-0002: Type System
 
-> **Executive Summary**: Defines Spore's type system under Signature v2. Base signatures are fully annotated, generic bounds live inline in type parameter lists, and type checking produces the type evidence consumed by HoleReport and EvidenceRecord payloads.
+> **Executive Summary**: Defines Spore's type system under the signature model. Base signatures are fully annotated, generic bounds live inline in type parameter lists, and type checking produces the type evidence consumed by HoleReport and EvidenceRecord payloads.
 
 ## Summary
 
@@ -32,7 +32,7 @@ fn insert[K: Eq + Hash, V](map: Map[K, V], key: K, value: V) -> Map[K, V] { ?ins
 
 ## Motivation
 
-The type system gives Signature v2 its base notion of possibility. A realization
+The type system gives the signature model its base notion of possibility. A realization
 must inhabit the target type before property, budget, or evidence checks can
 mean anything.
 
@@ -228,7 +228,7 @@ Rejected because nominal types give clearer diagnostics and package boundaries.
 
 ### Inferred public signatures
 
-Rejected because Signature v2 relies on explicit callable boundaries as shared
+Rejected because the signature model relies on explicit callable boundaries as shared
 intent.
 
 ### Separate bound clauses

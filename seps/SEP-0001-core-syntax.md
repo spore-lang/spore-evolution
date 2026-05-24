@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0001: Core Syntax & Signatures
 
-> **Executive Summary**: Defines Spore's root surface grammar and Signature v2 layout. A function declaration is a Base Signature plus optional Intent Signature clauses in fixed order: `uses`, `budget`, `properties`, and body. Later SEPs interpret type, effect, budget, hole, evidence, concurrency, module, and standard-library semantics.
+> **Executive Summary**: Defines Spore's root surface grammar and signature layout. A function declaration is a Base Signature plus optional Intent Signature clauses in fixed order: `uses`, `budget`, `properties`, and body. Later SEPs interpret type, effect, budget, hole, evidence, concurrency, module, and standard-library semantics.
 
 ## Summary
 
@@ -29,19 +29,19 @@ Intent Signature constrains that space with effects, quantitative
 realization-shape budgets, and semantic properties.
 
 ```spore
-fn group_by[T, K: Eq](xs: List[T], key: Fn[T, K]) -> Dict[K, List[T]] ! Error
+fn normalize(score: I64) -> I64
 budget {
-    branches: 4
-    nesting: 3
+    branches: 3
+    nesting: 2
     recursion: 0
     parallelism: 1
 }
 properties {
-    empty(): group_by([], key) == Dict.empty()
-    preserves_count(xs: List[T]): len(flatten(values(group_by(xs, key)))) == len(xs)
+    lower(score: I64): normalize(score) >= 0
+    upper(score: I64): normalize(score) <= 100
 }
 {
-    ?group_by_body
+    ?normalize_body
 }
 ```
 
@@ -51,7 +51,7 @@ Spore signatures are the shared boundary between humans, compilers, checkers,
 and Agents. The grammar must make that boundary regular enough for tools while
 remaining readable to programmers.
 
-Signature v2 separates two concerns:
+The signature model separates two concerns:
 
 1. **Base Signature**: the callable type boundary the compiler must understand.
 2. **Intent Signature**: effects, budgets, and properties that guide
@@ -193,6 +193,18 @@ fn <name>[<type-params>](<params>) -> <ReturnType> [! <ErrorTypes>]
 ### EBNF
 
 ```ebnf
+SourceFile        = { ItemDecl } ;
+ItemDecl          = FunctionDecl
+                  | StructDecl
+                  | TypeDecl
+                  | TraitDecl
+                  | EffectDecl
+                  | HandlerDecl
+                  | ImplDecl
+                  | ConstDecl
+                  | AliasDecl
+                  | ImportDecl ;
+
 FunctionDecl      = FunctionSig Block ;
 FunctionSig       = FunctionHeader [ UsesClause ] [ BudgetBlock ] [ PropertiesBlock ] ;
 FunctionHeader    = { Attribute } [ DocComment ] [ Visibility ] "fn" Ident [ TypeParams ]
@@ -220,10 +232,35 @@ PropertyParam     = Ident ":" TypeExpr ;
 
 Block             = "{" { Statement } [ Expr ] "}" ;
 HoleExpr          = "?" [ Ident ] [ ":" TypeExpr ] ;
+
+StructDecl        = [ Visibility ] "struct" Ident [ TypeParams ]
+                    "{" [ FieldDecl { "," FieldDecl } [ "," ] ] "}" ;
+FieldDecl         = Ident ":" TypeExpr ;
+
+TypeDecl          = [ Visibility ] "type" Ident [ TypeParams ]
+                    "{" [ VariantDecl { "," VariantDecl } [ "," ] ] "}" ;
+VariantDecl       = Ident [ "(" [ TypeExpr { "," TypeExpr } [ "," ] ] ")" ] ;
+
+TraitDecl         = [ Visibility ] "trait" Ident [ TypeParams ]
+                    "{" { MemberFunction } "}" ;
+EffectDecl        = [ Visibility ] "effect" Ident
+                    ( "{" { MemberFunction } "}"
+                    | "=" Ident { "|" Ident } ) ;
+HandlerDecl       = "handler" Ident "for" TypeExpr "{" { FunctionDecl } "}" ;
+ImplDecl          = "impl" [ TypeParams ] TypeExpr [ "for" TypeExpr ]
+                    "{" { FunctionDecl } "}" ;
+MemberFunction    = FunctionSig [ Block ] ;
+
+ConstDecl         = [ Visibility ] "const" Ident ":" TypeExpr "=" Expr ;
+AliasDecl         = [ Visibility ] "alias" Ident [ TypeParams ] "=" TypeExpr ;
+ImportDecl        = "import" ModulePath [ "as" Ident ] ;
+ModulePath        = Ident { "." Ident } ;
+Visibility        = "pub" | "pub" "(" "pkg" ")" ;
 ```
 
-Type, expression, pattern, import, effect, handler, and module grammar remain
-part of SEP-0001, while their semantics are delegated.
+This grammar defines root item spelling and placement. Type expressions,
+expressions, patterns, imports, effects, handlers, and modules remain part of the
+root surface, while their detailed semantics are delegated.
 
 ### Type surface
 
@@ -252,7 +289,7 @@ values.
 
 ## Human experience impact
 
-Signature v2 keeps simple functions compact and makes richer intent scan in a
+The signature model keeps simple functions compact and makes richer intent scan in a
 stable order. A reader can distinguish the callable boundary from constraints
 used by review, verification, or Agents.
 
@@ -330,7 +367,7 @@ content-addressed identity. Roc influenced explicit effect boundaries.
 
 ## Backward compatibility and migration
 
-Signature v2 is a breaking surface update. Migration tools should:
+The signature model is a breaking surface update. Migration tools should:
 
 1. move generic bounds into type parameter lists;
 2. rewrite behavioral assertions into `properties` items;
