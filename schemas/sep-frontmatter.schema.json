@@ -34,7 +34,6 @@
         "Draft",
         "Accepted",
         "Rejected",
-        "Withdrawn",
         "Superseded"
       ]
     },

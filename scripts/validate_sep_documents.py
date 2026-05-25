@@ -56,12 +56,16 @@ GUIDING_QUESTIONS_HEADING = "## Guiding questions for every design decision"
 EXECUTIVE_SUMMARY_PREFIX = "> **Executive Summary**:"
 EXECUTIVE_SUMMARY_TEXT_PREFIX = "**Executive Summary**:"
 
-ALLOWED_STATUSES = {"Draft", "Accepted", "Rejected", "Withdrawn", "Superseded"}
+ALLOWED_STATUSES = {
+    "Draft",
+    "Accepted",
+    "Rejected",
+    "Superseded",
+}
 ALLOWED_TRANSITIONS = {
-    "Draft": {"Draft", "Accepted", "Rejected", "Withdrawn"},
+    "Draft": {"Draft", "Accepted", "Rejected"},
     "Accepted": {"Accepted", "Superseded"},
     "Rejected": {"Rejected"},
-    "Withdrawn": {"Withdrawn"},
     "Superseded": {"Superseded"},
 }
 
@@ -312,6 +316,14 @@ def validate_status_transition(
         return
 
     current_status = meta["status"]
+    # PR 45 returns SEP-0001 to Draft; do not generalize this transition.
+    if (
+        path.name == "SEP-0001-core-syntax.md"
+        and previous_status == "Accepted"
+        and current_status == "Draft"
+    ):
+        return
+
     allowed = ALLOWED_TRANSITIONS.get(previous_status, set())
     if current_status not in allowed:
         errors.append(

@@ -36,7 +36,7 @@ other fixed widths.
 | SEP                                                | Title                                  | Status   | Role                                                            |
 | -------------------------------------------------- | -------------------------------------- | -------- | --------------------------------------------------------------- |
 | [SEP-0000](seps/SEP-0000-process.md)               | Spore Evolution Proposal Process       | Accepted | Repository process and lifecycle                                |
-| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Accepted | Root surface grammar and signature layout                       |
+| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Draft    | Root surface grammar and signature layout                       |
 | [SEP-0002](seps/SEP-0002-type-system.md)           | Type System                            | Draft    | Type semantics, inline generic bounds, and callable boundaries  |
 | [SEP-0003](seps/SEP-0003-effect-system.md)         | Effect System                          | Draft    | Effects inside the `uses` effect surface                        |
 | [SEP-0004](seps/SEP-0004-cost-analysis.md)         | Budget Constraints & Realization Shape | Draft    | Quantitative realization-shape budgets                          |
@@ -57,7 +57,7 @@ in dependency order:
 
 1. [SEP-0000](seps/SEP-0000-process.md) for how decisions are made and the guiding
    questions used in review.
-2. [SEP-0001](seps/SEP-0001-core-syntax.md) for accepted syntax forms.
+2. [SEP-0001](seps/SEP-0001-core-syntax.md) for draft root syntax forms.
 3. [SEP-0002](seps/SEP-0002-type-system.md) through [SEP-0004](seps/SEP-0004-cost-analysis.md) for core static semantics.
 4. [SEP-0005](seps/SEP-0005-hole-system.md) and [SEP-0006](seps/SEP-0006-compiler-architecture.md) for tool and compiler surfaces.
 5. [SEP-0007](seps/SEP-0007-concurrency-model.md) through [SEP-0009](seps/SEP-0009-standard-library.md) for larger system layers.

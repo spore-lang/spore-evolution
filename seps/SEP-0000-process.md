@@ -156,7 +156,7 @@ Describes design explorations, architectural context, prior art, or guidance tha
 
 The default lifecycle is:
 
-`Pitch -> Draft SEP -> Review -> Accepted / Rejected / Withdrawn`
+`Pitch -> Draft SEP -> Accepted / Rejected`
 
 ### Pitch
 
@@ -223,10 +223,6 @@ An accepted SEP becomes the design record for that change. Acceptance means the 
 
 A rejected SEP is closed with rationale preserved in the historical record.
 
-### Withdrawn
-
-The author or maintainers may withdraw a proposal that is no longer being pursued.
-
 ### Superseded
 
 If a later SEP replaces a previous one, the older document should remain in the repository and be marked `Superseded`.
@@ -254,6 +250,7 @@ not, by themselves, compatibility guarantees or public release contracts.
 
 In particular:
 
+- `Draft` covers proposals under active writing or review
 - `Accepted` means the design direction is approved
 - it does **not** mean the proposal is shipped
 - it does **not** mean the release surface is production-ready
@@ -443,28 +440,23 @@ addressed differs:
 
 ## Amendments and follow-up changes
 
-Accepted SEPs should not be silently rewritten to mean something substantially different.
+Accepted SEPs should not be rewritten to mean something substantially different.
 
 - small clarifications may be merged as ordinary edits
-- explicitly declared bootstrap amendments may revise repository-defining SEPs
-  when the pull request names the accepted documents being materially revised,
-  explains why direct amendment is appropriate, and asks reviewers whether a
-  follow-up Process or Standards Track SEP should supersede the change
-- outside that bootstrap exception, significant semantic changes should go
-  through a new SEP
+- the bootstrap amendment to SEP-0000 in pull request 45 is the sole direct
+  substantive amendment exception to this document
+- future significant semantic changes to accepted SEPs must go through a new SEP
 - superseding SEPs should link to the older document they replace
 
 ### Amending this document
 
 Non-semantic clarification edits to SEP-0000 itself may be merged directly by the
-maintainer. During bootstrap, substantive changes to SEP-0000 may be merged as
-explicit bootstrap amendments only when the pull request identifies the affected
-process rules, calls out the amendment risk, and invites review on whether a
-separate Process SEP is required.
+maintainer. The bootstrap amendment in pull request 45 is the only direct
+substantive amendment exception to SEP-0000.
 
-After bootstrap, substantive changes that alter the decision model, the
-lifecycle, the SEP type taxonomy, or the required section templates must go
-through a new Process SEP that supersedes or amends this document.
+Future substantive changes that alter the decision model, the lifecycle, the SEP
+type taxonomy, or the required section templates must go through a new Process
+SEP that supersedes or amends this document.
 
 ## Drawbacks
 

@@ -1,7 +1,7 @@
 ---
 sep: 1
 title: "SEP-0001: Core Syntax & Signatures"
-status: Accepted
+status: Draft
 type: Standards Track
 authors:
   - Zhan Rongrui
