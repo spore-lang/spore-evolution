@@ -153,6 +153,13 @@ def main() -> int:
 
     add_pattern_errors(
         errors,
+        user_facing_markdown_files(),
+        re.compile(r"\bReviewing\b|\bWithdrawn\b|\bwithdrawn\b"),
+        "SEP status prose must use only Draft, Accepted, Rejected, or Superseded",
+    )
+
+    add_pattern_errors(
+        errors,
         files_outside_sep_0000(),
         re.compile(re.escape(GUIDING_QUESTIONS_HEADING)),
         "guiding questions belong in SEP-0000; link to SEP-0000 instead of duplicating them",

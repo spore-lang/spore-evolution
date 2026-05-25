@@ -1,5 +1,8 @@
 # Draft proposals
 
-This directory is for unnumbered proposal drafts that are still under active discussion.
+This directory is for unnumbered proposal drafts that are still under active
+discussion.
 
-Once a draft is accepted and merged as an SEP, it should move into `seps/` and receive its permanent SEP number.
+When maintainers decide a draft should become a numbered SEP, it moves into
+`seps/` and receives its permanent SEP number. Numbering does not by itself
+change proposal status; a numbered SEP may still be `Draft`.

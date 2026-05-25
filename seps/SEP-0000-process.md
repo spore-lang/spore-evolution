@@ -14,7 +14,7 @@ superseded_by: null
 
 # SEP-0000: Spore Evolution Proposal Process
 
-> **Executive Summary**: Defines the governance process for evolving Spore through structured proposals (SEPs). It establishes the Pitch -> Draft -> Review -> Accepted lifecycle, machine-verifiable metadata, required sections by SEP type, and repository automation. It also makes SEP-0000 the canonical home for the guiding questions that operationalize [VISION.md](../VISION.md) for human and Agent review.
+> **Executive Summary**: Defines the governance process for evolving Spore through structured proposals (SEPs). It establishes the `Pitch -> Draft -> Accepted / Rejected` lifecycle, treats review as a Draft-phase activity, and defines machine-verifiable metadata, required sections by SEP type, and repository automation. It also makes SEP-0000 the canonical home for the guiding questions that operationalize [VISION.md](../VISION.md) for human and Agent review.
 
 ## Summary
 
@@ -190,7 +190,9 @@ A draft SEP should be:
 
 ### Review
 
-When maintainers believe a draft is ready, it moves into review.
+When maintainers believe a draft is ready for focused feedback, it enters
+review while retaining `Draft` status. Review is not a separate SEP status; a
+proposal under review remains `Draft` until accepted or rejected.
 
 For Spore, review is expected to use **both**:
 
@@ -291,8 +293,9 @@ different champion in its text.
 
 ### Maintainers
 
-During the bootstrap phase, the `spore-lang` organization owner acts as sole maintainer and
-exercises final decision authority for accepting, rejecting, or withdrawing SEPs.
+During the bootstrap phase, the `spore-lang` organization owner acts as sole
+maintainer and exercises final decision authority for accepting or rejecting
+SEPs, and for marking older SEPs superseded when a replacement is accepted.
 
 As the project grows, this role may be distributed to a maintainer team.
 Any change to the decision model described in this section requires a Process SEP.
@@ -300,8 +303,8 @@ Any change to the decision model described in this section requires a Process SE
 For now, `spore-lang` maintainers are responsible for:
 
 - deciding when a proposal is ready for review
-- deciding whether it is accepted, rejected, or withdrawn
-- assigning SEP numbers at merge time
+- deciding whether it is accepted or rejected
+- assigning SEP numbers when proposals become numbered SEPs
 - keeping status metadata up to date
 
 Future governance may refine or replace this arrangement through a Process SEP.
@@ -312,8 +315,8 @@ Future governance may refine or replace this arrangement through a Process SEP.
 
 - `SEP-0000` is reserved for the process document
 - later SEPs use sequential four-digit numbers
-- maintainers assign the final number at merge time
-- draft proposals should use descriptive temporary filenames before acceptance
+- maintainers assign the final number when a proposal becomes a numbered SEP
+- unnumbered drafts should use descriptive temporary filenames before numbering
 
 ### File layout
 
@@ -525,7 +528,7 @@ For Spore, the required front matter keys are:
 - `pr`
 - `superseded_by`
 
-Drafts may use `sep: null` before a permanent number is assigned at merge time.
+Unnumbered drafts in `drafts/` may use `sep: null` before a permanent number is assigned.
 
 Spore also maintains a committed machine-readable index at `seps-index.json`.
 
