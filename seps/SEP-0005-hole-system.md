@@ -202,6 +202,10 @@ Batch output:
 
 Single-hole queries return the same per-hole object directly.
 
+Human-facing educational renderings of these records are owned by SEP-0010.
+Those renderings must stay projections over the same HoleReport data rather than
+forming a separate hole protocol.
+
 ## Diagnostics impact
 
 Hole diagnostics use `H0xxx` codes:

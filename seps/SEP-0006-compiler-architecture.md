@@ -206,6 +206,8 @@ VerificationBundle
 ```
 
 Default text, JSON, LSP, and watch outputs are renderings over these records.
+SEP-0010 owns the concept registry and explain protocol layered over these same
+records.
 
 ## Diagnostics impact
 
@@ -223,6 +225,9 @@ Diagnostic categories are:
 
 Property diagnostics include failed property checks, counter-witnesses, and
 properties that reached an open hole.
+
+Diagnostic teaching metadata, concept references, and `spore explain` behavior
+are owned by SEP-0010.
 
 ## Drawbacks
 

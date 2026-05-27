@@ -23,6 +23,9 @@ update both its glossary definition and its multilingual correspondence here.
 | Evidence          | 证据         |
 | Claim             | 检查主张     |
 | Budget            | 预算         |
+| ConceptDoc        | 概念文档     |
+| ConceptRegistry   | 概念注册表   |
+| Concept ref       | 概念引用     |
 | Realization shape | 实现形态     |
 | Effect surface    | 效应表面     |
 | Effect            | 效应         |
@@ -32,8 +35,10 @@ update both its glossary definition and its multilingual correspondence here.
 | Content-addressed | 内容寻址     |
 | Content identity  | 内容身份     |
 | Provenance hash   | 来源哈希     |
+| Explain protocol  | 解释协议     |
 | Diagnostic        | 诊断         |
 | HoleReport        | 洞报告       |
+| Repair hint       | 修复提示     |
 | Dependency        | 依赖         |
 | Checker           | 检查器       |
 
@@ -58,6 +63,12 @@ update both its glossary definition and its multilingual correspondence here.
 **Claim** (SEP-0006): Internal compiler representation derived from a source `properties` item.
 
 **Content-addressed package** (SEP-0008): Package identified by hashes of normalized signatures, intents, properties, realizations, evidence, and dependency inputs.
+
+**ConceptDoc** (SEP-0010): Machine-readable record that explains one Spore concept for `spore explain`, diagnostics, LSP, and Agent tooling.
+
+**Concept ref** (SEP-0010): Stable concept id attached to a diagnostic, HoleReport projection, or explain response.
+
+**ConceptRegistry** (SEP-0010): Ordered collection of `ConceptDoc` records plus schema identity.
 
 ## D
 
@@ -88,6 +99,8 @@ update both its glossary definition and its multilingual correspondence here.
 **EvidenceRecord** (SEP-0006): Machine payload containing subject, claim, checker, result, and provenance hash data.
 
 **Evidence hash** (SEP-0008): Hash of the evidence records selected by a package or publication policy.
+
+**Explain protocol** (SEP-0010): CLI and JSON contract for resolving diagnostic codes, language concepts, and surface symbols into compiler-owned concept docs.
 
 **`@export`** (SEP-0001, SEP-0008): Attribute marking a public Spore function as an outbound ABI surface, for example `@export("C")`.
 
@@ -154,6 +167,8 @@ update both its glossary definition and its multilingual correspondence here.
 **Realization hash** (SEP-0006, SEP-0008): Hash of a concrete completed body or generated artifact.
 
 **Refinement type** (SEP-0002): Type augmented with a predicate constraint.
+
+**Repair hint** (SEP-0010): Local diagnostic guidance that shows the smallest source shape or replacement likely to move the user forward.
 
 **`Result[T, E]`** (SEP-0009): Prelude type representing success (`Ok(T)`) or failure (`Err(E)`).
 
