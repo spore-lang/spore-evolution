@@ -66,7 +66,7 @@ Vec[Order, max: N]
 ```spore
 struct Point { x: I64, y: I64 }
 
-type Shape {
+enum Shape {
     Circle(I64),
     Rect(I64, I64),
 }
@@ -81,13 +81,17 @@ Traits define type interfaces:
 
 ```spore
 trait Display {
-    fn show(self) -> Str
+    fn show(self) -> Str;
 }
 
 fn to_string[T: Display](value: T) -> Str {
     value.show()
 }
 ```
+
+Inside trait and impl members, `self` is receiver shorthand for `self: Self`.
+It may only appear as the first parameter; receiver ownership refinements are
+outside this SEP.
 
 Multiple bounds use `+` inside the type parameter list:
 
@@ -211,6 +215,10 @@ unsatisfied trait obligations.
 Type diagnostics use `E0xxx` codes. Important categories include unknown type,
 return mismatch, unhandled error, missing trait implementation, unsatisfied
 refinement, and ambiguous hole type.
+
+A bodyless `type Name;` declaration without `@foreign` should produce a warning
+that asks the author to either mark the type as external (`@foreign type
+Name;`) or provide a real definition (`type Name = ...`).
 
 ## Drawbacks
 

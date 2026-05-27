@@ -1,4 +1,9 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 
 from __future__ import annotations
 
@@ -6,19 +11,18 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
-
-def iter_lines(paths: Iterable[Path]) -> Iterable[tuple[Path, int, str]]:
-    for path in sorted(paths):
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        for line_no, line in enumerate(text.splitlines(), start=1):
-            yield path, line_no, line
+from sep_common import (
+    GUIDING_QUESTIONS_HEADING,
+    GUIDING_QUESTIONS_LINK_FRAGMENT,
+    ROOT,
+    draft_markdown_files,
+    iter_markdown_lines,
+    relative_path,
+    report_errors,
+    sep_markdown_files,
+    template_markdown_files,
+    vision_files,
+)
 
 
 def add_pattern_errors(
@@ -27,17 +31,16 @@ def add_pattern_errors(
     pattern: re.Pattern[str],
     message: str,
 ) -> None:
-    for path, line_no, line in iter_lines(paths):
+    for path, line_no, line in iter_markdown_lines(paths):
         if pattern.search(line):
-            rel = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
-            errors.append(f"{rel}:{line_no}: {message}: {line.strip()}")
+            errors.append(f"{relative_path(path)}:{line_no}: {message}: {line.strip()}")
 
 
 def self_markdown_files() -> list[Path]:
     return [
         ROOT / "README.md",
         ROOT / "GLOSSARY.md",
-        *sorted((ROOT / "seps").glob("*.md")),
+        *sep_markdown_files(),
     ]
 
 
@@ -45,37 +48,19 @@ def user_facing_markdown_files() -> list[Path]:
     return [
         ROOT / "README.md",
         ROOT / "GLOSSARY.md",
-        *VISION_FILES,
-        *sorted((ROOT / "seps").glob("*.md")),
-        *sorted((ROOT / "drafts").glob("*.md")),
-        *sorted((ROOT / "templates").glob("*.md")),
+        *vision_files(),
+        *sep_markdown_files(),
+        *draft_markdown_files(),
+        *template_markdown_files(),
     ]
-
-
-GUIDING_QUESTIONS_HEADING = "## Guiding questions for every design decision"
-GUIDING_QUESTIONS_LINK_FRAGMENT = (
-    "SEP-0000-process.md#guiding-questions-for-every-design-decision"
-)
-VISION_FILES = sorted(ROOT.glob("VISION*.md"))
 
 
 def files_outside_sep_0000() -> list[Path]:
     return [
         path
-        for path in [
-            ROOT / "README.md",
-            ROOT / "VISION.md",
-            ROOT / "GLOSSARY.md",
-            *sorted((ROOT / "seps").glob("*.md")),
-            *sorted((ROOT / "drafts").glob("*.md")),
-            *sorted((ROOT / "templates").glob("*.md")),
-        ]
+        for path in user_facing_markdown_files()
         if path.name != "SEP-0000-process.md"
     ]
-
-
-def template_files() -> list[Path]:
-    return sorted((ROOT / "templates").glob("*.md"))
 
 
 def main() -> int:
@@ -166,36 +151,32 @@ def main() -> int:
     )
     add_pattern_errors(
         errors,
-        VISION_FILES,
+        vision_files(),
         re.compile(r"^## (?:Recommended syntax shape|推荐语法)"),
         "vision documents should stay principle-level; syntax shape belongs in concrete SEPs",
     )
     add_pattern_errors(
         errors,
-        VISION_FILES,
+        vision_files(),
         re.compile(r"^## (?:Guiding questions\b|.*引导问题)"),
         "vision documents should stay principle-level; guiding questions belong in SEP-0000",
     )
 
-    for template in template_files():
+    for template in template_markdown_files():
         if not template.is_file():
             continue
         text = template.read_text(encoding="utf-8")
         if GUIDING_QUESTIONS_LINK_FRAGMENT not in text:
-            rel = template.relative_to(ROOT)
             errors.append(
-                f"{rel}: must link to `{GUIDING_QUESTIONS_LINK_FRAGMENT}` so authors "
+                f"{relative_path(template)}: must link to `{GUIDING_QUESTIONS_LINK_FRAGMENT}` so authors "
                 "find the canonical guiding-question section in SEP-0000"
             )
 
-    if errors:
-        print("Surface consistency check failed:")
-        for error in errors:
-            print(f"- {error}")
-        return 1
-
-    print("Surface consistency check passed.")
-    return 0
+    return report_errors(
+        errors,
+        "Surface consistency check failed",
+        success_message="Surface consistency check passed.",
+    )
 
 
 if __name__ == "__main__":

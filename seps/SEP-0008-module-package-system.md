@@ -59,9 +59,9 @@ import platform.console as console
 ### Visibility
 
 ```spore
-pub fn public_api() -> () { return }
-pub(pkg) fn package_helper() -> () { return }
-fn private_helper() -> () { return }
+pub fn public_api() -> () { () }
+pub(pkg) fn package_helper() -> () { () }
+fn private_helper() -> () { () }
 ```
 
 ### Platform packages
@@ -76,6 +76,30 @@ uses [Console, Exit]
     ?main_body
 }
 ```
+
+### Foreign linkage and exports
+
+Platform-facing declarations use attributes rather than dedicated keywords:
+
+```spore
+@foreign("ssl", name = "SSL_new")
+fn ssl_new() -> Ptr[SSL]
+uses [Native];
+
+@foreign
+type Map[K, V];
+
+@export("C")
+pub fn score(raw: I64) -> F64 {
+    raw.to_f64() / 100.0
+}
+```
+
+`@foreign` marks declarations whose implementation or representation is supplied
+by the selected Platform or host environment. `@export("C")` marks a public
+Spore function as an outbound ABI surface. Source-level linkage metadata is the
+canonical declaration site; manifests may refine platform-specific build details
+but should not replace source annotations.
 
 ### Package provenance
 
@@ -123,6 +147,38 @@ A selected Platform declares the accepted startup function shape, required
 runtime handlers, and host adapter. The compiler verifies the application entry
 against that contract.
 
+### Foreign linkage and export attributes
+
+`@foreign` is valid on bodyless function declarations and bodyless type
+declarations. On functions, an optional first positional string identifies the
+link target or provider, and `name = "..."` optionally overrides the external
+symbol name:
+
+```spore
+@foreign("ssl", name = "SSL_new")
+fn ssl_new() -> Ptr[SSL]
+uses [Native];
+```
+
+A bare `@foreign` delegates symbol resolution to the selected Platform package:
+
+```spore
+@foreign
+fn read_file(path: Path) -> Str ! IoError
+uses [FileRead];
+```
+
+`@foreign` on a type declaration marks the representation as external:
+
+```spore
+@foreign
+type Map[K, V];
+```
+
+`@export("C")` is valid on `pub fn` declarations with a body. SEP-0008 only
+standardizes the `"C"` ABI string. Future ABIs may extend this set without
+changing SEP-0001 grammar.
+
 ### Holes and packages
 
 A package may contain holes during development. Public release policies may
@@ -168,6 +224,10 @@ Module diagnostics use `M0xxx` codes:
 | `M0402` | evidence-missing          | Required evidence record is absent                |
 | `M0501` | platform-binding-conflict | More than one Platform binding selected           |
 | `M0502` | startup-contract-mismatch | Entry function does not satisfy Platform contract |
+| `M0601` | invalid-foreign-target    | `@foreign` attached to an unsupported declaration |
+| `M0602` | foreign-body-present      | `@foreign` function unexpectedly has a body       |
+| `M0603` | unsupported-export-abi    | `@export` ABI string is not supported             |
+| `M0604` | foreign-symbol-unresolved | Foreign symbol or link target cannot be resolved  |
 
 ## Drawbacks
 
@@ -192,10 +252,19 @@ properties, realizations, evidence, or dependencies.
 
 Rejected because file paths are already the package structure source of truth.
 
+### Link metadata only in manifests
+
+Rejected as the primary mechanism because it separates a foreign declaration
+from its linkage intent, makes symbol-to-library provenance harder to review,
+and weakens library self-containment. Manifest data may still refine
+platform-specific build settings.
+
 ## Prior art
 
 Unison and Nix influenced content addressing. Cargo and Go modules influenced
 lock data and reproducible dependency review. Roc influenced Platform packages.
+Rust influenced ABI export and linker metadata conventions. Kotlin, Swift, and
+Java influenced attribute-style metadata surfaces.
 
 ## Backward compatibility and migration
 

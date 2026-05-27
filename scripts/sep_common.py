@@ -1,24 +1,113 @@
 from __future__ import annotations
 
+import json
 import re
+import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SEPS_DIR = ROOT / "seps"
+DRAFTS_DIR = ROOT / "drafts"
+TEMPLATES_DIR = ROOT / "templates"
+SCHEMAS_DIR = ROOT / "schemas"
+FRONTMATTER_SCHEMA_PATH = SCHEMAS_DIR / "sep-frontmatter.schema.json"
 INDEX_PATH = ROOT / "seps-index.json"
 INDEX_VERSION = 1
-INDEX_FIELDS = (
-    "sep",
-    "title",
-    "status",
-    "type",
-    "authors",
-    "created",
-    "requires",
-    "discussion",
-    "pr",
-    "superseded_by",
+
+GUIDING_QUESTIONS_HEADING = "## Guiding questions for every design decision"
+GUIDING_QUESTIONS_LINK_FRAGMENT = (
+    "SEP-0000-process.md#guiding-questions-for-every-design-decision"
 )
+
+
+def load_json(path: Path) -> tuple[object | None, str | None]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), None
+    except OSError as exc:
+        return None, f"{path}: failed to read JSON file ({exc})"
+    except json.JSONDecodeError as exc:
+        return (
+            None,
+            f"{path}: invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+        )
+
+
+def frontmatter_index_fields() -> tuple[str, ...]:
+    schema, error = load_json(FRONTMATTER_SCHEMA_PATH)
+    if error is not None:
+        raise ValueError(error)
+    if not isinstance(schema, dict):
+        raise ValueError(f"{FRONTMATTER_SCHEMA_PATH}: schema must be a JSON object")
+
+    required = schema.get("required")
+    if not isinstance(required, list) or not required:
+        raise ValueError(f"{FRONTMATTER_SCHEMA_PATH}: `required` must be a non-empty array")
+
+    return tuple(str(field) for field in required)
+
+
+INDEX_FIELDS = frontmatter_index_fields()
+
+
+def report_errors(errors: list[str], title: str, *, success_message: str | None = None) -> int:
+    if errors:
+        print(f"{title}:\n", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+
+    if success_message is not None:
+        print(success_message)
+    return 0
+
+
+def iter_markdown_lines(
+    paths: Iterable[Path],
+) -> Iterable[tuple[Path, int, str]]:
+    for path in sorted(paths):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            yield path, line_no, line
+
+
+def relative_path(path: Path) -> Path:
+    return path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+
+
+def vision_files() -> list[Path]:
+    return sorted(ROOT.glob("VISION*.md"))
+
+
+def numbered_sep_files() -> list[Path]:
+    return sorted(SEPS_DIR.glob("SEP-*.md"))
+
+
+def sep_markdown_files() -> list[Path]:
+    return sorted(SEPS_DIR.glob("*.md"))
+
+
+def draft_markdown_files() -> list[Path]:
+    return sorted(DRAFTS_DIR.glob("*.md"))
+
+
+def template_markdown_files() -> list[Path]:
+    return sorted(TEMPLATES_DIR.glob("*.md"))
+
+
+def discover_markdown_files() -> list[Path]:
+    return sorted(
+        path
+        for directory in (DRAFTS_DIR, SEPS_DIR)
+        for path in directory.rglob("*.md")
+        if path.name != "README.md"
+    )
 
 
 @dataclass(frozen=True)
@@ -108,15 +197,6 @@ def headings(body: str) -> set[str]:
         if line.startswith("## "):
             found.add(line[3:].strip())
     return found
-
-
-def discover_markdown_files() -> list[Path]:
-    return sorted(
-        path
-        for directory in (ROOT / "drafts", ROOT / "seps")
-        for path in directory.rglob("*.md")
-        if path.name != "README.md"
-    )
 
 
 def load_documents() -> tuple[list[SepDocument], list[str]]:

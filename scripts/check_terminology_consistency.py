@@ -1,18 +1,21 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 
 from __future__ import annotations
 
 import re
-import sys
 
-from sep_common import ROOT
+from sep_common import ROOT, numbered_sep_files, relative_path, report_errors, vision_files
 
 TARGETS = (
     ROOT / "README.md",
-    ROOT / "VISION.md",
-    ROOT / "VISION.zh-CN.md",
+    *vision_files(),
     ROOT / "GLOSSARY.md",
-    *sorted((ROOT / "seps").glob("SEP-*.md")),
+    *numbered_sep_files(),
 )
 
 FORBIDDEN_PATTERNS = (
@@ -95,17 +98,14 @@ def main() -> int:
             for pattern, message in FORBIDDEN_PATTERNS:
                 if pattern.search(line):
                     violations.append(
-                        f"{path.relative_to(ROOT)}:{line_number}: {message}\n    {line}"
+                        f"{relative_path(path)}:{line_number}: {message}\n    {line}"
                     )
 
-    if violations:
-        print("Terminology consistency check failed:\n", file=sys.stderr)
-        for violation in violations:
-            print(f"- {violation}", file=sys.stderr)
-        return 1
-
-    print("Terminology consistency check passed.")
-    return 0
+    return report_errors(
+        violations,
+        "Terminology consistency check failed",
+        success_message="Terminology consistency check passed.",
+    )
 
 
 if __name__ == "__main__":

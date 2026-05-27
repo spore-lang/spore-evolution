@@ -1,17 +1,32 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "check-jsonschema",
+# ]
+# ///
 
 from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from sep_common import ROOT, SepDocument, headings, load_documents
+from sep_common import (
+    FRONTMATTER_SCHEMA_PATH,
+    GUIDING_QUESTIONS_HEADING,
+    ROOT,
+    SepDocument,
+    extract_front_matter,
+    headings,
+    load_documents,
+    parse_front_matter,
+    report_errors,
+)
 
-SCHEMA_PATH = ROOT / "schemas" / "sep-frontmatter.schema.json"
+SCHEMA_PATH = FRONTMATTER_SCHEMA_PATH
 
 REQUIRED_SECTIONS = {
     "Standards Track": [
@@ -52,7 +67,6 @@ REQUIRED_SECTIONS = {
     ],
 }
 
-GUIDING_QUESTIONS_HEADING = "## Guiding questions for every design decision"
 EXECUTIVE_SUMMARY_PREFIX = "> **Executive Summary**:"
 EXECUTIVE_SUMMARY_TEXT_PREFIX = "**Executive Summary**:"
 
@@ -89,10 +103,6 @@ def validate_front_matter_schema(
     if not documents:
         return
 
-    if shutil.which("uvx") is None:
-        errors.append("`uvx` is required to run check-jsonschema")
-        return
-
     with TemporaryDirectory(prefix="sep-frontmatter-") as temp_dir:
         for document in documents:
             temp_path = Path(temp_dir) / document.relative_path.with_suffix(".yaml")
@@ -101,9 +111,6 @@ def validate_front_matter_schema(
 
             result = subprocess.run(
                 [
-                    "uvx",
-                    "--from",
-                    "check-jsonschema",
                     "check-jsonschema",
                     "--schemafile",
                     str(SCHEMA_PATH),
@@ -244,8 +251,6 @@ def extract_status_from_git(ref: str, relative_path: Path) -> str | None:
         return None
 
     try:
-        from sep_common import extract_front_matter, parse_front_matter
-
         raw_front_matter, _ = extract_front_matter(result.stdout, relative_path)
         meta = parse_front_matter(raw_front_matter, relative_path)
     except ValueError:
@@ -358,10 +363,7 @@ def main() -> int:
                 seen_numbers[sep_number] = document.path
 
     if errors:
-        print("SEP validation failed:\n", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
-        return 1
+        return report_errors(errors, "SEP validation failed")
 
     print(f"Validated {len(documents)} SEP documents successfully.")
     return 0

@@ -33,6 +33,10 @@ platform needs:
 Routine operations do not carry explicit budgets unless realization shape is
 part of the contract.
 
+The snippets in this SEP are standard-library surface sketches. A signature that
+omits a body states an API item the standard library must provide; it is not a
+requirement that this SEP spell out the implementation body.
+
 ## Motivation
 
 The standard library should demonstrate the idiomatic signature model: compact Base
@@ -44,32 +48,32 @@ that users rely on.
 ### Option
 
 ```spore
-type Option[T] {
+enum Option[T] {
     Some(T),
     None,
 }
 
 impl[T] Option[T] {
-    fn map[U](self, f: Fn[T, U]) -> Option[U]
-    fn unwrap_or(self, default: T) -> T
-    fn is_some(self) -> Bool
-    fn is_none(self) -> Bool
+    fn map[U](self, f: Fn[T, U]) -> Option[U];
+    fn unwrap_or(self, default: T) -> T;
+    fn is_some(self) -> Bool;
+    fn is_none(self) -> Bool;
 }
 ```
 
 ### Result
 
 ```spore
-type Result[T, E] {
+enum Result[T, E] {
     Ok(T),
     Err(E),
 }
 
 impl[T, E] Result[T, E] {
-    fn map[U](self, f: Fn[T, U]) -> Result[U, E]
-    fn map_err[F](self, f: Fn[E, F]) -> Result[T, F]
-    fn is_ok(self) -> Bool
-    fn is_err(self) -> Bool
+    fn map[U](self, f: Fn[T, U]) -> Result[U, E];
+    fn map_err[F](self, f: Fn[E, F]) -> Result[T, F];
+    fn is_ok(self) -> Bool;
+    fn is_err(self) -> Bool;
 }
 ```
 
@@ -80,30 +84,36 @@ carry compile-time index information when APIs need a static size parameter.
 
 ```spore
 trait Len {
-    fn len(self) -> I64
+    fn len(self) -> I64;
 }
 
 impl[T] Len for List[T] {
-    fn len(self) -> I64
+    fn len(self) -> I64;
 }
 ```
 
 ### Maps and sets
 
+The standard library must provide abstract `Map[K, V]` and `Set[T]` types. This
+SEP specifies their surface, not their representation.
+
 ```spore
-type Map[K, V]
-type Set[T]
+@foreign
+type Map[K, V];
+
+@foreign
+type Set[T];
 
 impl[K: Eq + Hash, V] Map[K, V] {
-    fn empty() -> Map[K, V]
-    fn get(self, key: K) -> Option[V]
-    fn insert(self, key: K, value: V) -> Map[K, V]
-    fn contains_key(self, key: K) -> Bool
+    fn empty() -> Map[K, V];
+    fn get(self, key: K) -> Option[V];
+    fn insert(self, key: K, value: V) -> Map[K, V];
+    fn contains_key(self, key: K) -> Bool;
 }
 
 impl[T: Eq + Hash] Set[T] {
-    fn empty() -> Set[T]
-    fn contains(self, item: T) -> Bool
+    fn empty() -> Set[T];
+    fn contains(self, item: T) -> Bool;
 }
 ```
 
@@ -140,8 +150,8 @@ the correct operation.
 All standard-library generic bounds are written in type parameter lists:
 
 ```spore
-fn to_debug_string[T: Debug](value: T) -> Str
-fn contains[T: Eq](xs: List[T], value: T) -> Bool
+fn to_debug_string[T: Debug](value: T) -> Str;
+fn contains[T: Eq](xs: List[T], value: T) -> Bool;
 ```
 
 ### Effects
@@ -149,8 +159,9 @@ fn contains[T: Eq](xs: List[T], value: T) -> Bool
 Platform functions declare effects through `uses`:
 
 ```spore
-foreign fn read_file(path: Path) -> Str ! IoError
-uses [FileRead]
+@foreign
+fn read_file(path: Path) -> Str ! IoError
+uses [FileRead];
 ```
 
 ### Budgets

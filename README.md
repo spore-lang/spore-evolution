@@ -31,22 +31,12 @@ integers and **`F64`** for floats; UTF-8 text is **`Str`**; the unit surface typ
 is **`()`**. SEP-0002 owns the full type-system rules and metavariables for
 other fixed widths.
 
-## SEP status
+## SEP index
 
-| SEP                                                | Title                                  | Status   | Role                                                            |
-| -------------------------------------------------- | -------------------------------------- | -------- | --------------------------------------------------------------- |
-| [SEP-0000](seps/SEP-0000-process.md)               | Spore Evolution Proposal Process       | Accepted | Repository process and lifecycle                                |
-| [SEP-0001](seps/SEP-0001-core-syntax.md)           | Core Syntax & Signatures               | Draft    | Root surface grammar and signature layout                       |
-| [SEP-0002](seps/SEP-0002-type-system.md)           | Type System                            | Draft    | Type semantics, inline generic bounds, and callable boundaries  |
-| [SEP-0003](seps/SEP-0003-effect-system.md)         | Effect System                          | Draft    | Effects inside the `uses` effect surface                        |
-| [SEP-0004](seps/SEP-0004-cost-analysis.md)         | Budget Constraints & Realization Shape | Draft    | Quantitative realization-shape budgets                          |
-| [SEP-0005](seps/SEP-0005-hole-system.md)           | Hole System & Agent Protocol           | Draft    | Typed absence and agent-facing reports                          |
-| [SEP-0006](seps/SEP-0006-compiler-architecture.md) | Compiler Architecture                  | Draft    | Compiler pipeline, properties, claims, and evidence records     |
-| [SEP-0007](seps/SEP-0007-concurrency-model.md)     | Concurrency Model                      | Draft    | Structured concurrency semantics under effect and budget checks |
-| [SEP-0008](seps/SEP-0008-module-package-system.md) | Module & Package System                | Draft    | Modules, manifests, platforms, packages, and provenance hashes  |
-| [SEP-0009](seps/SEP-0009-standard-library.md)      | Standard Library Surface               | Draft    | Prelude, core modules, and platform libraries                   |
-
-The generated machine-readable index is [`seps-index.json`](seps-index.json).
+The canonical machine-readable SEP index is [`seps-index.json`](seps-index.json).
+It is generated from document front matter and lists each proposal's title,
+status, type, dependencies, and source path. Numbered proposals live under
+[`seps/`](seps/).
 
 ## Reading path
 
@@ -59,7 +49,7 @@ in dependency order:
    questions used in review.
 2. [SEP-0001](seps/SEP-0001-core-syntax.md) for draft root syntax forms.
 3. [SEP-0002](seps/SEP-0002-type-system.md) through [SEP-0004](seps/SEP-0004-cost-analysis.md) for core static semantics.
-4. [SEP-0005](seps/SEP-0005-hole-system.md) and [SEP-0006](seps/SEP-0006-compiler-architecture.md) for tool and compiler surfaces.
+4. [SEP-0005](seps/SEP-0005-hole-system.md) and [SEP-0006](seps/SEP-0006-compiler-architecture.md) for hole and compiler surfaces.
 5. [SEP-0007](seps/SEP-0007-concurrency-model.md) through [SEP-0009](seps/SEP-0009-standard-library.md) for larger system layers.
 
 Use [GLOSSARY.md](GLOSSARY.md) when checking cross-SEP terminology.
@@ -70,7 +60,7 @@ Use [GLOSSARY.md](GLOSSARY.md) when checking cross-SEP terminology.
 - `seps/` - numbered SEP documents and historical process records
 - `templates/` - authoring templates for new proposals
 - `schemas/` - machine-readable rules for SEP metadata and shared contracts
-- `scripts/` - repository validation and automation helpers
+- `scripts/` - uv-managed validation scripts; run `check_repo.py` for the full suite
 
 ## Authoring
 
@@ -92,10 +82,16 @@ matching template:
 Run the repository checks before opening a PR:
 
 ```bash
-uv run scripts/validate_sep_documents.py
+uv run scripts/check_repo.py
+```
+
+Individual checks remain available for targeted runs:
+
+```bash
 uv run scripts/check_sep_index.py
-uv run scripts/check_terminology_consistency.py
+uv run scripts/validate_sep_documents.py
 uv run scripts/check_contract_schemas.py
+uv run scripts/check_terminology_consistency.py
 uv run scripts/check_surface_consistency.py
 ```
 

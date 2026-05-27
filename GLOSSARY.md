@@ -41,7 +41,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Atomic effect** (SEP-0003): One of the built-in effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit.
 
-**`await`** (SEP-0007): Expression that blocks until a `Task[T]` completes and extracts its result value of type `T`.
+**`await`** (SEP-0007): Expression that blocks until a `Task[T, E]` completes, extracts its result value of type `T`, and reintroduces error boundary `E`.
 
 ## B
 
@@ -81,7 +81,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Effect surface** (SEP-0001, SEP-0003): The `uses [...]` list attached to an intent signature. SEP-0003 defines the accepted effect names, aliases, handlers, and checking rules.
 
-**Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant(T) }`.
+**Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `enum Name { Variant(T) }`.
 
 **Evidence** (SEP-0006): Generated checked record of what held for a concrete realization.
 
@@ -89,9 +89,11 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Evidence hash** (SEP-0008): Hash of the evidence records selected by a package or publication policy.
 
+**`@export`** (SEP-0001, SEP-0008): Attribute marking a public Spore function as an outbound ABI surface, for example `@export("C")`.
+
 ## F
 
-**`foreign fn`** (SEP-0008): Function declaration whose implementation is provided by the platform rather than written in Spore.
+**`@foreign`** (SEP-0001, SEP-0008): Attribute marking a function or type as externally provided. On functions it may also carry linkage metadata such as `@foreign("ssl", name = "SSL_new")`.
 
 ## G
 
@@ -161,7 +163,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Signature hash** (SEP-0006, SEP-0008): Hash of the normalized Base Signature that participates in dependency tracking.
 
-**`spawn`** (SEP-0007): Expression that creates a scoped `Task[T]`, requiring the `Spawn` effect.
+**`spawn`** (SEP-0007): Expression that creates a scoped `Task[T, E]`, requiring the `Spawn` effect.
 
 **spore** (SEP-0006, SEP-0008): Project and package workflow CLI.
 
@@ -177,7 +179,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## T
 
-**Task[T]** (SEP-0007): Typed future representing an asynchronous computation.
+**Task[T, E]** (SEP-0007): Typed future representing an asynchronous computation with success type `T` and await-time error boundary `E`.
 
 **Typed hole** (SEP-0005): See Hole.
 

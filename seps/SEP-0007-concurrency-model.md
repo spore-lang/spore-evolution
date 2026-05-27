@@ -30,6 +30,7 @@ Spore provides structured concurrency primitives:
 - `spawn { ... }`
 - `task.await`
 - `select { ... }`
+- `Task[T, E]`
 - `Channel[T]`
 
 A concurrent function declares the required effects and may constrain its
@@ -118,8 +119,10 @@ can bound effect operation sites performed by concurrent branches.
 
 ### Type rule for tasks
 
-If expression `e` checks as `T ! E`, then `spawn { e }` checks as `Task[T]` and
-awaiting it reintroduces the child error boundary at the await site.
+If expression `e` checks as `T ! E`, then `spawn { e }` checks as `Task[T, E]`.
+Awaiting a `Task[T, E]` yields `T` and reintroduces `E` at the await site. A
+non-throwing spawned expression uses the empty error boundary, represented as
+`Task[T, Never]`.
 
 ### Determinism and properties
 

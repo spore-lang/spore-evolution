@@ -1,4 +1,9 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ import argparse
 import json
 import sys
 
-from sep_common import INDEX_PATH, build_sep_index, load_documents
+from sep_common import INDEX_PATH, build_sep_index, load_documents, report_errors
 
 
 def expected_index_text() -> tuple[str, list[str]]:
@@ -29,10 +34,7 @@ def main() -> int:
 
     expected, errors = expected_index_text()
     if errors:
-        print("SEP index generation failed:\n", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
-        return 1
+        return report_errors(errors, "SEP index generation failed")
 
     current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.exists() else None
 

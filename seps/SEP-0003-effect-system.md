@@ -25,7 +25,7 @@ function lists required effects in `uses [...]`:
 
 ```spore
 effect Console {
-    fn println(msg: Str) -> ()
+    fn println(msg: Str) -> ();
 }
 
 fn greet(name: Str) -> ()
@@ -54,11 +54,11 @@ requirements in `properties`.
 
 ```spore
 effect FileRead {
-    fn read(path: Path) -> Str ! IoError
+    fn read(path: Path) -> Str ! IoError;
 }
 
 effect Clock {
-    fn now() -> Instant
+    fn now() -> Instant;
 }
 ```
 
