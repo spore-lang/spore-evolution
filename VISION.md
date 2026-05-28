@@ -20,8 +20,9 @@ Signature -> Property -> Hole -> Realization -> Evidence
 A signature has two layers.
 
 The **Base Signature** is the callable type boundary: name, type parameters and
-inline bounds, value parameters, return type, and error boundary. It defines
-the possible implementation space without fixing any particular member of it.
+inline bounds, value parameters, and result type (including any outcome
+boundary). It defines the possible implementation space without fixing any
+particular member of it.
 
 The **Intent Signature** adds the constraints that guide reviewers, tools, and
 Agents: effect surface, realization-shape budget, and properties. Budgets

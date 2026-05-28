@@ -16,6 +16,7 @@ update both its glossary definition and its multilingual correspondence here.
 | Signature         | 签名         |
 | Base Signature    | 基础签名     |
 | Intent Signature  | 意图签名     |
+| Outcome           | 结果         |
 | Property          | 性质         |
 | Hole              | 洞           |
 | Typed absence     | 有类型的缺失 |
@@ -44,13 +45,13 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## A
 
-**Atomic effect** (SEP-0003): One of the built-in effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit.
+**Atomic effect** (SEP-0003): A single effect protocol declared with `effect Name { ... }`, as opposed to a reusable surface declaration.
 
-**`await`** (SEP-0007): Expression that blocks until a `Task[T, E]` completes, extracts its result value of type `T`, and reintroduces error boundary `E`.
+**`await`** (SEP-0007): Expression that blocks until a `Task[T, E]` completes, extracts its success value of type `T`, and reintroduces failure type `E` at the await site.
 
 ## B
 
-**Base Signature** (SEP-0001): The callable boundary made of function name, type parameters, parameter types, return type, and error boundary. It defines possible implementation space.
+**Base Signature** (SEP-0001): The callable boundary made of function name, type parameters, parameter types, and result type (including any outcome boundary). It defines possible implementation space.
 
 **Bidirectional inference** (SEP-0002): Type inference strategy combining synthesis from expressions and checking against expected types.
 
@@ -80,9 +81,9 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## E
 
-**Effect** (SEP-0003): Observable interaction with the outside world that must be declared in a `uses [...]` effect surface.
+**Effect** (SEP-0003): Observable interaction with the outside world that must be declared in a `uses` effect surface.
 
-**Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written with `|`.
+**Effect surface declaration** (SEP-0003): A named reusable surface written as `surface Name = [EffectA, EffectB]`.
 
 **Effect context** (SEP-0005): The declared effects, expanded effect set, active handlers, and discharged effects visible at a hole or realization candidate.
 
@@ -90,7 +91,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Effect set** (SEP-0003): Unordered collection of effects associated with a function or scope.
 
-**Effect surface** (SEP-0001, SEP-0003): The `uses [...]` list attached to an intent signature. SEP-0003 defines the accepted effect names, aliases, handlers, and checking rules.
+**Effect surface** (SEP-0001, SEP-0003): The `uses` surface expression attached to an intent signature. SEP-0003 defines the accepted effect names, surface declarations, handlers, and checking rules.
 
 **Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `enum Name { Variant(T) }`.
 
@@ -168,13 +169,13 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Refinement type** (SEP-0002): Type augmented with a predicate constraint.
 
-**Repair hint** (SEP-0010): Local diagnostic guidance that shows the smallest source shape or replacement likely to move the user forward.
-
-**`Result[T, E]`** (SEP-0009): Prelude type representing success (`Ok(T)`) or failure (`Err(E)`).
+**Outcome** (SEP-0002): First-class result type written as `A ! E`, representing success `A` or failure `E`.
 
 ## S
 
 **Signature** (SEP-0001): The combination of Base Signature and optional Intent Signature.
+
+**Surface** (SEP-0003): Finite, unordered effect requirement set used by `uses` and named by `surface` declarations.
 
 **Signature hash** (SEP-0006, SEP-0008): Hash of the normalized Base Signature that participates in dependency tracking.
 
@@ -194,13 +195,13 @@ update both its glossary definition and its multilingual correspondence here.
 
 ## T
 
-**Task[T, E]** (SEP-0007): Typed future representing an asynchronous computation with success type `T` and await-time error boundary `E`.
+**Task[T, E]** (SEP-0007): Typed future representing an asynchronous computation with success type `T` and await-time failure type `E`.
 
 **Typed hole** (SEP-0005): See Hole.
 
 ## U
 
-**uses clause** (SEP-0001, SEP-0003): Signature clause declaring effect names, written as `uses [Name1, Name2]`.
+**uses clause** (SEP-0001, SEP-0003): Signature clause declaring an effect surface expression, written as `uses [Name1, Name2]` or `uses SurfaceName`.
 
 ## V
 

@@ -16,12 +16,12 @@ superseded_by: null
 
 # SEP-0003: Effect System
 
-> **Executive Summary**: Defines the signature model's `uses [...]` effect surface. SEP-0003 owns effect declarations, handlers, alias expansion, and effect checking. Non-effect constraints belong to `budget`, `properties`, or future tooling metadata rather than `uses`.
+> **Executive Summary**: Defines the signature model's `uses` effect surface. SEP-0003 owns atomic effect declarations, surface declarations, handlers, surface expansion, and effect checking. Non-effect constraints belong to `budget`, `properties`, or future tooling metadata rather than `uses`.
 
 ## Summary
 
 Spore effects describe observable interactions with the outside world. A
-function lists required effects in `uses [...]`:
+function lists its ambient effect surface in `uses`:
 
 ```spore
 effect Console {
@@ -35,8 +35,9 @@ uses [Console]
 }
 ```
 
-`uses` is an effect surface. Every name in `uses [...]` must resolve to an effect
-or to an alias that expands to effects.
+`uses` is an effect surface. Every item in a `uses` surface expression must
+resolve to an atomic effect or to a named surface that expands to atomic
+effects.
 
 ## Motivation
 
@@ -73,33 +74,41 @@ uses [FileRead]
 ```
 
 The body may only perform effects included in the declared effect surface or
-provided by a narrower local handler context.
+provided by a narrower local handler context. Effect operations are addressed by
+qualified names such as `Console.println` or `FileRead.read`.
 
-### Effect aliases
+### Surface declarations
 
 ```spore
-effect CliIO = Console | FileRead | FileWrite
+surface CliIO = [Console, FileRead, FileWrite]
 
 fn run(path: Path) -> () ! IoError
 uses [CliIO]
 {
     ?run_body
 }
+
+fn app(path: Path) -> () ! IoError
+uses [CliIO, Clock]
+{
+    ?app_body
+}
 ```
 
-Aliases expand to sets of atomic effects.
+Surfaces expand to finite sets of atomic effects. They are not sum types,
+logical OR, or error unions.
 
 ### Handlers
 
 ```spore
-handler MockConsole for Console {
-    fn println(msg: Str) -> () { self.output.push(msg) }
+handler MockIO for [Console] {
+    fn Console.println(msg: Str) -> () { self.output.push(msg) }
 }
 
 handle {
     greet("spore")
 } with {
-    use MockConsole { output: [] }
+    use MockIO { output: [] }
 }
 ```
 
@@ -117,21 +126,24 @@ metadata, or future tooling metadata owned by a separate SEP.
 
 Each checked body has an available effect set `E_available`. A `perform`
 operation requiring effect `E` is valid when `E` is in the available set after
-alias expansion and local handler narrowing.
+surface expansion and local handler narrowing.
 
-### Effect resolution
+### Surface resolution
 
-The compiler resolves names in `uses [...]` into:
+The compiler resolves names in a `uses` surface expression into:
 
-- effects owned by this SEP;
-- aliases that expand to effects.
+- atomic effects owned by this SEP;
+- named surfaces that expand to atomic effects.
 
-Unknown names are diagnostics.
+Unknown names are diagnostics. Surface expansion is unordered, duplicate-free,
+and recursive cycles are diagnostics.
 
 ### Handler checking
 
-A handler must implement every operation of the effect it handles. Handler
-methods use ordinary function typing and may declare their own required effects.
+A handler targets a surface expression and must implement every operation of the
+atomic effects it claims to discharge. Handler methods name operations with a
+qualified identifier such as `Console.println`. Handler methods use ordinary
+function typing and may declare their own required effects.
 
 ### Interaction with properties
 
@@ -156,7 +168,7 @@ Effect checking emits normalized effect metadata:
 
 ```text
 EffectContext
-├── declared[]
+├── declared_surface
 ├── expanded_effects[]
 ├── active_handlers[]
 └── discharged_effects[]
@@ -176,9 +188,11 @@ Effect diagnostics use `F0xxx` codes:
 
 ## Drawbacks
 
-Tools that need non-effect guidance require a separate surface rather than
-piggybacking on `uses [...]`. The benefit is that the language effect model stays
-clear and handler checking remains local.
+Using a separate `surface` declaration adds one more noun to the language.
+That cost is acceptable because it keeps `effect` for atomic protocols and keeps
+`uses` free of overloaded `|` syntax. Tools that need non-effect guidance still
+require a separate surface rather than piggybacking on `uses`. The benefit is
+that the language effect model stays clear and handler checking remains local.
 
 ## Alternatives considered
 
@@ -200,13 +214,15 @@ effects.
 
 ## Backward compatibility and migration
 
-Existing effect declarations stay conceptually valid. Signatures that used
-`uses [...]` for effects continue to map directly. Non-effect names that were
-previously placed in `uses [...]` should move to properties, package metadata, or
-a future tooling surface.
+Existing atomic effect declarations stay conceptually valid. Legacy effect-alias
+forms such as `effect IO = A | B` should migrate to `surface IO = [A, B]`.
+Signatures that used `uses [...]` for effects continue to map directly, though
+surface expressions may now mix atomic effects and named surfaces. Non-effect
+names that were previously placed in `uses` should move to properties, package
+metadata, or a future tooling surface.
 
 ## Unresolved questions
 
 1. Should effect names be partitioned by namespace?
-2. Should effect aliases be allowed to reference package-qualified effect names?
+2. Should named surfaces be allowed to reference package-qualified effect names?
 3. How much inferred purity and determinism data should be visible in normal diagnostics?

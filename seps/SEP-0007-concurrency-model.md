@@ -120,9 +120,9 @@ can bound effect operation sites performed by concurrent branches.
 ### Type rule for tasks
 
 If expression `e` checks as `T ! E`, then `spawn { e }` checks as `Task[T, E]`.
-Awaiting a `Task[T, E]` yields `T` and reintroduces `E` at the await site. A
-non-throwing spawned expression uses the empty error boundary, represented as
-`Task[T, Never]`.
+Awaiting a `Task[T, E]` yields `T` and reintroduces failure type `E` at the
+await site. A non-failing spawned expression uses the empty failure type,
+represented as `Task[T, Never]`.
 
 ### Determinism and properties
 
