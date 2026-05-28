@@ -20,8 +20,8 @@ superseded_by: null
 ## Summary
 
 Spore uses nominal-primary static typing with bidirectional inference inside
-function bodies. Function signatures are explicit: parameters, return type,
-error boundary, and type-parameter bounds are all written at the callable
+function bodies. Function signatures are explicit: parameters, result type,
+outcome boundary, and type-parameter bounds are all written at the callable
 boundary.
 
 ```spore
@@ -56,9 +56,15 @@ Composite types use square brackets:
 ```spore
 List[I64]
 Option[Str]
-Result[User, ParseError]
 Array[I64, N]
 Vec[Order, max: N]
+```
+
+Outcome types are first-class and use `!` inside the type surface:
+
+```spore
+User ! ParseError
+List[Config ! LoadError]
 ```
 
 ### Structs and variants
@@ -113,16 +119,29 @@ Refinement checking is staged: decidable checks happen during type checking,
 flow-sensitive propagation happens through abstract interpretation, and harder
 obligations become claims for the evidence layer.
 
-### Error boundaries
+### Outcome types
 
-Errors are part of the Base Signature:
+`A ! E` is a first-class outcome type. `A` is the success type and `E` is the
+failure type. Errors are ordinary values; multiple failure forms are modeled by
+ordinary `enum` types rather than inline unions:
 
 ```spore
+enum LoadError {
+    Io(IoError),
+    Parse(ParseError),
+}
+
 fn parse(input: Str) -> Config ! ParseError
+fn load(path: Path) -> Config ! LoadError
 ```
 
-A throwing callee must be covered by the caller's error boundary or handled
-inside the body.
+`Result[T, E]` is not part of the core type surface. Source programs use `A ! E`
+directly.
+
+`fail err` constructs a failure outcome. If `expr : A ! E`, then `expr?`
+eliminates the outcome at the expression site and propagates failures to the
+enclosing outcome boundary. Outcome matches use `ok` / `fail` patterns at the
+surface level.
 
 ### Holes
 
@@ -147,7 +166,7 @@ Core checking uses two judgments:
 Γ |- e <= T      expression checks against expected type T
 ```
 
-Function bodies are checked against the return type from the Base Signature.
+Function bodies are checked against the result type from the Base Signature.
 Holes are compatible with the expected type but recorded as incomplete terms.
 
 ### Inline bounds
@@ -171,10 +190,21 @@ let message = "ready";
 let count = 42;
 ```
 
-### Error-set typing
+### Outcome typing
 
-Error boundaries are canonicalized for comparison. A call is valid when the
-callee's possible errors are handled locally or included in the caller boundary.
+Outcome types are normalized into a pair:
+
+```text
+OutcomeType
+├── success_type
+└── failure_type
+```
+
+A call is valid when the callee's failure type is handled locally, propagated by
+`?`, or explicitly transformed into the caller's declared failure type. `fail e`
+checks against an expected outcome when `e` inhabits the failure type. Bare
+`A ! E ! F` is rejected without parentheses so `!` does not become an ambiguous
+chain operator.
 
 ### Refinement obligations
 
@@ -186,12 +216,12 @@ compiler can lower into a Claim for evidence processing.
 
 Inline bounds keep type requirements near the variables they constrain. The
 signature remains the place where readers learn what can be passed, returned, or
-raised.
+failed.
 
 ## Agent experience impact
 
 Agents receive precise expected types for holes and can filter candidate
-realizations by trait bounds, error boundaries, and visible bindings without
+realizations by trait bounds, outcome boundaries, and visible bindings without
 parsing prose.
 
 ## Structured representation / protocol impact
@@ -202,22 +232,23 @@ TypedHIR records:
 FunctionType
 ├── type_params[]
 ├── params[]
-├── return_type
-├── error_set[]
+├── result_type
+├── outcome_shape?
 └── trait_obligations[]
 ```
 
-HoleReport receives `type.expected`, `type.inferred_from`, visible bindings, and
-unsatisfied trait obligations.
+When `result_type` is an outcome, `outcome_shape` records the normalized
+`success_type` / `failure_type` pair. HoleReport receives `type.expected`,
+`type.inferred_from`, visible bindings, and unsatisfied trait obligations.
 
 ## Diagnostics impact
 
 Type diagnostics use `E0xxx` codes. Important categories include unknown type,
-return mismatch, unhandled error, missing trait implementation, unsatisfied
-refinement, and ambiguous hole type.
+return mismatch, outcome mismatch, unhandled failure propagation, missing trait
+implementation, unsatisfied refinement, and ambiguous hole type.
 
-A bodyless `type Name;` declaration without `@foreign` should produce a warning
-that asks the author to either mark the type as external (`@foreign type
+A bodyless `type Name;` declaration without `@foreign` should produce a hard
+error that asks the author to either mark the type as external (`@foreign type
 Name;`) or provide a real definition (`type Name = ...`).
 
 ## Drawbacks

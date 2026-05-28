@@ -48,13 +48,18 @@ fn add(a: I64, b: I64) -> I64 {
 
 ### Base Signature
 
-Contains name, type parameters with inline bounds, value parameters, return
-type, and optional error boundary:
+Contains name, type parameters with inline bounds, value parameters, and
+result type. Outcomes are expressed inside `TypeExpr` itself:
 
 ```spore
+enum LoadError {
+    Io(IoError),
+    Parse(ParseError),
+}
+
 fn id[T](x: T) -> T
 fn contains[T: Eq](xs: List[T], value: T) -> Bool
-fn load(path: Path) -> Config ! IoError | ParseError
+fn load(path: Path) -> Config ! LoadError
 ```
 
 ### Intent Signature
@@ -77,6 +82,34 @@ properties {
 Clause semantics are delegated: `uses` → SEP-0003, `budget` → SEP-0004,
 `properties` → SEP-0006.
 
+### Outcome types and propagation
+
+`A ! E` is a first-class outcome type. It does not mean a list of error names;
+it means a value that either succeeds with `A` or fails with `E`. Multiple
+failure forms are modeled by ordinary `enum` types:
+
+```spore
+enum LoadError {
+    File(FileReadError),
+    Parse(ParseError),
+}
+
+fn load(path: Path) -> Config ! LoadError {
+    let text = read_text(path)?;
+    parse_config(text)
+}
+```
+
+`fail` constructs a failure, postfix `?` propagates it to the enclosing outcome
+boundary, and outcome matches use `ok` / `fail` patterns:
+
+```spore
+match load(path) {
+    ok config => config,
+    fail err => recover(err),
+}
+```
+
 ### Data types
 
 `struct` defines product types; `enum` defines sum types:
@@ -93,9 +126,8 @@ enum Shape {
 ### Type declarations
 
 `type = Expr` defines transparent aliases and refinement aliases. A bodyless
-`type Name;` form is only a syntactic placeholder; without `@foreign`, later
-semantic checks should warn and ask for either `@foreign` or a real definition.
-Refinement semantics are owned by SEP-0002:
+`type Name;` declaration is reserved for externally-provided opaque types and
+must be marked `@foreign`. Refinement semantics are owned by SEP-0002:
 
 ```spore
 type Meters = I64
@@ -133,6 +165,31 @@ type Map[K, V];
 
 External-linking and ABI semantics are owned by SEP-0008.
 
+### Effect surfaces
+
+`effect` declares an atomic effect protocol. `surface` names a reusable effect
+surface expression:
+
+```spore
+effect Console {
+    fn println(msg: Str) -> ();
+}
+
+effect FileRead {
+    fn read(path: Path) -> Str ! FileReadError;
+}
+
+surface IO = [Console, FileRead]
+
+fn run(path: Path) -> ()
+uses [IO]
+{
+    ?run_body
+}
+```
+
+Surface semantics are owned by SEP-0003.
+
 ### Attributes
 
 Attributes attach metadata to any item:
@@ -166,8 +223,8 @@ Hole semantics and HoleReport are owned by SEP-0005.
 ### Signature layout
 
 ```text
-fn <name>[<type-params>](<params>) -> <ReturnType> [! <ErrorType> { | <ErrorType> }]
-[uses [<Effect>, ...]]
+fn <name>[<type-params>](<params>) -> <ResultType>
+[uses <SurfaceExpr>]
 [budget { <field>: <int>, ... }]
 [properties { <name>(<params>): <expr>, ... }]
 ( <block> | ";" )
@@ -181,6 +238,7 @@ ItemDecl        = FunctionDecl
                 | StructDecl
                 | EnumDecl
                 | TypeDecl
+                | SurfaceDecl
                 | TraitDecl
                 | EffectDecl
                 | HandlerDecl
@@ -197,9 +255,10 @@ FunctionDecl    = FunctionSig ( Block | ";" ) ;
 FunctionSig     = FunctionHeader [ UsesClause ] [ BudgetBlock ] [ PropertiesBlock ] ;
 FunctionHeader  = { Attribute } [ DocComment ] [ Visibility ]
                   "fn" Ident [ TypeParams ]
-                  "(" [ ParamList ] ")" "->" TypeExpr [ ErrorClause ] ;
+                  "(" [ ParamList ] ")" "->" TypeExpr ;
 
 TypeParams      = "[" TypeParam { "," TypeParam } "]" ;
+TypeArgs        = "[" TypeExpr { "," TypeExpr } [ "," ] "]" ;
 TypeParam       = Ident [ ":" BoundList ]
                 | "const" Ident ":" TypeExpr ;
 BoundList       = Ident { "+" Ident } ;
@@ -207,10 +266,19 @@ BoundList       = Ident { "+" Ident } ;
 ParamList       = Param { "," Param } [ "," ] ;
 Param           = ReceiverParam | Ident ":" TypeExpr ;
 ReceiverParam   = "self" [ ":" TypeExpr ] ;
-ErrorClause     = "!" TypeExpr { "|" TypeExpr } ;
 
-UsesClause      = "uses" "[" [ EffectList ] "]" ;
-EffectList      = Ident { "," Ident } ;
+TypeExpr        = RefinementTypeExpr [ "!" PrimaryTypeExpr ] ;
+RefinementTypeExpr = PrimaryTypeExpr [ "when" Expr ] ;
+PrimaryTypeExpr = Ident [ TypeArgs ]
+                | "(" [ TypeExpr { "," TypeExpr } [ "," ] ] ")" [ "->" TypeExpr ]
+                | "{" [ FieldDecl { "," FieldDecl } [ "," ] ] "}"
+                | "?" [ Ident ] ;
+
+UsesClause      = "uses" SurfaceExpr ;
+SurfaceDecl     = { Attribute } [ Visibility ] "surface" Ident [ TypeParams ] "=" SurfaceExpr ;
+SurfaceExpr     = Ident [ TypeArgs ]
+                | "[" [ SurfaceItem { "," SurfaceItem } [ "," ] ] "]" ;
+SurfaceItem     = Ident [ TypeArgs ] ;
 
 BudgetBlock     = "budget" "{" { BudgetItem } "}" ;
 BudgetItem      = Ident ":" IntLiteral ;
@@ -222,6 +290,9 @@ PropertyParam   = Ident ":" TypeExpr ;
 
 Block           = "{" { Statement } [ Expr ] "}" ;
 HoleExpr        = "?" [ Ident ] [ ":" TypeExpr ] ;
+FailExpr        = "fail" Expr ;
+TryExpr         = Expr "?" ;
+OutcomePattern  = "ok" Pattern | "fail" Pattern ;
 
 StructDecl      = { Attribute } [ Visibility ] "struct" Ident [ TypeParams ]
                   "{" [ FieldDecl { "," FieldDecl } [ "," ] ] "}" ;
@@ -236,11 +307,13 @@ TypeDecl        = { Attribute } [ Visibility ] "type" Ident [ TypeParams ]
 
 TraitDecl       = { Attribute } [ Visibility ] "trait" Ident [ TypeParams ]
                   "{" { MemberFunction } "}" ;
-EffectDecl      = { Attribute } [ Visibility ] "effect" Ident
-                  ( "{" { MemberFunction } "}"
-                  | "=" Ident { "|" Ident } ) ;
-HandlerDecl     = { Attribute } "handler" Ident "for" TypeExpr
-                  "{" { FunctionDecl } "}" ;
+EffectDecl      = { Attribute } [ Visibility ] "effect" Ident [ TypeParams ]
+                  "{" { MemberFunction } "}" ;
+HandlerDecl     = { Attribute } [ Visibility ] "handler" Ident "for" SurfaceExpr
+                  "{" { HandlerItem } "}" ;
+HandlerItem     = "fn" QualifiedIdent [ TypeParams ]
+                  "(" [ ParamList ] ")" "->" TypeExpr ( Block | ";" ) ;
+QualifiedIdent  = Ident "." Ident ;
 ImplDecl        = { Attribute } "impl" [ TypeParams ] TypeExpr [ "for" TypeExpr ]
                   "{" { FunctionDecl } "}" ;
 MemberFunction  = FunctionSig ( Block | ";" ) ;
@@ -258,9 +331,14 @@ Visibility      = "pub" | "pub" "(" "pkg" ")" ;
 - `ReceiverParam` is only valid as the first parameter inside `trait` or
   `impl`. Bare `self` normalizes to `self: Self`.
 - `type = Expr` defines aliases; `enum` covers all sum types.
-- `type Name;` is syntactically valid. Without `@foreign`, compilers should
-  warn and suggest adding `@foreign` or a real definition. Warning semantics
-  are defined by SEP-0002.
+- `type Name;` is syntactically valid only for externally-provided opaque types
+  and must carry `@foreign`.
+- Unparenthesized outcome chaining such as `A ! E ! F` is rejected. Nested
+  outcomes must be written with parentheses.
+- `surface` names a reusable effect-surface expression. It is not a sum type,
+  logical OR, or error union.
+- Handler items must name effect operations with a qualified identifier such as
+  `Console.println`.
 
 ### Delegated semantics
 
@@ -290,9 +368,13 @@ has a fixed position and fixed spelling.
 
 ```text
 FunctionDecl
-├── base_signature  (name, type_params, params, return_type, error_set)
+├── base_signature  (name, type_params, params, result_type)
 ├── intent_signature (uses, budget_items, properties)
 └── body
+
+OutcomeType
+├── success_type
+└── failure_type
 ```
 
 This structure feeds HoleReport, Claim, and EvidenceRecord generation.
@@ -307,10 +389,13 @@ are owned by dependent SEPs.
 This is a breaking surface. Migration tools should:
 
 1. Rewrite `type Name { ... }` to `enum Name { ... }`.
-2. Rewrite `foreign fn` and `foreign type` to `@foreign` attributes.
-3. Mark external opaque declarations as `@foreign type Name;`.
-4. Move generic bounds into type parameter lists.
-5. Replace positional resource annotations with named `budget` fields.
+2. Rewrite legacy `-> A ! E1 | E2` forms into `-> A ! ErrorEnum` with an
+   explicit `enum` failure type.
+3. Rewrite `effect IO = A | B` into `surface IO = [A, B]`.
+4. Rewrite `foreign fn` and `foreign type` to `@foreign` attributes.
+5. Mark external opaque declarations as `@foreign type Name;`.
+6. Move generic bounds into type parameter lists.
+7. Replace positional resource annotations with named `budget` fields.
 
 ## Drawbacks
 

@@ -23,7 +23,7 @@ platform needs:
 
 - `spore.list`
 - `spore.option`
-- `spore.result`
+- `spore.outcome`
 - `spore.map`
 - `spore.set`
 - `spore.str`
@@ -40,8 +40,8 @@ requirement that this SEP spell out the implementation body.
 ## Motivation
 
 The standard library should demonstrate the idiomatic signature model: compact Base
-Signatures, inline bounds, effects through `uses`, and properties for behavior
-that users rely on.
+Signatures, first-class outcomes, inline bounds, effects through `uses`, and
+properties for behavior that users rely on.
 
 ## Guide-level explanation
 
@@ -61,20 +61,17 @@ impl[T] Option[T] {
 }
 ```
 
-### Result
+### Outcome helpers
+
+Spore does not expose a prelude `Result[T, E]` type. Outcome handling is built
+into `A ! E`, and the standard library may provide helper functions in
+`spore.outcome`:
 
 ```spore
-enum Result[T, E] {
-    Ok(T),
-    Err(E),
-}
-
-impl[T, E] Result[T, E] {
-    fn map[U](self, f: Fn[T, U]) -> Result[U, E];
-    fn map_err[F](self, f: Fn[E, F]) -> Result[T, F];
-    fn is_ok(self) -> Bool;
-    fn is_err(self) -> Bool;
-}
+fn map_ok[A, B, E](value: A ! E, f: Fn[A, B]) -> B ! E;
+fn map_fail[A, E, F](value: A ! E, f: Fn[E, F]) -> A ! F;
+fn is_ok[A, E](value: A ! E) -> Bool;
+fn is_fail[A, E](value: A ! E) -> Bool;
 ```
 
 ### Lists and indexed containers
