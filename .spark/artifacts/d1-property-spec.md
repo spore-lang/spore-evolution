@@ -88,7 +88,7 @@ obligations`, near `seps/SEP-0002-type-system.md:191-213`.
 
 ### New subsection
 
-```markdown
+````markdown
 ### Property body typing
 
 A source property body is an ordinary Spore expression checked under the
@@ -115,7 +115,7 @@ The type checker does not need to decide whether every well-typed property is
 true. It only establishes that the property is a `Bool` expression in the right
 type and effect context. Decidable failures may become immediate diagnostics;
 undecidable obligations lower into SEP-0006 claims.
-```
+````
 
 ### Link refinement obligations to the same channel
 
