@@ -133,8 +133,9 @@ properties {
 ### Prelude
 
 The prelude exports primitive traits, common data types, and small helpers that
-are safe to use without imports. Platform-specific effects remain in Platform
-packages.
+are safe to use without imports. State primitive effect names are standard names,
+but their host handlers remain Platform-provided. Importing the prelude does not
+implicitly select a Platform.
 
 ### Trait style
 
@@ -160,6 +161,50 @@ Platform functions declare effects through `uses`:
 fn read_file(path: Path) -> Str ! IoError
 uses [FileRead];
 ```
+
+### State primitive effects
+
+SEP-0003 defines membership rules for state primitive effects. The standard
+library defines the initial primitive surface by semantic contract. Method names
+below are initial spellings for the surface and may be refined while the SEP is
+Draft.
+
+```spore
+effect Cell[T] {
+    fn get() -> T;
+    fn set(value: T) -> ();
+}
+
+effect Output[T] {
+    fn emit(value: T) -> ();
+}
+
+effect Map[K, V] {
+    fn get(key: K) -> Option[V];
+    fn put(key: K, value: V) -> ();
+    fn remove(key: K) -> ();
+}
+
+effect Clock {
+    fn now() -> Instant;
+}
+
+effect Random {
+    fn next_u64() -> U64;
+    fn next_f64() -> F64;
+}
+```
+
+These effects are the standard state and event endpoints used by handler-local
+mocking and test instrumentation. Their interfaces are standard-library surface;
+their handlers are supplied by the selected Platform package or by explicit
+local handlers.
+
+Derived effects such as `Counter`, `Cache`, `Logger`, and `Tracer` do not belong
+to the primitive set because they can be expressed over `Cell`, `Map`, or
+`Output` plus domain policy. Platform I/O effects such as `FileRead` and
+`FileWrite` and concurrency effects such as `Spawn` remain owned by their
+respective Platform or concurrency SEPs.
 
 ### Budgets
 
@@ -238,4 +283,4 @@ realization-shape bound.
 
 1. Which standard properties are required for publication?
 2. Should standard property suites be generated into package evidence records?
-3. Which Platform packages should be distributed with the standard library set?
+3. Which Platform packages should be distributed alongside the standard library set without creating a default Platform?

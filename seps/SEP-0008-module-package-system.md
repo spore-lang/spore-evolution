@@ -147,6 +147,12 @@ A selected Platform declares the accepted startup function shape, required
 effect surface, runtime handlers, and host adapter. The compiler verifies the
 application entry against that contract.
 
+A conforming Platform package that claims support for the standard state
+primitive effect set provides two handler families for each supported primitive:
+a host handler backed by the target environment and an in-memory mock handler
+usable by tests and local handler scopes. This requirement does not create a
+default Platform. Programs still select a Platform explicitly.
+
 ### Foreign linkage and export attributes
 
 `@foreign` is valid on bodyless function declarations and bodyless type
@@ -224,6 +230,7 @@ Module diagnostics use `M0xxx` codes:
 | `M0402` | evidence-missing          | Required evidence record is absent                |
 | `M0501` | platform-binding-conflict | More than one Platform binding selected           |
 | `M0502` | startup-contract-mismatch | Entry function does not satisfy Platform contract |
+| `M0503` | primitive-handler-missing | Platform binding lacks a required state primitive handler |
 | `M0601` | invalid-foreign-target    | `@foreign` attached to an unsupported declaration |
 | `M0602` | foreign-body-present      | `@foreign` function unexpectedly has a body       |
 | `M0603` | unsupported-export-abi    | `@export` ABI string is not supported             |

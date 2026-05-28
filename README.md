@@ -49,7 +49,7 @@ in dependency order:
    questions used in review.
 2. [SEP-0001](seps/SEP-0001-core-syntax.md) for draft root syntax forms.
 3. [SEP-0002](seps/SEP-0002-type-system.md) through [SEP-0004](seps/SEP-0004-cost-analysis.md) for core static semantics.
-4. [SEP-0005](seps/SEP-0005-hole-system.md), [SEP-0006](seps/SEP-0006-compiler-architecture.md), and [SEP-0010](seps/SEP-0010-compiler-as-documentation.md) for hole, compiler, diagnostic, and explain surfaces.
+4. [SEP-0005](seps/SEP-0005-hole-report-protocol.md), [SEP-0006](seps/SEP-0006-compiler-architecture.md), and [SEP-0010](seps/SEP-0010-compiler-as-documentation.md) for hole, compiler, diagnostic, and explain surfaces.
 5. [SEP-0007](seps/SEP-0007-concurrency-model.md) through [SEP-0009](seps/SEP-0009-standard-library.md) for larger system layers.
 
 Use [GLOSSARY.md](GLOSSARY.md) when checking cross-SEP terminology.

@@ -73,8 +73,16 @@ properties {
 }
 ```
 
-The parser records a source property. The compiler lowers it into an internal
-Claim with normalized subject, parameters, predicate, and source span.
+The parser records a source property. SEP-0002 first checks the property body as
+an ordinary Spore expression whose result type must be `Bool` and whose required
+effects must fit inside the enclosing effect context. After that check, the
+compiler lowers the property into an internal `Claim` with normalized subject,
+parameters, predicate expression, effect context, and source span.
+
+A `Claim` may originate from a source `properties` item, a refinement obligation,
+a budget check, an effect check, or a validator. Source properties and
+refinement obligations share the same `Claim` and `EvidenceRecord` structure so
+tools do not need a separate property protocol.
 
 ### Evidence records
 
@@ -172,6 +180,17 @@ EvidenceRecord
 
 `dependency_hashes` bind imported modules and package inputs.
 
+For property claims, `result.passed` means the checker established the property
+for the checked subject. `result.failed` means the checker produced a failing
+case, counter-witness, or direct contradiction. `result.unknown` means the
+property was well typed but the checker could not decide it with the available
+analysis or evidence. `result.skipped` means the checker did not run.
+
+A well-typed property with `unknown` evidence remains visible to tools and
+reviewers. It is not the same as a type error and does not by itself reject
+compilation. Release gates and package policies may choose stricter treatment
+for unknown evidence.
+
 ### Watch mode
 
 `spore watch --json` emits newline-delimited events:
@@ -207,7 +226,9 @@ VerificationBundle
 
 Default text, JSON, LSP, and watch outputs are renderings over these records.
 SEP-0010 owns the concept registry and explain protocol layered over these same
-records.
+records. SEP-0010 teaching metadata is optional metadata over these shared
+records. It does not change the identity, hash, or required fields of
+`Diagnostic`, `HoleReport`, `Claim`, `EvidenceRecord`, or `VerificationBundle`.
 
 ## Diagnostics impact
 
@@ -224,7 +245,11 @@ Diagnostic categories are:
 | `W0xxx` | Warnings                       |
 
 Property diagnostics include failed property checks, counter-witnesses, and
-properties that reached an open hole.
+properties that reached an open hole. A property body that does not check as
+`Bool` is reported as a type diagnostic because the source expression is ill
+typed. A property body that checks as `Bool` but fails or remains unknown is
+reported as a property or claim diagnostic because the source shape is valid and
+the evidence result is the issue.
 
 Diagnostic teaching metadata, concept references, and `spore explain` behavior
 are owned by SEP-0010.

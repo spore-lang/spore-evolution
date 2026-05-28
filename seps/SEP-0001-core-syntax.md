@@ -79,8 +79,9 @@ properties {
 }
 ```
 
-Clause semantics are delegated: `uses` → SEP-0003, `budget` → SEP-0004,
-`properties` → SEP-0006.
+Clause semantics are delegated: `uses` → SEP-0003, `budget` → SEP-0004, and
+`properties` → SEP-0002 for expression typing plus SEP-0006 for claim and
+evidence lowering.
 
 ### Outcome types and propagation
 
@@ -288,6 +289,10 @@ PropertyItem    = Ident "(" [ PropertyParamList ] ")" ":" Expr ;
 PropertyParamList = PropertyParam { "," PropertyParam } [ "," ] ;
 PropertyParam   = Ident ":" TypeExpr ;
 
+(* The expression after `:` is an ordinary Spore expression. SEP-0002 owns
+   property body typing, including the strict `Bool` result requirement.
+   SEP-0006 owns claim and evidence lowering. *)
+
 Block           = "{" { Statement } [ Expr ] "}" ;
 HoleExpr        = "?" [ Ident ] [ ":" TypeExpr ] ;
 FailExpr        = "fail" Expr ;
@@ -309,10 +314,16 @@ TraitDecl       = { Attribute } [ Visibility ] "trait" Ident [ TypeParams ]
                   "{" { MemberFunction } "}" ;
 EffectDecl      = { Attribute } [ Visibility ] "effect" Ident [ TypeParams ]
                   "{" { MemberFunction } "}" ;
-HandlerDecl     = { Attribute } [ Visibility ] "handler" Ident "for" SurfaceExpr
-                  "{" { HandlerItem } "}" ;
-HandlerItem     = "fn" QualifiedIdent [ TypeParams ]
-                  "(" [ ParamList ] ")" "->" TypeExpr ( Block | ";" ) ;
+HandlerDecl     = { Attribute } [ Visibility ] "handler" Ident
+                  [ "(" [ FieldDecl { "," FieldDecl } [ "," ] ] ")" ]
+                  HandlesClause [ UsesClause ]
+                  "{" { HandlerImplBlock } "}" ;
+HandlesClause   = "handles" SurfaceExpr ;
+HandlerImplBlock = "impl" Ident [ TypeArgs ]
+                   "{" { HandlerMethod } "}" ;
+HandlerMethod   = "fn" Ident [ TypeParams ]
+                  "(" ReceiverParam [ "," ParamList ] ")"
+                  "->" TypeExpr ( Block | ";" ) ;
 QualifiedIdent  = Ident "." Ident ;
 ImplDecl        = { Attribute } "impl" [ TypeParams ] TypeExpr [ "for" TypeExpr ]
                   "{" { FunctionDecl } "}" ;
@@ -337,8 +348,17 @@ Visibility      = "pub" | "pub" "(" "pkg" ")" ;
   outcomes must be written with parentheses.
 - `surface` names a reusable effect-surface expression. It is not a sum type,
   logical OR, or error union.
-- Handler items must name effect operations with a qualified identifier such as
-  `Console.println`.
+- Handler declarations use `handles` to name the discharged effect surface and
+  may use `uses` to declare effects required by handler method bodies. Handler
+  fields are immutable instance payload. Handler methods live inside
+  `impl Effect { ... }` blocks and write `self` as the first parameter. The
+  receiver is read-only; this SEP does not introduce `mut self` or field
+  assignment.
+- A `handle` expression installs named handler instances and inline arms for a
+  lexical scope: `handle { body } with { use HandlerName { field: value }, on
+  Effect.operation(param) => arm_body }`. Named `use` entries instantiate a
+  handler payload. Inline `on` arms handle a single effect operation directly.
+  SEP-0003 owns the checking rules.
 
 ### Delegated semantics
 
@@ -432,5 +452,5 @@ influenced explicit effect boundaries.
 ## Unresolved questions
 
 1. Should long inline bounds allow line breaks after each type parameter?
-2. Which property expression subset is accepted for automated checking?
+2. How should the compiler present `unknown` property evidence when a checker cannot decide an otherwise well-typed `Bool` property body?
 3. Should effect names be partitioned by namespace?

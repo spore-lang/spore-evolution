@@ -30,7 +30,9 @@ are named bounds on acceptable realization shape, not Big-O notation and not a
 machine-resource model.
 
 Together, the two layers make every callable a small, machine-readable design
-record rather than a name attached to a body.
+record rather than a name attached to a body. Stateful testing and
+instrumentation use explicit effects and selected handlers rather than
+user-level mutation hidden inside the body.
 
 ### 2. Properties specify intent
 
@@ -50,7 +52,8 @@ effect context, budget context, and property context that surround it.
 
 A hole report should expose enough context for any reader — human or machine —
 to propose a realization without further conversation. The compiler should make
-that context available as readable explanations and as stable structured data.
+that context available as stable structured data, while explain projections teach
+readers how to interpret the same facts.
 
 ### 4. Realization implements the missing
 
@@ -69,9 +72,11 @@ what was checked for a concrete realization, which checker produced the result,
 what the result was, and which provenance hashes bind the result to its source
 and dependencies.
 
-Evidence should be readable by humans and structured for machines. It is useful
-only when tied to precise content identity: signatures, intents, properties,
-realizations, checkers, evidence records, and dependencies can each be named by
+Evidence should be readable by humans and structured for machines. Teaching
+metadata and explain pages can project those records for readers, but they do
+not replace the underlying evidence identity. Evidence is useful only when tied
+to precise content identity: signatures, intents, properties, realizations,
+checkers, evidence records, and dependencies can each be named by
 the content they actually contain.
 
 Evidence is checked support, not a stamp of correctness.

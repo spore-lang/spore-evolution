@@ -63,6 +63,27 @@ effect Clock {
 }
 ```
 
+### State primitive effects
+
+A state primitive effect is a standard atomic effect whose purpose is to carry a
+minimal state or event boundary without exposing user-level mutation. State
+primitive effects are still ordinary atomic effects for `uses` resolution,
+handler checking, and HoleReport effect context.
+
+An effect belongs to the state primitive set only when it satisfies all of these
+membership rules:
+
+1. It cannot be defined as a composition of other effects.
+2. It carries one minimal state or event responsibility.
+3. It is broadly useful across application, test, and tooling contexts.
+4. A Platform package can provide a host handler and an in-memory mock handler.
+5. Its operation set is small and stable enough to be part of the standard
+   effect surface.
+
+The initial state primitive set is defined by SEP-0009. Adding a new state
+primitive effect requires a separate SEP because it changes the standard effect
+taxonomy and the Platform conformance surface.
+
 ### Using effects
 
 ```spore
@@ -101,18 +122,44 @@ logical OR, or error unions.
 ### Handlers
 
 ```spore
-handler MockIO for [Console] {
-    fn Console.println(msg: Str) -> () { self.output.push(msg) }
+effect Console {
+    fn println(msg: Str) -> ();
+}
+
+effect Output[T] {
+    fn emit(value: T) -> ();
+}
+
+handler MockConsole handles [Console] uses [Output[Str]] {
+    impl Console {
+        fn println(self, msg: Str) -> () {
+            perform Output.emit(msg)
+        }
+    }
 }
 
 handle {
     greet("spore")
 } with {
-    use MockIO { output: [] }
+    use MockConsole {}
 }
 ```
 
-Handlers discharge or reinterpret effects inside a lexical scope.
+Handlers discharge or reinterpret effects inside a lexical scope. The example
+omits the `Output[Str]` handler; the enclosing test or Platform scope must
+install it explicitly.
+
+### Handler state policy
+
+Handler fields are immutable runtime configuration. Handler method bodies may
+read `self` and fields on `self`, but they may not assign to `self.field` or
+otherwise update handler instance payload. Spore does not add `mut`, `mut self`,
+or mutable handler fields for stateful handlers.
+
+Stateful handler use cases route through state primitive effects such as
+`Cell`, `Output`, `Map`, `Clock`, and `Random`. A handler that needs state lists
+the relevant primitive effects in its own `uses` clause and performs those
+effects in method bodies.
 
 ### Non-effect requirements
 
@@ -138,12 +185,22 @@ The compiler resolves names in a `uses` surface expression into:
 Unknown names are diagnostics. Surface expansion is unordered, duplicate-free,
 and recursive cycles are diagnostics.
 
+State primitive effects resolve as atomic effects. Their primitive status
+affects standard-library and Platform obligations, not the surface-expansion
+algorithm.
+
 ### Handler checking
 
 A handler targets a surface expression and must implement every operation of the
-atomic effects it claims to discharge. Handler methods name operations with a
-qualified identifier such as `Console.println`. Handler methods use ordinary
-function typing and may declare their own required effects.
+atomic effects it claims to discharge. Handler methods live inside an
+`impl Effect { ... }` block, write `self` as the first parameter, use ordinary
+function typing, and may declare their own required effects. The receiver is
+read-only.
+
+Handler instances are lexical and task-local. Installing a handler with
+`handle ... with` affects only the dynamic extent of that expression inside the
+installing task. Spawned or sibling tasks do not inherit the handler instance
+unless that handler is installed in their own dynamic extent.
 
 ### Interaction with properties
 
@@ -175,6 +232,10 @@ EffectContext
 ```
 
 SEP-0005 embeds this context in HoleReport. SEP-0006 may embed it in evidence.
+Handler fields are instance payload and do not participate in `signature_hash`,
+`intent_hash`, or `property_hash`. Hashes cover callable boundaries and intent
+metadata; handler payload values are runtime configuration for a specific
+installation.
 
 ## Diagnostics impact
 

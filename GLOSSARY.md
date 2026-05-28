@@ -32,16 +32,22 @@ update both its glossary definition and its multilingual correspondence here.
 | Effect            | 效应         |
 | Effect context    | 效应上下文   |
 | Effect handler    | 效应处理器   |
+| Handler field     | 处理器字段   |
+| Handler instance  | 处理器实例   |
 | Platform          | 平台         |
 | Content-addressed | 内容寻址     |
 | Content identity  | 内容身份     |
 | Provenance hash   | 来源哈希     |
 | Explain protocol  | 解释协议     |
 | Diagnostic        | 诊断         |
+| Concept projection | 概念投影     |
 | HoleReport        | 洞报告       |
+| HoleReport Protocol | 洞报告协议   |
 | Repair hint       | 修复提示     |
 | Dependency        | 依赖         |
 | Checker           | 检查器       |
+| Property body     | 性质主体     |
+| State primitive effect | 状态原语效应 |
 
 ## A
 
@@ -70,6 +76,8 @@ update both its glossary definition and its multilingual correspondence here.
 **Concept ref** (SEP-0010): Stable concept id attached to a diagnostic, HoleReport projection, or explain response.
 
 **ConceptRegistry** (SEP-0010): Ordered collection of `ConceptDoc` records plus schema identity.
+
+**Concept projection** (SEP-0010): Human-facing rendering over compiler-owned structured records, such as a HoleReport teaching view backed by SEP-0005 data.
 
 ## D
 
@@ -121,7 +129,13 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, effect, budget, and property dependencies for fill scheduling.
 
-**Hole realization workflow** (SEP-0005): Agent-facing realization loop: DISCOVER -> ANALYZE -> PROPOSE -> VERIFY -> ACCEPT or REJECT.
+**HoleReport Protocol** (SEP-0005): Normative per-hole record and dependency graph contract used by humans, Agents, and tools.
+
+**Hole realization workflow** (SEP-0005): Informational Agent-facing realization loop: DISCOVER -> ANALYZE -> PROPOSE -> VERIFY -> ACCEPT or REJECT.
+
+**Handler field** (SEP-0003): Immutable runtime configuration stored on a handler instance. Handler fields are not user-level mutable state and do not participate in signature or intent hashes.
+
+**Handler instance** (SEP-0003): Lexical, task-local installation of a handler inside a `handle ... with` expression.
 
 ## I
 
@@ -157,6 +171,8 @@ update both its glossary definition and its multilingual correspondence here.
 
 **Property** (SEP-0001, SEP-0006): Source-level validity rule written in `properties { name(params): expr }`.
 
+**Property body** (SEP-0002): Ordinary Spore expression after `:` in a property item. It must check as `Bool` under the enclosing effect context.
+
 **Property context** (SEP-0005): Properties from the enclosing intent signature projected into a hole report.
 
 **Property hash** (SEP-0006, SEP-0008): Hash of normalized properties attached to a callable or contract.
@@ -188,6 +204,8 @@ update both its glossary definition and its multilingual correspondence here.
 **Startup contract** (SEP-0008): Platform-defined requirement on startup function parameters, result type, and effect surface.
 
 **Startup function** (SEP-0008): Callable inside the selected entry module that satisfies the Platform startup contract.
+
+**State primitive effect** (SEP-0003, SEP-0009): Standard atomic effect that carries a minimal state or event responsibility without exposing user-level mutation. The initial set is `Cell`, `Output`, `Map`, `Clock`, and `Random`.
 
 **Str** (SEP-0002): UTF-8 text primitive in Spore surface syntax.
 

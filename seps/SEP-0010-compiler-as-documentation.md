@@ -170,6 +170,10 @@ The `ConceptRegistry` contains the ordered set of `ConceptDoc` records plus
 schema identity. The concrete contract can later be published under
 `schemas/contracts`.
 
+For hole-related concept docs, `related_seps` should include SEP-0005 when the
+concept explains HoleReport data and SEP-0010 when the concept explains the
+teaching or query layer.
+
 ### Diagnostic teaching metadata
 
 Every user-facing diagnostic should be able to carry:
@@ -186,13 +190,15 @@ not scrape prose.
 
 ### Hole teaching projection
 
-The educational projection of a HoleReport is a rendering over existing
-SEP-0005 fields. It should include expected type, source location, visible
-bindings, effect context, budget context, property context, candidates,
-dependent holes, and rejection reasons when those fields are present.
+The educational projection of a HoleReport is a rendering over SEP-0005 fields.
+It should include expected type, source location, visible bindings, effect
+context, budget context, property context, candidates, dependent holes, and
+rejection reasons when those fields are present. SEP-0010 may choose which fields
+to highlight for a user-facing explanation, but it does not define different
+field names or a second hole query payload.
 
-This projection is not a second hole protocol. It is a human-readable view over
-the same typed absence record that Agents consume.
+When SEP-0005 and SEP-0010 appear to overlap, SEP-0005 owns the data contract
+and SEP-0010 owns the teaching projection over that contract.
 
 ## Human experience impact
 
@@ -288,9 +294,10 @@ those codes:
 - repair hint: the smallest local shape that can move the user forward;
 - concept reference: the `spore explain` query that teaches the rule.
 
-Every user-facing diagnostic should map to at least one concept id. Diagnostic
-families may point to broad concepts, while more specific codes may point to a
-subconcept through `explanation_key`.
+Every user-facing diagnostic produced by the compiler should have a path to at
+least one concept id, either directly or through its diagnostic family.
+Diagnostic families may point to broad concepts, while more specific codes may
+point to a subconcept through `explanation_key`.
 
 The default text renderer should stay concise. Long rationale, multiple
 snippets, prior art, and cross-topic exploration belong in `spore explain`.

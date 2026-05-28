@@ -206,11 +206,41 @@ checks against an expected outcome when `e` inhabits the failure type. Bare
 `A ! E ! F` is rejected without parentheses so `!` does not become an ambiguous
 chain operator.
 
+### Property body typing
+
+A source property body is an ordinary Spore expression checked under the
+surrounding callable's type environment.
+
+If a property item is written as:
+
+```spore
+properties {
+    name(params...): body
+}
+```
+
+then `body` must check against `Bool`. A body with any other result type is a
+type error. Property parameters introduce local bindings with the declared types
+for the property body only; they do not change the callable's Base Signature.
+
+The property body inherits the enclosing callable's effect context. It may only
+perform effects included in the enclosing `uses` surface or effects discharged
+by a narrower local handler context. A property body that requires an unavailable
+effect is an effect-checking error.
+
+The type checker does not need to decide whether every well-typed property is
+true. It only establishes that the property is a `Bool` expression in the right
+type and effect context. Decidable failures may become immediate diagnostics;
+undecidable obligations lower into SEP-0006 claims.
+
 ### Refinement obligations
 
 When a refinement predicate is decidable in the type checker, it is discharged
 immediately. Otherwise the checker emits a property-level obligation that the
-compiler can lower into a Claim for evidence processing.
+compiler can lower into a Claim for evidence processing. This is the same claim
+and evidence channel used for source properties. Source properties and
+refinement obligations differ in where they come from, not in the shape of the
+downstream claim record.
 
 ## Human experience impact
 
