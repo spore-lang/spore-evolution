@@ -194,6 +194,25 @@
       "superseded_by": null
     },
     {
+      "path": "seps/SEP-0010-compiler-as-documentation.md",
+      "sep": 10,
+      "title": "SEP-0010: Compiler-as-Documentation & Explain Protocol",
+      "status": "Draft",
+      "type": "Standards Track",
+      "authors": [
+        "Zhan Rongrui"
+      ],
+      "created": "2026-05-26",
+      "requires": [
+        1,
+        5,
+        6
+      ],
+      "discussion": "https://github.com/spore-lang/spore-evolution/discussions/46",
+      "pr": null,
+      "superseded_by": null
+    },
+    {
       "path": "drafts/script-mode.md",
       "sep": null,
       "title": "Draft SEP: Script Mode & Inline Script Metadata",
