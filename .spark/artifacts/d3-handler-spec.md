@@ -71,7 +71,7 @@ SEP does not introduce `mut self` or field assignment.
 
 Add this note near expression forms when expression grammar is expanded:
 
-```markdown
+````markdown
 A `handle` expression installs named handler instances and inline arms for a
 lexical scope:
 
@@ -84,7 +84,7 @@ handle { body } with {
 
 Named `use` entries instantiate a handler payload. Inline `on` arms handle a
 single effect operation directly. SEP-0003 owns the checking rules.
-```
+````
 
 ## SEP-0003 handler patch draft
 
