@@ -144,8 +144,8 @@ same callable boundary but still record the new realization and evidence.
 ### Platform startup contract
 
 A selected Platform declares the accepted startup function shape, required
-runtime handlers, and host adapter. The compiler verifies the application entry
-against that contract.
+effect surface, runtime handlers, and host adapter. The compiler verifies the
+application entry against that contract.
 
 ### Foreign linkage and export attributes
 

@@ -35,7 +35,10 @@ budget {
     holes: 1
 }
 properties {
-    accepted(order: Order): validate(order).is_ok() || has_validation_reason(order)
+    accepted(order: Order): match validate(order) {
+        ok _ => true,
+        fail _ => has_validation_reason(order),
+    }
 }
 {
     ?validate_body
@@ -124,10 +127,10 @@ The per-hole object includes:
 | `enclosing_signature`  | Normalized Base Signature and Intent Signature summary |
 | `bindings`             | Visible local bindings and types                       |
 | `binding_dependencies` | Data-flow among visible bindings                       |
-| `effect_context`       | Available effects and handler context                  |
+| `effect_context`       | Available effect surface and handler context           |
 | `budget_context`       | Relevant budget constraints and observed shape data    |
 | `property_context`     | Properties the realization must preserve               |
-| `errors_to_handle`     | Error variants still not handled at the site           |
+| `failures_to_handle`   | Failure variants still not handled at the site         |
 | `candidates`           | Visible functions or templates that may fit            |
 | `dependent_holes`      | Holes unlocked by this realization                     |
 | `confidence`           | Type and candidate confidence data                     |
@@ -142,8 +145,8 @@ for reporting and a diagnostic is emitted.
 
 ### Effect context
 
-`effect_context` includes declared effect names, expanded effect sets, active
-handlers, and discharged effects.
+`effect_context` includes the declared surface expression, expanded effect set,
+active handlers, and discharged effects.
 
 ### Budget context
 
@@ -189,7 +192,7 @@ Batch output:
     {
       "name": "validate_body",
       "expected_type": "ValidOrder ! ValidationError",
-      "effect_context": { "declared": ["DbRead"] },
+      "effect_context": { "declared_surface": "[DbRead]" },
       "budget_context": { "branches": { "limit": 5 } },
       "property_context": { "properties": ["accepted"] }
     }
@@ -233,7 +236,7 @@ and richer property design remain important.
 Rejected because named holes make CLI queries, reviews, and Agent coordination
 stable.
 
-### Holes as errors
+### Holes as hard errors
 
 Rejected because partial programs are a core collaboration state.
 

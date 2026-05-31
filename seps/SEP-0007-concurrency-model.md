@@ -33,8 +33,8 @@ Spore provides structured concurrency primitives:
 - `Task[T, E]`
 - `Channel[T]`
 
-A concurrent function declares the required effects and may constrain its
-realization shape with budget fields:
+A concurrent function declares the required effect surface and may constrain
+its realization shape with budget fields:
 
 ```spore
 fn fetch_all(urls: List[Url]) -> List[Page] ! NetworkError
@@ -102,9 +102,10 @@ select {
 
 ### Effect requirement
 
-`spawn`, scoped task creation, and task scheduling require the `Spawn` effect.
-Channel operations require the channel effects defined by the standard library
-or platform package that supplies them.
+`spawn`, scoped task creation, and task scheduling require the `Spawn` effect to
+appear in the enclosing effect surface, either directly or through a named
+surface. Channel operations require the channel effects defined by the standard
+library or platform package that supplies them.
 
 ### Scope rule
 
@@ -132,8 +133,9 @@ boundary correctness for evidence generation.
 
 ## Human experience impact
 
-Concurrency appears at the signature boundary through `uses [Spawn]` and shape
-budgets. Reviewers can see whether fan-out is intended before reading the body.
+Concurrency appears at the signature boundary through the declared `uses`
+surface and shape budgets. Reviewers can see whether fan-out is intended before
+reading the body.
 
 ## Agent experience impact
 
@@ -193,7 +195,7 @@ platform boundaries inform this model.
 ## Backward compatibility and migration
 
 Concurrent code should move fan-out constraints into `budget { parallelism: N }`
-and retain explicit `uses [Spawn]` effect declarations.
+and retain explicit `Spawn` membership in the declared effect surface.
 
 ## Unresolved questions
 

@@ -117,8 +117,8 @@ Handlers discharge or reinterpret effects inside a lexical scope.
 ### Non-effect requirements
 
 Properties, checker guidance, and Agent-generation requirements do not appear in
-`uses [...]`. They should be expressed through `properties`, `budget`, package
-metadata, or future tooling metadata owned by a separate SEP.
+`uses` surface expressions. They should be expressed through `properties`,
+`budget`, package metadata, or future tooling metadata owned by a separate SEP.
 
 ## Reference-level explanation
 
@@ -153,9 +153,9 @@ SEP-0006.
 
 ## Human experience impact
 
-A reader can inspect `uses [...]` to know what outside-world interaction a
-function depends on. Effect names stay explicit without mixing runtime behavior
-with checker-only guidance.
+A reader can inspect a function's `uses` surface expression to know what
+outside-world interaction it depends on. Effect names stay explicit without
+mixing runtime behavior with checker-only guidance.
 
 ## Agent experience impact
 
@@ -198,7 +198,7 @@ that the language effect model stays clear and handler checking remains local.
 
 ### Broader `uses` surface
 
-Rejected because mixing effects with checker or Agent guidance made `uses [...]`
+Rejected because mixing effects with checker or Agent guidance made `uses`
 an unclear heterogeneous bucket.
 
 ### Separate checker keyword in core syntax
@@ -214,9 +214,9 @@ effects.
 
 ## Backward compatibility and migration
 
-Existing atomic effect declarations stay conceptually valid. Legacy effect-alias
+Existing atomic effect declarations stay conceptually valid. Legacy shorthand
 forms such as `effect IO = A | B` should migrate to `surface IO = [A, B]`.
-Signatures that used `uses [...]` for effects continue to map directly, though
+Signatures that used `uses [A, B]` for effects continue to map directly, though
 surface expressions may now mix atomic effects and named surfaces. Non-effect
 names that were previously placed in `uses` should move to properties, package
 metadata, or a future tooling surface.

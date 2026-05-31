@@ -185,7 +185,7 @@ update both its glossary definition and its multilingual correspondence here.
 
 **sporec** (SEP-0006, SEP-0008): Low-level explicit-input compiler CLI.
 
-**Startup contract** (SEP-0008): Platform-defined requirement on startup function parameters, return type, and effect boundary.
+**Startup contract** (SEP-0008): Platform-defined requirement on startup function parameters, result type, and effect surface.
 
 **Startup function** (SEP-0008): Callable inside the selected entry module that satisfies the Platform startup contract.
 
