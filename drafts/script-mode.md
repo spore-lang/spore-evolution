@@ -189,7 +189,7 @@ Example:
 
 ```spore
 /* spore-script
-requires-spore = ">=0.1.0"
+requires-spore = "current"
 
 [platform]
 path = "../platforms/cli"
@@ -207,9 +207,9 @@ error. It must not silently ignore malformed structured metadata.
 
 ### Metadata shape
 
-V1 script metadata contains:
+Script metadata contains:
 
-- `requires-spore = "<version-range>"`
+- `requires-spore = "<compatibility-label>"`
 - `[platform]` carrying script-local platform selection metadata that parallels
   manifest platform configuration, without requiring the exact same table shape
 - `[dependencies]` using the same dependency-entry shape as manifest

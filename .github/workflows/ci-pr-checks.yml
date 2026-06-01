@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Check PR title
-        uses: zrr1999/zendev/actions/validate-title@v0.0.5
+        uses: zendev-lab/zendev/actions/validate-title@v0.0.7
         with:
           text: ${{ github.event.pull_request.title }}
 
@@ -44,36 +44,12 @@ jobs:
             echo "is_sep=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Validate PR body checklist (SEP PRs only)
+      - name: Validate PR body template shape and checklist
         if: steps.changes.outputs.is_sep == 'true'
-        env:
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import sys
-          from pathlib import Path
-
-          REQUIRED_CHECKBOXES = [
-              "- [x] I opened or linked a public Discussion or Issue for the pitch before submitting this draft SEP.",
-              "- [x] I linked the canonical discussion thread.",
-              "- [x] I used the correct SEP template for this proposal type.",
-              "- [x] I updated front matter metadata and required sections.",
-          ]
-
-          payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-          body = (payload.get("pull_request") or {}).get("body") or ""
-          missing = [item for item in REQUIRED_CHECKBOXES if item not in body]
-
-          if missing:
-              print("Pull request body is missing required checked items:\n", file=sys.stderr)
-              for item in missing:
-                  print(f"- {item}", file=sys.stderr)
-              raise SystemExit(1)
-
-          print("Pull request body checklist looks good.")
-          PY
+        uses: zendev-lab/zendev/actions/validate-body@v0.0.7
+        with:
+          body: ${{ github.event.pull_request.body }}
+          require-checklist: "true"
 
       - name: PR body OK (non-SEP PR)
         if: steps.changes.outputs.is_sep == 'false'

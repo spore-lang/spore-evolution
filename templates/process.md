@@ -26,6 +26,14 @@ superseded_by: null
 
 ## Proposal
 
+The [guiding questions for every design decision](../seps/SEP-0000-process.md#guiding-questions-for-every-design-decision)
+live in SEP-0000. Do **not** create a `## Guiding questions for every design
+decision` heading in this SEP; link to the SEP-0000 heading instead.
+
+If this Process SEP changes the review criteria, the question set, or the
+relationship between vision principles and questions, amend SEP-0000 directly
+in the same proposal.
+
 ## Lifecycle and transition rules
 
 ## Roles and responsibilities

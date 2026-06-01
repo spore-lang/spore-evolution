@@ -1,4 +1,9 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 
 from __future__ import annotations
 
@@ -6,7 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from sep_common import ROOT, load_json, report_errors
+
 CONTRACTS_ROOT = ROOT / "schemas" / "contracts"
 CATALOG_PATH = CONTRACTS_ROOT / "catalog.json"
 CATALOG_URL = "https://raw.githubusercontent.com/spore-lang/spore-evolution/main/schemas/contracts/catalog.json"
@@ -16,18 +22,6 @@ OWNER = {
     "path": "schemas/contracts",
 }
 JSON_SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
-
-
-def load_json(path: Path) -> tuple[object | None, str | None]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8")), None
-    except OSError as exc:
-        return None, f"{path}: failed to read JSON file ({exc})"
-    except json.JSONDecodeError as exc:
-        return (
-            None,
-            f"{path}: invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
-        )
 
 
 def require_string(entry: dict[str, object], key: str, errors: list[str], scope: str) -> str | None:
@@ -163,14 +157,11 @@ def main() -> int:
             if not file_name.startswith(expected_prefix):
                 errors.append(f"{scope}: file `{file_name}` must start with `{expected_prefix}`")
 
-    if errors:
-        print("Contract schema validation failed:\n", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
-        return 1
-
-    print(f"Validated {len(schemas)} contract schema(s).")
-    return 0
+    return report_errors(
+        errors,
+        "Contract schema validation failed",
+        success_message=f"Validated {len(schemas)} contract schema(s).",
+    )
 
 
 if __name__ == "__main__":

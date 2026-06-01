@@ -1,17 +1,32 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "check-jsonschema",
+# ]
+# ///
 
 from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from sep_common import ROOT, SepDocument, headings, load_documents
+from sep_common import (
+    FRONTMATTER_SCHEMA_PATH,
+    GUIDING_QUESTIONS_HEADING,
+    ROOT,
+    SepDocument,
+    extract_front_matter,
+    headings,
+    load_documents,
+    parse_front_matter,
+    report_errors,
+)
 
-SCHEMA_PATH = ROOT / "schemas" / "sep-frontmatter.schema.json"
+SCHEMA_PATH = FRONTMATTER_SCHEMA_PATH
 
 REQUIRED_SECTIONS = {
     "Standards Track": [
@@ -52,22 +67,40 @@ REQUIRED_SECTIONS = {
     ],
 }
 
-ALLOWED_STATUSES = {"Draft", "Accepted", "Rejected", "Withdrawn", "Superseded"}
+EXECUTIVE_SUMMARY_PREFIX = "> **Executive Summary**:"
+EXECUTIVE_SUMMARY_TEXT_PREFIX = "**Executive Summary**:"
+
+ALLOWED_STATUSES = {
+    "Draft",
+    "Accepted",
+    "Rejected",
+    "Superseded",
+}
 ALLOWED_TRANSITIONS = {
-    "Draft": {"Draft", "Accepted", "Rejected", "Withdrawn"},
+    "Draft": {"Draft", "Accepted", "Rejected"},
     "Accepted": {"Accepted", "Superseded"},
     "Rejected": {"Rejected"},
-    "Withdrawn": {"Withdrawn"},
     "Superseded": {"Superseded"},
 }
 
+GUIDING_QUESTION_MARKERS = [
+    "Does this make intent clearer?",
+    "Does this reduce ambiguity for Agents?",
+    "preserve the distinction between base signature and intent signature",
+    "exported in a stable, machine-readable form",
+    "realized without extra conversation",
+    "every check produce evidence",
+    "tied to content hashes and invalidated precisely",
+    "diagnostics, repair, and review workflows",
+    "preserve the semantic path",
+    "Signature -> Property -> Hole -> Realization -> Evidence",
+]
 
-def validate_front_matter_schema(documents: list[SepDocument], errors: list[str]) -> None:
+
+def validate_front_matter_schema(
+    documents: list[SepDocument], errors: list[str]
+) -> None:
     if not documents:
-        return
-
-    if shutil.which("uvx") is None:
-        errors.append("`uvx` is required to run check-jsonschema")
         return
 
     with TemporaryDirectory(prefix="sep-frontmatter-") as temp_dir:
@@ -78,9 +111,6 @@ def validate_front_matter_schema(documents: list[SepDocument], errors: list[str]
 
             result = subprocess.run(
                 [
-                    "uvx",
-                    "--from",
-                    "check-jsonschema",
                     "check-jsonschema",
                     "--schemafile",
                     str(SCHEMA_PATH),
@@ -101,7 +131,9 @@ def validate_front_matter_schema(documents: list[SepDocument], errors: list[str]
             )
 
 
-def validate_filename_and_title(path: Path, meta: dict[str, object], errors: list[str]) -> None:
+def validate_filename_and_title(
+    path: Path, meta: dict[str, object], errors: list[str]
+) -> None:
     if path.parent.name == "drafts":
         if meta["sep"] is not None:
             errors.append(f"{path}: drafts must use `sep: null`")
@@ -131,7 +163,9 @@ def validate_filename_and_title(path: Path, meta: dict[str, object], errors: lis
         errors.append(f"{path}: filename prefix must match SEP number")
 
 
-def validate_sections(path: Path, meta: dict[str, object], body: str, errors: list[str]) -> None:
+def validate_sections(
+    path: Path, meta: dict[str, object], body: str, errors: list[str]
+) -> None:
     required = REQUIRED_SECTIONS.get(str(meta["type"]), [])
     found = headings(body)
     missing = [section for section in required if section not in found]
@@ -139,7 +173,58 @@ def validate_sections(path: Path, meta: dict[str, object], body: str, errors: li
         errors.append(f"{path}: missing required sections: {', '.join(missing)}")
 
 
-def validate_cross_field_rules(path: Path, meta: dict[str, object], errors: list[str]) -> None:
+def validate_executive_summary(path: Path, body: str, errors: list[str]) -> None:
+    lines = body.splitlines()
+    index = 0
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+
+    if index >= len(lines) or not lines[index].startswith("# "):
+        errors.append(f"{path}: first body heading must be the SEP title H1")
+        return
+
+    index += 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+
+    if index >= len(lines) or not lines[index].startswith(EXECUTIVE_SUMMARY_PREFIX):
+        errors.append(
+            f"{path}: executive summary must be a blockquote immediately below the H1 title heading"
+        )
+        return
+
+    blockquote_lines: list[str] = []
+    while index < len(lines) and lines[index].startswith(">"):
+        blockquote_lines.append(lines[index])
+        index += 1
+
+    summary_text = " ".join(line.removeprefix(">").strip() for line in blockquote_lines)
+    if not summary_text.startswith(EXECUTIVE_SUMMARY_TEXT_PREFIX):
+        errors.append(
+            f"{path}: executive summary blockquote must start with "
+            f"`{EXECUTIVE_SUMMARY_TEXT_PREFIX}`"
+        )
+        return
+
+    summary_body = summary_text.removeprefix(EXECUTIVE_SUMMARY_TEXT_PREFIX).strip()
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", summary_body)
+        if sentence.strip()
+    ]
+    if sentences and not sentences[-1].endswith((".", "!", "?")):
+        errors.append(f"{path}: executive summary must end with sentence punctuation")
+        return
+
+    if not (2 <= len(sentences) <= 4):
+        errors.append(
+            f"{path}: executive summary must contain 2-4 sentences; found {len(sentences)}"
+        )
+
+
+def validate_cross_field_rules(
+    path: Path, meta: dict[str, object], errors: list[str]
+) -> None:
     status = str(meta["status"])
     if status not in ALLOWED_STATUSES:
         errors.append(f"{path}: invalid status `{status}`")
@@ -166,8 +251,6 @@ def extract_status_from_git(ref: str, relative_path: Path) -> str | None:
         return None
 
     try:
-        from sep_common import extract_front_matter, parse_front_matter
-
         raw_front_matter, _ = extract_front_matter(result.stdout, relative_path)
         meta = parse_front_matter(raw_front_matter, relative_path)
     except ValueError:
@@ -195,7 +278,41 @@ def resolve_base_ref() -> str | None:
     return None
 
 
-def validate_status_transition(path: Path, meta: dict, base_ref: str | None, errors: list[str]) -> None:
+def validate_guiding_questions_in_sep_0000(
+    path: Path, body: str, errors: list[str]
+) -> None:
+    if path.name != "SEP-0000-process.md":
+        return
+
+    if GUIDING_QUESTIONS_HEADING not in body:
+        errors.append(
+            f"{path}: missing canonical heading `{GUIDING_QUESTIONS_HEADING}`"
+        )
+
+    missing = [marker for marker in GUIDING_QUESTION_MARKERS if marker not in body]
+    if missing:
+        errors.append(
+            f"{path}: guiding questions section is incomplete; missing markers: "
+            + ", ".join(missing)
+        )
+
+
+def validate_guiding_questions_uniqueness(
+    path: Path, body: str, errors: list[str]
+) -> None:
+    if path.name == "SEP-0000-process.md":
+        return
+
+    if GUIDING_QUESTIONS_HEADING in body:
+        errors.append(
+            f"{path}: contains the canonical guiding-questions heading; "
+            f"only SEP-0000 may carry `{GUIDING_QUESTIONS_HEADING}` (link to it instead)"
+        )
+
+
+def validate_status_transition(
+    path: Path, meta: dict, base_ref: str | None, errors: list[str]
+) -> None:
     if base_ref is None:
         return
 
@@ -204,6 +321,14 @@ def validate_status_transition(path: Path, meta: dict, base_ref: str | None, err
         return
 
     current_status = meta["status"]
+    # PR 45 returns SEP-0001 to Draft; do not generalize this transition.
+    if (
+        path.name == "SEP-0001-core-syntax.md"
+        and previous_status == "Accepted"
+        and current_status == "Draft"
+    ):
+        return
+
     allowed = ALLOWED_TRANSITIONS.get(previous_status, set())
     if current_status not in allowed:
         errors.append(
@@ -220,8 +345,11 @@ def main() -> int:
 
     for document in documents:
         validate_filename_and_title(document.path, document.metadata, errors)
+        validate_executive_summary(document.path, document.body, errors)
         validate_sections(document.path, document.metadata, document.body, errors)
         validate_cross_field_rules(document.path, document.metadata, errors)
+        validate_guiding_questions_in_sep_0000(document.path, document.body, errors)
+        validate_guiding_questions_uniqueness(document.path, document.body, errors)
         validate_status_transition(document.path, document.metadata, base_ref, errors)
 
         sep_number = document.metadata.get("sep")
@@ -235,10 +363,7 @@ def main() -> int:
                 seen_numbers[sep_number] = document.path
 
     if errors:
-        print("SEP validation failed:\n", file=sys.stderr)
-        for error in errors:
-            print(f"- {error}", file=sys.stderr)
-        return 1
+        return report_errors(errors, "SEP validation failed")
 
     print(f"Validated {len(documents)} SEP documents successfully.")
     return 0

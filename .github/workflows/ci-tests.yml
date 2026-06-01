@@ -28,13 +28,7 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Check SEP index
-        run: uv run scripts/check_sep_index.py
-
-      - name: Check contract schemas
-        run: uv run scripts/check_contract_schemas.py
-
-      - name: Validate SEP documents
+      - name: Run repository checks
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
-        run: uv run scripts/validate_sep_documents.py
+        run: uv run scripts/check_repo.py

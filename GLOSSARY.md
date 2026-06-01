@@ -1,201 +1,238 @@
 # Spore Glossary
 
-Unified terminology index for Spore. Each term links to the SEP where it is authoritatively defined.
+Unified terminology index for Spore. Each term links to the SEP where it is
+authoritatively defined.
+
+This file also owns the multilingual terminology table used by Spore
+documentation translations. When a new user-facing term is added to Spore docs,
+update both its glossary definition and its multilingual correspondence here.
+
+## Multilingual terminology
+
+| Term              | zh-CN        |
+| ----------------- | ------------ |
+| Spore             | 孢子         |
+| Agent             | 智能体       |
+| Signature         | 签名         |
+| Base Signature    | 基础签名     |
+| Intent Signature  | 意图签名     |
+| Outcome           | 结果         |
+| Property          | 性质         |
+| Hole              | 洞           |
+| Typed absence     | 有类型的缺失 |
+| Realization       | 实现         |
+| Evidence          | 证据         |
+| Claim             | 检查主张     |
+| Budget            | 预算         |
+| ConceptDoc        | 概念文档     |
+| ConceptRegistry   | 概念注册表   |
+| Concept ref       | 概念引用     |
+| Realization shape | 实现形态     |
+| Effect surface    | 效应表面     |
+| Effect            | 效应         |
+| Effect context    | 效应上下文   |
+| Effect handler    | 效应处理器   |
+| Handler field     | 处理器字段   |
+| Handler instance  | 处理器实例   |
+| Platform          | 平台         |
+| Content-addressed | 内容寻址     |
+| Content identity  | 内容身份     |
+| Provenance hash   | 来源哈希     |
+| Explain protocol  | 解释协议     |
+| Diagnostic        | 诊断         |
+| Concept projection | 概念投影     |
+| HoleReport        | 洞报告       |
+| HoleReport Protocol | 洞报告协议   |
+| Repair hint       | 修复提示     |
+| Dependency        | 依赖         |
+| Checker           | 检查器       |
+| Property body     | 性质主体     |
+| State primitive effect | 状态原语效应 |
 
 ## A
 
-**Atomic effect** (SEP-0003): One of the 10 built-in intent-oriented atomic effects in Spore's effect system: Console, FileRead, FileWrite, NetConnect, NetListen, Env, Spawn, Clock, Random, Exit. In compiler/tooling contexts, these effect names form the checked effect set.
+**Atomic effect** (SEP-0003): A single effect protocol declared with `effect Name { ... }`, as opposed to a reusable surface declaration.
 
-**`Add`** (SEP-0002): Compiler-known trait for the `+` operator on types that explicitly implement addition.
-
-**`@allows`** (SEP-0002, SEP-0003, SEP-0005): Hole-level annotation that restricts which candidate functions may be used to fill a specific Hole. It cannot suppress resource checks.
-
-**`@unbounded`** (SEP-0004): Annotation declaring that a function's cost is intentionally unanalyzed, opting out of cost verification entirely.
-
-**`await`** (SEP-0007): Expression that blocks until a `Task[T]` completes and extracts its result value of type `T`.
+**`await`** (SEP-0007): Expression that blocks until a `Task[T, E]` completes, extracts its success value of type `T`, and reintroduces failure type `E` at the await site.
 
 ## B
 
-**Bidirectional inference** (SEP-0002): Type inference strategy combining synthesis (bottom-up, infer type from expression) and checking (top-down, verify expression against expected type).
+**Base Signature** (SEP-0001): The callable boundary made of function name, type parameters, parameter types, and result type (including any outcome boundary). It defines possible implementation space.
+
+**Bidirectional inference** (SEP-0002): Type inference strategy combining synthesis from expressions and checking against expected types.
+
+**Budget** (SEP-0004): A named integer upper bound on realization shape, written in a `budget { ... }` block.
+
+**Budget context** (SEP-0005): The subset of enclosing budget constraints relevant to a hole or realization candidate.
 
 ## C
 
-**Declared effects** (SEP-0003): The effect names explicitly written on a function or platform/manifest surface.
+**Claim** (SEP-0006): Internal compiler representation derived from a source `properties` item.
 
-**Effect ceiling** (SEP-0003, SEP-0008): The maximum set of effects available to a scope. Function-level `uses [...]` clauses are standardized today; broader module/project ceilings remain reserved follow-up design space.
+**Content-addressed package** (SEP-0008): Package identified by hashes of normalized signatures, intents, properties, realizations, evidence, and dependency inputs.
 
-**Effect narrowing** (SEP-0003): Restricting the available effect set when entering a nested scope, ensuring inner code cannot exceed outer permissions.
+**ConceptDoc** (SEP-0010): Machine-readable record that explains one Spore concept for `spore explain`, diagnostics, LSP, and Agent tooling.
 
-**Effect set (EffectSet)** (SEP-0003): An unordered collection of effects associated with a function or scope, written as `uses [Effect1, Effect2]`.
+**Concept ref** (SEP-0010): Stable concept id attached to a diagnostic, HoleReport projection, or explain response.
 
-**`Clone`** (SEP-0002): Compiler-known trait for explicitly duplicating a value.
+**ConceptRegistry** (SEP-0010): Ordered collection of `ConceptDoc` records plus schema identity.
 
-**`Channel[T]`** (SEP-0007): Bounded channel type for inter-task message passing, parameterized by the message type.
-
-**Content-addressed package** (SEP-0008): Package identified by BLAKE3 hashes of its normalized signatures and implementations, enabling reproducible builds and cache deduplication.
-
-**Cost budget** (SEP-0004): The declared cost bound on a function, verified at compile time against inferred cost of the function body.
-
-**Cost dimension** (SEP-0004): One of four orthogonal resource axes in a CostVector: compute, alloc, io, parallel.
-
-**Cost expression (CostExpr)** (SEP-0004): Arithmetic expression over compile-time Index symbols and `cost(f)` summaries. CostExpr does not reference ordinary runtime values.
-
-**CostVector** (SEP-0004): A 4-tuple `(compute(op), alloc(cell), io(call), parallel(lane))` representing multidimensional resource usage.
-
-**`Count[N]`** (SEP-0002, SEP-0009): Runtime non-negative count value that carries a compile-time Index parameter `N`. Cost analysis sees `N`, not the runtime integer.
+**Concept projection** (SEP-0010): Human-facing rendering over compiler-owned structured records, such as a HoleReport teaching view backed by SEP-0005 data.
 
 ## D
 
-**`Debug`** (SEP-0002): Compiler-known trait for programmer-facing string representation, used in diagnostics and logging.
+**Declared effects** (SEP-0003): Effect names explicitly written on a function or platform surface.
 
-**`Default`** (SEP-0002): Compiler-known trait providing a default value for a type.
+**Default literals** (SEP-0002): Unsuffixed integer literals synthesize as `I64` and float literals as `F64` unless a signature or context fixes another width.
 
-**`Deserialize`** (SEP-0002): Compiler-known trait for converting serialized data back into a typed value.
-
-**Derivable trait** (SEP-0002): A compiler-known trait whose implementation can be auto-generated from the type's structure, using the `deriving [...]` syntax.
-
-**`Display`** (SEP-0002): Compiler-known trait for user-facing string representation.
-
-**`Div`** (SEP-0002): Compiler-known trait for the `/` operator on types that explicitly implement division.
-
-**Diagnostic code** (SEP-0006): Structured error/warning identifier in the format `X0NNN`, where X is a category letter: E (type error), C (effect), K (cost), M (module), W (warning).
-
-**Default entry** (SEP-0008): The manifest-selected entry used when project commands omit an explicit entry name.
+**Diagnostic code** (SEP-0006): Structured error or warning identifier in the format `X0NNN`, where X is a category letter.
 
 ## E
 
-**Entry** (SEP-0008): A manifest-selected executable target within a project. An entry resolves to an entry module.
+**Effect** (SEP-0003): Observable interaction with the outside world that must be declared in a `uses` effect surface.
 
-**Entry module** (SEP-0008): The source file and derived module selected by an entry, such as `src/main.sp` → `main`.
+**Effect surface declaration** (SEP-0003): A named reusable surface written as `surface Name = [EffectA, EffectB]`.
 
-**`Eq`** (SEP-0002): Compiler-known trait for structural equality comparison.
+**Effect context** (SEP-0005): The declared effects, expanded effect set, active handlers, and discharged effects visible at a hole or realization candidate.
 
-**Effect** (SEP-0003): An observable interaction with the outside world (I/O, mutation, randomness), tracked via the effect system.
+**Effect handler** (SEP-0003, SEP-0008): Implementation of effect operations, often provided by a selected Platform package.
 
-**Effect alias** (SEP-0003): A named shorthand for a set of atomic effects, written as `effect FileIO = FileRead | FileWrite;`.
+**Effect set** (SEP-0003): Unordered collection of effects associated with a function or scope.
 
-**Effect handler** (SEP-0003, SEP-0008): Implementation of an effect's operations. SEP-0003 owns handler semantics; SEP-0008 explains Platform-provided handlers and host adapters.
+**Effect surface** (SEP-0001, SEP-0003): The `uses` surface expression attached to an intent signature. SEP-0003 defines the accepted effect names, surface declarations, handlers, and checking rules.
 
-**Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `type Name { Variant1(T), Variant2 }`.
+**Enum** (SEP-0002): Algebraic data type with named variants, each optionally carrying data. Defined with `enum Name { Variant(T) }`.
+
+**Evidence** (SEP-0006): Generated checked record of what held for a concrete realization.
+
+**EvidenceRecord** (SEP-0006): Machine payload containing subject, claim, checker, result, and provenance hash data.
+
+**Evidence hash** (SEP-0008): Hash of the evidence records selected by a package or publication policy.
+
+**Explain protocol** (SEP-0010): CLI and JSON contract for resolving diagnostic codes, language concepts, and surface symbols into compiler-owned concept docs.
+
+**`@export`** (SEP-0001, SEP-0008): Attribute marking a public Spore function as an outbound ABI surface, for example `@export("C")`.
 
 ## F
 
-**`foreign fn`** (SEP-0008): Function declaration whose implementation is provided by the platform rather than written in Spore. Used for I/O bindings.
+**`@foreign`** (SEP-0001, SEP-0008): Attribute marking a function or type as externally provided. On functions it may also carry linkage metadata such as `@foreign("ssl", name = "SSL_new")`.
 
 ## G
 
-**Generics** (SEP-0002): Parametric polymorphism using type variables, written as `fn f[T](x: T)` with optional `where` clause bounds.
+**Generics** (SEP-0002): Parametric polymorphism using type variables in square brackets, with bounds written inline, as in `fn f[T: Eq + Hash](x: T)`.
 
 ## H
 
-**`Hash`** (SEP-0002): Compiler-known trait for computing hash values, often required alongside `Eq` for use in hash-based collections.
+**Hole** (SEP-0005): Typed absence in source code, written as `?name`, constrained by base signature, effect context, budget context, and property context.
 
-**Hole** (SEP-0005): A typed placeholder in source code written as `?name`, representing incomplete code that carries type, effect, and cost context for agent-assisted completion.
+**Hole context** (SEP-0005): The type environment, visible bindings, effect context, budget context, property context, and dependency information associated with a typed hole.
 
-**Hole context** (SEP-0005): The full type environment, effect set, cost budget, and dependency information associated with a typed hole.
+**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, effect, budget, and property dependencies for fill scheduling.
 
-**Hole Dependency Graph** (SEP-0005): DAG ordering typed holes by data-flow, type, effect, and cost dependencies for parallel fill scheduling.
+**HoleReport Protocol** (SEP-0005): Normative per-hole record and dependency graph contract used by humans, Agents, and tools.
 
-**Hole state machine** (SEP-0005): Lifecycle of a hole: Open → Filling → Filled → Accepted.
+**Hole realization workflow** (SEP-0005): Informational Agent-facing realization loop: DISCOVER -> ANALYZE -> PROPOSE -> VERIFY -> ACCEPT or REJECT.
+
+**Handler field** (SEP-0003): Immutable runtime configuration stored on a handler instance. Handler fields are not user-level mutable state and do not participate in signature or intent hashes.
+
+**Handler instance** (SEP-0003): Lexical, task-local installation of a handler inside a `handle ... with` expression.
 
 ## I
 
-**Implementation hash (impl hash)** (SEP-0006): Content hash of a function's full body, used for incremental compilation — a change in impl hash triggers recompilation.
+**Intent Signature** (SEP-0001): Signature metadata after the base signature: `uses`, `budget`, and `properties`.
 
-**Import resolution** (SEP-0008): The process of mapping `import pkg.module` declarations to concrete module files and verifying symbol visibility.
+**Intent hash** (SEP-0006, SEP-0008): Hash of canonical `uses`, `budget`, and `properties` metadata attached to a callable.
 
-**Index** (SEP-0002, SEP-0004): Compile-time non-negative size kind used by cost analysis. Index parameters such as `N: Index` are the only variables that may appear directly in CostExpr.
+**Import resolution** (SEP-0008): Mapping import declarations to concrete module files and verifying symbol visibility.
 
-## L
-
-**Lane** (SEP-0007): The parallel cost dimension — each `spawn` creates a new lane, tracked in CostVector's `parallel` field.
+**Index** (SEP-0002): Compile-time non-negative size kind used by indexed types such as `Array[T, N]` and `Vec[T, max: N]`.
 
 ## M
 
-**`Mul`** (SEP-0002): Compiler-known trait for the `*` operator on types that explicitly implement multiplication.
-
-**Module** (SEP-0008): A single Spore source file whose module path is derived from its filesystem path. Function-level signatures inside the module declare effects.
+**Module** (SEP-0008): A single Spore source file whose module path is derived from its filesystem path.
 
 ## N
 
-**NDJSON (Newline-Delimited JSON)** (SEP-0006): Output format for watch mode, where each compiler event is a single JSON object on one line, enabling streaming IDE integration.
+**NDJSON** (SEP-0006): Newline-delimited JSON output format for watch mode.
 
-**Nominal typing** (SEP-0002): Types are distinguished by name, not structure. Two structs with identical fields but different names are different types.
+**Never** (SEP-0002): The bottom type, used for functions that never return.
 
-**`Never`** (SEP-0002): The bottom type — uninhabited, used as the return type of functions that never return (e.g., `exit()`).
+**Nominal typing** (SEP-0002): Types are distinguished by name, not by structure alone.
 
 ## O
-
-**`Ord`** (SEP-0002): Compiler-known trait for total ordering comparison, enabling `<`, `>`, `<=`, `>=` operators.
 
 **`Option[T]`** (SEP-0009): Prelude type representing an optional value: `Some(T)` or `None`.
 
 ## P
 
-**Platform** (SEP-0008): A package that provides effect handlers for a target environment (e.g., CLI, Web, Embedded). Each manifest-backed project binds exactly one Platform, and each selected entry module must satisfy its startup contract.
+**Platform** (SEP-0008): Package that provides effect handlers for a target environment and validates startup contracts.
 
-**Prelude** (SEP-0009): The set of types and functions available in every Spore module without explicit import.
+**Prelude** (SEP-0009): Types, traits, and functions available in every Spore module without explicit import.
+
+**Property** (SEP-0001, SEP-0006): Source-level validity rule written in `properties { name(params): expr }`.
+
+**Property body** (SEP-0002): Ordinary Spore expression after `:` in a property item. It must check as `Bool` under the enclosing effect context.
+
+**Property context** (SEP-0005): Properties from the enclosing intent signature projected into a hole report.
+
+**Property hash** (SEP-0006, SEP-0008): Hash of normalized properties attached to a callable or contract.
 
 ## R
 
-**Refinement type** (SEP-0002): Type augmented with a predicate constraint. Three tiers: L0 (decidable, compile-time), L1 (abstract interpretation), L2 (proof obligation).
+**Realization** (SEP-0005, SEP-0006): Property-preserving completion of typed absence. It is a process and artifact identity, not a source keyword.
 
-**`Result[T, E]`** (SEP-0009): Prelude type representing success (`Ok(T)`) or failure (`Err(E)`).
+**Realization hash** (SEP-0006, SEP-0008): Hash of a concrete completed body or generated artifact.
+
+**Refinement type** (SEP-0002): Type augmented with a predicate constraint.
+
+**Outcome** (SEP-0002): First-class result type written as `A ! E`, representing success `A` or failure `E`.
 
 ## S
 
-**`Serialize`** (SEP-0002): Compiler-known trait for converting a typed value into a serialized format.
+**Signature** (SEP-0001): The combination of Base Signature and optional Intent Signature.
 
-**`select`** (SEP-0007): Expression that waits for the first ready channel arm or timeout arm, enabling concurrent race patterns.
+**Surface** (SEP-0003): Finite, unordered effect requirement set used by `uses` and named by `surface` declarations.
 
-**SEP (Spore Enhancement Proposal)** (SEP-0000): A design document proposing a change or addition to Spore, following a structured review process.
+**Signature hash** (SEP-0006, SEP-0008): Hash of the normalized Base Signature that participates in dependency tracking.
 
-**Signature hash (sig hash)** (SEP-0006): Content hash of a function's public interface (name, params, return type, required effects), used for dependency tracking — a change in sig hash invalidates all callers.
+**`spawn`** (SEP-0007): Expression that creates a scoped `Task[T, E]`, requiring the `Spawn` effect.
 
-**`spawn`** (SEP-0007): Expression that creates a new `Task[T]` for concurrent execution, requiring the `Spawn` effect.
+**spore** (SEP-0006, SEP-0008): Project and package workflow CLI.
 
-**`Sub`** (SEP-0002): Compiler-known trait for the `-` operator on types that explicitly implement subtraction.
+**sporec** (SEP-0006, SEP-0008): Low-level explicit-input compiler CLI.
 
-**Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field1: T1, field2: T2 }`.
+**Startup contract** (SEP-0008): Platform-defined requirement on startup function parameters, result type, and effect surface.
 
-**spore** (SEP-0006, SEP-0008): The project/package workflow CLI. It owns `build`, `check`, `test`, `run`, `fmt`, `update`, and `upgrade`.
+**Startup function** (SEP-0008): Callable inside the selected entry module that satisfies the Platform startup contract.
 
-**sporec** (SEP-0006, SEP-0008): The low-level explicit-input compiler CLI. It owns `compile`, `holes`, `query-hole`, and `explain`.
+**State primitive effect** (SEP-0003, SEP-0009): Standard atomic effect that carries a minimal state or event responsibility without exposing user-level mutation. The initial set is `Cell`, `Output`, `Map`, `Clock`, and `Random`.
 
-**Structured concurrency** (SEP-0007): Concurrency model where all spawned tasks are scoped to their parent block, ensuring no task outlives its creator.
+**Str** (SEP-0002): UTF-8 text primitive in Spore surface syntax.
 
-**Startup contract** (SEP-0008): The Platform-defined requirement on the startup function's parameters, return type, and effect boundary.
-
-**Startup function** (SEP-0008): The callable inside the selected entry module that satisfies the Platform's startup contract. Today this is usually `main`.
-
-**`Str`** (SEP-0002): The UTF-8 text primitive in Spore surface syntax (not `String`). Single Unicode scalars use length-1 `Str` values; there is no separate `Char` type (see implementation PR #113).
-
-**Default literals** (SEP-0002): In the reference compiler (`sporec-typeck`), unsuffixed integer literals synthesize as **`I64`** and float literals as **`F64`**, unless a signature or context fixes another width (see metavariables **ι** / **φ** in SEP-0002 for other fixed sizes).
+**Struct** (SEP-0002): Product type with named fields, defined as `struct Name { field: T }`.
 
 ## T
 
-**`Task[T]`** (SEP-0007): Typed future representing an asynchronous computation that will produce a value of type `T`.
+**Task[T, E]** (SEP-0007): Typed future representing an asynchronous computation with success type `T` and await-time failure type `E`.
 
-**Typed hole** (SEP-0005): See **Hole**.
+**Typed hole** (SEP-0005): See Hole.
 
 ## U
 
-**`uses` clause** (SEP-0003): Annotation on a function declaring required effects, written as `uses [Effect1, Effect2]`.
+**uses clause** (SEP-0001, SEP-0003): Signature clause declaring an effect surface expression, written as `uses [Name1, Name2]` or `uses SurfaceName`.
 
 ## V
 
-**Visibility** (SEP-0008): Access control on module exports: `pub` (public to all), `pub(pkg)` (package-internal), or private (default, module-only).
+**Visibility** (SEP-0008): Access control on module exports: `pub`, `pub(pkg)`, or private.
 
 ## W
 
-**Watch mode** (SEP-0006): Compiler mode that continuously monitors source files and emits NDJSON events on changes, designed for IDE integration.
-
-**`where` clause** (SEP-0002): Constraint block on generic functions specifying trait bounds, written as `where T: Eq + Hash`.
+**Watch mode** (SEP-0006): Compiler mode that monitors source files and emits diagnostics and hole events on change.
 
 ## Process terms
 
-**Discussion** (SEP-0000): The canonical public thread where a pitch is debated before a
-formal SEP draft is proposed.
+**SEP** (SEP-0000): **Spore Evolution Proposal** (Spore 演进提案). A design document that records and reviews language, tooling, ecosystem, and governance changes across Spore's evolution.
 
-**Pitch** (SEP-0000): A public discussion-stage proposal that tests whether an idea is
-worth turning into a repository-backed SEP.
+**Discussion** (SEP-0000): Public thread where a pitch is debated before a formal SEP draft is proposed.
+
+**Pitch** (SEP-0000): Public discussion-stage proposal that tests whether an idea is worth turning into a repository-backed SEP.

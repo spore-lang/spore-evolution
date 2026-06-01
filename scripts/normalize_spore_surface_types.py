@@ -1,4 +1,9 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 
 """Rewrite legacy surface names inside ```spore / ```Spore fences only.
 
@@ -15,7 +20,7 @@ import re
 import sys
 from pathlib import Path
 
-from sep_common import ROOT
+from sep_common import numbered_sep_files
 
 # ```spore or ```Spore, consume optional info string after language token.
 FENCE_OPEN = re.compile(r"^```[Ss]pore[^\n]*\n", re.MULTILINE)
@@ -79,7 +84,7 @@ def process_file(path: Path) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    paths = [Path(p) for p in argv[1:]] if len(argv) > 1 else sorted((ROOT / "seps").glob("SEP-*.md"))
+    paths = [Path(p) for p in argv[1:]] if len(argv) > 1 else numbered_sep_files()
     updated = sum(process_file(p) for p in paths)
     print(f"Updated {updated} file(s).")
     return 0
