@@ -65,6 +65,11 @@ Use [GLOSSARY.md](GLOSSARY.md) when checking cross-SEP terminology.
 
 ## Authoring
 
+For agent-assisted SEP drafting, revision, or review, use the repository
+[spore-add-proposal skill](.agents/skills/spore-add-proposal/SKILL.md).
+It applies the existing process and local checks; no global skill installation
+is required.
+
 **SEP** stands for **Spore Enhancement Proposal**. An SEP records changes to
 Spore semantics, standard-library surface, tooling protocols, cross-cutting
 system design, or the project process itself.
