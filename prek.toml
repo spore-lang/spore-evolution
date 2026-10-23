@@ -18,7 +18,7 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/tombi-toml/tombi-pre-commit"
-rev = "v1.8.4"
+rev = "v1.9.0"
 hooks = [
   { id = "tombi-format" },
   { id = "tombi-lint" },
@@ -26,7 +26,7 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/rvben/rumdl-pre-commit"
-rev = "v0.2.79"
+rev = "v0.3.0"
 hooks = [
   { id = "rumdl-fmt", exclude = "^\\.github/styles/" },
 ]
@@ -40,30 +40,30 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/crate-ci/typos"
-rev = "v1.33.1"
+rev = "v1.51.1"
 hooks = [
   { id = "typos", args = ["--force-exclude"], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/vale-cli/vale"
-rev = "v3.14.1"
+rev = "v3.25.1"
 hooks = [
   { id = "vale", args = ["--minAlertLevel=error", "--glob=*.md", "."], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/lycheeverse/lychee"
-rev = "v0.15.1"
+rev = "lychee-v0.24.2"
 hooks = [
   { id = "lychee", args = ["--no-progress", "./**/*.md"], exclude = "^\\.github/styles/" },
 ]
 
 [[repos]]
 repo = "https://github.com/zrr1999/zendev"
-rev = "v0.0.5"
+rev = "v0.5.0"
 hooks = [
-  { id = "zendev-commit-msg" },
+  { id = "zendev-message-check", args = ["--profile", "zendev"] },
 ]
 
 [[repos]]

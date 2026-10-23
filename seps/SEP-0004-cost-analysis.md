@@ -771,7 +771,7 @@ Verification rules for max/min at the top level:
 t = c × n₁^a₁ × ... × nₖ^aₖ × log(n₁)^b₁ × ... × log(nₖ)^bₖ
 ```
 
-where c is a positive N0 coefficient, and each ai and bi is in N0. We write
+where c is a positive N0 coefficient, and each `ai` and `bi` is in N0. We write
 this as the triple **(c, a_bar, b_bar)**.
 
 The _normal form_ of a CostExpr is a finite sum of poly-log monomials. Conversion algorithm NF:
