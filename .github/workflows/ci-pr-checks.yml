@@ -32,20 +32,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect changed files
+      - name: Detect new proposal documents
         id: changes
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          BASE=${{ github.event.pull_request.base.sha }}
-          HEAD=${{ github.event.pull_request.head.sha }}
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          CHANGED=$(git diff --no-renames --diff-filter=A --name-only "$PR_BASE_SHA...$PR_HEAD_SHA")
           if echo "$CHANGED" | grep -qE '^(seps|drafts)/'; then
-            echo "is_sep=true" >> "$GITHUB_OUTPUT"
+            echo "is_new_sep=true" >> "$GITHUB_OUTPUT"
           else
-            echo "is_sep=false" >> "$GITHUB_OUTPUT"
+            echo "is_new_sep=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Validate PR body checklist (SEP PRs only)
-        if: steps.changes.outputs.is_sep == 'true'
+      - name: Validate PR body checklist (new SEP PRs only)
+        if: steps.changes.outputs.is_new_sep == 'true'
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
@@ -75,6 +76,6 @@ jobs:
           print("Pull request body checklist looks good.")
           PY
 
-      - name: PR body OK (non-SEP PR)
-        if: steps.changes.outputs.is_sep == 'false'
-        run: echo "Non-SEP PR — body checklist not required."
+      - name: PR body OK (no new SEP)
+        if: steps.changes.outputs.is_new_sep == 'false'
+        run: echo "No new SEP — pitch checklist not required."
