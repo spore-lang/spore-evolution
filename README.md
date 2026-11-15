@@ -25,6 +25,8 @@ for integers and **`F64`** for floats; UTF-8 text is **`Str`**; there is no
 `Char` type. SEP-0002 owns the full type-system rules and metavariables for
 other fixed widths.
 
+The current Spec relation target uses `impl A <: B;` and checked completion bodies. See the [2026-11-15 synchronization note](docs/decisions/2026-11-15-impl-relations.md) for ownership requirements and implementation boundaries; historical SEP status is unchanged.
+
 ## SEP status
 
 | SEP | Title | Status | Role |
